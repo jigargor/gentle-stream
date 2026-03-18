@@ -1,0 +1,19 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/scheduler",
+      "schedule": "*/30 * * * *",
+      "comment": "Check stock levels every 30 min, ingest if below threshold"
+    },
+    {
+      "path": "/api/cron/tagger",
+      "schedule": "*/5 * * * *",
+      "comment": "Tag new articles every 5 min"
+    },
+    {
+      "path": "/api/cron/cleanup",
+      "schedule": "0 3 * * *",
+      "comment": "Delete expired articles daily at 3am UTC"
+    }
+  ]
+}

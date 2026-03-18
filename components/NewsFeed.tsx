@@ -10,20 +10,37 @@ import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
 import type { Article, NewsSection as NewsSectionType } from "@/lib/types";
 
+// ── Lightweight anonymous user ID persisted in localStorage ──────────────────
+function getOrCreateUserId(): string {
+  if (typeof window === "undefined") return "anonymous";
+  const key = "gnd_user_id";
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `anon_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 export default function NewsFeed() {
   const [sections, setSections] = useState<NewsSectionType[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
+  const [liveGenerating, setLiveGenerating] = useState(false);
 
   const sectionCount = useRef(0);
-  const allHeadlines = useRef<string[]>([]);
   const isFirstLoad = useRef(true);
+  const userId = useRef<string>("anonymous");
+
+  // Resolve userId on mount (client-side only)
+  useEffect(() => {
+    userId.current = getOrCreateUserId();
+  }, []);
 
   // Sentinel element at the bottom of the feed
   const { ref: sentinelRef, inView } = useInView({
     threshold: 0.1,
-    // Don't trigger until after initial load
     initialInView: false,
   });
 
@@ -33,30 +50,29 @@ export default function NewsFeed() {
       setLoading(true);
       setError(null);
 
-      const category = overrideCategory !== undefined
-        ? overrideCategory
-        : activeCategory;
+      const category =
+        overrideCategory !== undefined ? overrideCategory : activeCategory;
 
       try {
-        // Build query params
         const params = new URLSearchParams();
+        params.set("userId", userId.current);
         params.set("sectionIndex", String(sectionCount.current));
         if (category) params.set("category", category);
-        // Pass recent headlines so the API avoids duplication
-        allHeadlines.current.slice(-8).forEach((h) =>
-          params.append("headline", h)
-        );
 
-        const res = await fetch(`/api/news?${params.toString()}`);
+        const res = await fetch(`/api/feed?${params.toString()}`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `HTTP ${res.status}`);
         }
 
-        const data: { articles: Article[]; category: string } = await res.json();
+        const data: {
+          articles: Article[];
+          category: string;
+          fromCache: boolean;
+        } = await res.json();
 
-        // Track headlines to prevent duplicates
-        data.articles.forEach((a) => allHeadlines.current.push(a.headline));
+        // Let the user know if we had to generate live (stock was empty)
+        setLiveGenerating(!data.fromCache);
 
         setSections((prev) => [
           ...prev,
@@ -82,7 +98,7 @@ export default function NewsFeed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Infinite scroll: load more when sentinel comes into view
+  // Infinite scroll
   useEffect(() => {
     if (inView && !loading && !error) {
       loadMore();
@@ -93,12 +109,9 @@ export default function NewsFeed() {
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;
     setActiveCategory(next);
-    // Reset feed
     setSections([]);
-    allHeadlines.current = [];
     sectionCount.current = 0;
-    // Immediately load with new category
-    setLoading(false); // reset lock so loadMore runs
+    setLoading(false);
     setTimeout(() => loadMore(next), 0);
   };
 
@@ -106,6 +119,26 @@ export default function NewsFeed() {
     <div style={{ background: "#ede9e1", minHeight: "100vh" }}>
       <Masthead />
       <CategoryBar selected={activeCategory} onSelect={handleCategorySelect} />
+
+      {/* Live-generation notice — shown when DB stock was empty */}
+      {liveGenerating && (
+        <div
+          style={{
+            background: "#fdf6e3",
+            borderBottom: "1px solid #e8d9a0",
+            padding: "0.5rem 1.5rem",
+            textAlign: "center",
+            fontFamily: "'IM Fell English', Georgia, serif",
+            fontStyle: "italic",
+            fontSize: "0.78rem",
+            color: "#7a6a30",
+            maxWidth: "1200px",
+            margin: "0 auto",
+          }}
+        >
+          Freshly sourced — our editors are searching the world for your stories&hellip;
+        </div>
+      )}
 
       <main
         style={{

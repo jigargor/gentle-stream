@@ -1,14 +1,76 @@
 # The Good News Daily
 
-A Next.js 14 web application that surfaces only uplifting news, rendered in a classic broadsheet newspaper aesthetic with infinite scroll.
+A Next.js 14 application that surfaces only uplifting news, rendered in a classic broadsheet newspaper aesthetic with infinite scroll, content caching, and per-user personalisation.
 
-## Tech Stack
+---
 
-- **Next.js 14** (App Router)
-- **TypeScript**
-- **Tailwind CSS**
-- **Claude API** with web search — server-side only, API key never exposed to client
-- **react-intersection-observer** — infinite scroll sentinel
+## Architecture Overview
+
+Content is decoupled from consumption — exactly like Reddit or Substack. A pool of tagged articles lives in the database. The feed API queries that pool and ranks it per-user. The LLM is only called when a category's stock drops below a threshold.
+
+```
+Browser
+  └── GET /api/feed?userId=...&sectionIndex=N
+        └── Ranker Agent          ← pure arithmetic, no LLM
+              └── Supabase DB     ← pre-tagged article pool
+                    ↑
+              Tagger Agent        ← Claude, no web search (cheap)
+                    ↑
+              Ingest Agent        ← Claude + web search (only when stock is low)
+                    ↑
+              Scheduler Cron      ← runs every 30 min
+```
+
+### The three agents
+
+| Agent | Trigger | LLM? | Web search? | Purpose |
+|---|---|---|---|---|
+| **Ingest** | Scheduler (stock < 20) or cold start | Yes | Yes | Fetches 12 real articles per category run |
+| **Tagger** | Cron every 5 min, processes untagged | Yes | No | Adds tags, sentiment, emotion, quality score |
+| **Ranker** | Every feed request | No | No | Scores articles against user profile, picks top N |
+
+---
+
+## Project Structure
+
+```
+good-news-daily/
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   └── api/
+│       ├── feed/route.ts               ← main feed endpoint
+│       ├── user/
+│       │   └── preferences/route.ts    ← read/update user profile
+│       └── cron/
+│           ├── scheduler/route.ts      ← checks stock, triggers ingest
+│           ├── tagger/route.ts         ← enriches untagged articles
+│           └── cleanup/route.ts        ← deletes expired articles
+├── components/
+│   ├── NewsFeed.tsx
+│   ├── Masthead.tsx
+│   ├── CategoryBar.tsx
+│   ├── ArticleCard.tsx
+│   ├── NewsSection.tsx
+│   ├── LoadingSection.tsx
+│   └── ErrorBanner.tsx
+├── lib/
+│   ├── constants.ts
+│   ├── types.ts
+│   ├── db/
+│   │   ├── client.ts                   ← Supabase singleton
+│   │   ├── schema.sql                  ← run once in Supabase SQL editor
+│   │   ├── articles.ts                 ← article read/write helpers
+│   │   └── users.ts                    ← user profile helpers
+│   └── agents/
+│       ├── ingestAgent.ts
+│       ├── taggerAgent.ts
+│       └── rankerAgent.ts
+├── .env.example
+├── vercel.json                         ← cron schedules
+└── README.md
+```
 
 ---
 
@@ -20,89 +82,105 @@ A Next.js 14 web application that surfaces only uplifting news, rendered in a cl
 npm install
 ```
 
-### 2. Set up your API key
+### 2. Set up Supabase
+
+1. Create a free project at [supabase.com](https://supabase.com)
+2. Go to **SQL Editor → New query**, paste `lib/db/schema.sql`, and run it
+3. Copy your **Project URL** and **service role key** from **Settings → API**
+
+### 3. Configure environment variables
 
 ```bash
 cp .env.example .env.local
 ```
 
-Open `.env.local` and replace the placeholder with your real key:
+Fill in `.env.local`:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-your-real-key-here
+ANTHROPIC_API_KEY=sk-ant-...
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+CRON_SECRET=any-random-string
 ```
 
-> **Never commit `.env.local`** — it's already in `.gitignore`.
+### 4. Prime the article pool (optional)
 
-### 3. Run the development server
+On first boot the DB is empty, so the feed falls back to live ingest automatically. To pre-populate before launch:
+
+```bash
+curl -H "x-cron-secret: your-secret" http://localhost:3000/api/cron/scheduler
+curl -H "x-cron-secret: your-secret" http://localhost:3000/api/cron/tagger
+```
+
+Or just start the dev server and scroll — the feed self-populates on first load.
+
+### 5. Run
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
-
 ---
 
-## Project Structure
+## How the Feed Works
+
+1. `NewsFeed.tsx` generates (or retrieves) an anonymous `userId` from `localStorage` and passes it on every feed request.
+2. `GET /api/feed` calls the **Ranker Agent** with the user's profile.
+3. The ranker pulls candidates from the pool (filtered by category and unseen by this user), scores them, and returns the top 3.
+4. If stock is depleted, the API falls back to **live ingest** synchronously and shows a "freshly sourced" banner.
+5. The **Scheduler** cron (every 30 min) keeps all categories stocked above threshold so the live fallback is rarely triggered.
+
+### Ranking score formula
 
 ```
-good-news-daily/
-├── app/
-│   ├── layout.tsx            # Root layout — fonts, metadata
-│   ├── page.tsx              # Home route → renders <NewsFeed />
-│   ├── globals.css           # Global styles, fonts, animations
-│   └── api/
-│       └── news/
-│           └── route.ts      # API route — calls Claude server-side
-├── components/
-│   ├── NewsFeed.tsx          # Infinite scroll orchestrator (client)
-│   ├── Masthead.tsx          # Gothic blackletter header
-│   ├── CategoryBar.tsx       # Sticky category filter nav
-│   ├── ArticleCard.tsx       # Individual article with drop cap + pull quote
-│   ├── NewsSection.tsx       # 3-article grid with rotating layouts
-│   ├── LoadingSection.tsx    # Spinner shown while fetching
-│   └── ErrorBanner.tsx       # Error state with retry button
-├── lib/
-│   ├── constants.ts          # Categories, colors, layout count
-│   ├── types.ts              # Shared TypeScript types
-│   └── fetchNews.ts          # Claude API logic (server-side only)
-├── .env.example              # Copy to .env.local and fill in key
-└── README.md
+score = qualityScore
+      × (categoryWeight × 8)
+      × emotionBoost        # 1.3× if article matches preferred emotions
+      × localeBoost         # 1.2× if article matches preferred locales
+      × freshnessFactor     # 1.0 → 0.3 linear decay over 7 days
+      × noveltyPenalty      # reduces score for widely-seen articles
 ```
 
 ---
 
-## How It Works
+## Personalisation
 
-1. `NewsFeed.tsx` (client component) renders the page and watches a sentinel element at the bottom via `IntersectionObserver`.
-2. When the sentinel comes into view, it calls `GET /api/news?sectionIndex=N&category=...`.
-3. `app/api/news/route.ts` runs server-side, reads `ANTHROPIC_API_KEY` from env, and calls `lib/fetchNews.ts`.
-4. `fetchNews.ts` prompts Claude with web search enabled, requesting 3 uplifting articles as JSON.
-5. Articles are returned to the client and rendered as a `<NewsSection>` with one of 3 rotating grid layouts.
+Update a user's profile via `POST /api/user/preferences`:
+
+```json
+{
+  "userId": "anon_...",
+  "categoryWeights": {
+    "Science & Discovery": 0.30,
+    "Arts & Culture": 0.20,
+    "Human Kindness": 0.20,
+    "Environment & Nature": 0.15,
+    "Innovation & Tech": 0.15,
+    "Community Heroes": 0,
+    "Health & Wellness": 0,
+    "Education": 0
+  },
+  "preferredEmotions": ["awe", "wonder"],
+  "gameRatio": 0.1
+}
+```
 
 ---
 
-## Deployment
-
-### Vercel (recommended)
+## Deployment (Vercel)
 
 ```bash
-npm install -g vercel
 vercel
 ```
 
-Add `ANTHROPIC_API_KEY` as an environment variable in the Vercel dashboard under **Settings → Environment Variables**.
-
-### Other platforms
-
-Set `ANTHROPIC_API_KEY` as a server-side environment variable. The Next.js API route keeps it secure.
+Add all four env vars in the Vercel dashboard. The `vercel.json` crons run automatically on Pro/Team plans. On Hobby, trigger via an external scheduler like cron-job.org.
 
 ---
 
 ## Roadmap
 
-- [ ] Games layer (Sudoku, Word Search) interspersed between news sections
-- [ ] Settings panel — games/news ratio slider, category weighting
-- [ ] Mobile app (React Native / Expo)
-- [ ] Personalisation — saved preferences, reading history
+- [ ] Settings panel UI — category sliders, emotion toggles, game ratio
+- [ ] Games layer — Sudoku, word search interspersed in the feed
+- [ ] Auth — NextAuth.js for persistent named accounts
+- [ ] Mobile app — React Native / Expo
+- [ ] Implicit feedback — reading time signals to auto-tune category weights

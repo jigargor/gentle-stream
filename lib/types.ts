@@ -1,6 +1,7 @@
 import type { Category } from "./constants";
 
-export interface Article {
+// ─── Raw shape returned by the ingest agent (LLM output) ─────────────────────
+export interface RawArticle {
   headline: string;
   subheadline: string;
   byline: string;
@@ -11,9 +12,75 @@ export interface Article {
   imagePrompt: string;
 }
 
+// ─── Fully enriched article as stored in the database ────────────────────────
+export interface StoredArticle extends RawArticle {
+  id: string;
+  fetchedAt: string;           // ISO timestamp
+  expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
+
+  // Written by tagger agent
+  tags: string[];              // ["ocean", "coral", "australia"]
+  sentiment: ArticleSentiment;
+  emotions: string[];          // ["joy", "awe", "hope"]
+  locale: string;              // "global" | "US" | "UK" | "AU" etc.
+  readingTimeSecs: number;
+  qualityScore: number;        // 0–1
+
+  // Feed mechanics
+  usedCount: number;           // how many feed responses included this article
+  tagged: boolean;             // false until tagger agent has run
+}
+
+export type ArticleSentiment =
+  | "uplifting"
+  | "inspiring"
+  | "heartwarming"
+  | "triumphant";
+
+// ─── User profile ─────────────────────────────────────────────────────────────
+export interface UserProfile {
+  userId: string;
+  categoryWeights: Record<Category, number>; // must sum to ~1.0
+  gameRatio: number;                          // 0.0–1.0, portion of feed that is games
+  seenArticleIds: string[];
+  preferredEmotions: string[];               // subset of ArticleSentiment emotions
+  preferredLocales: string[];                // ["global", "US"] etc.
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Feed API request / response ─────────────────────────────────────────────
+export interface FeedRequest {
+  userId: string;
+  category?: Category | null;
+  sectionIndex: number;
+  pageSize?: number;           // default 3 (one newspaper section = 3 articles)
+}
+
+export interface FeedResponse {
+  articles: StoredArticle[];
+  category: string;
+  fromCache: boolean;          // true = served from DB, false = freshly generated
+}
+
+// ─── Component / UI types ─────────────────────────────────────────────────────
+
+// Article passed to UI components — either a stored article or a raw one (same fields used)
+export type Article = StoredArticle | RawArticle;
+
 export interface NewsSection {
   articles: Article[];
   index: number;
 }
 
 export type LayoutVariant = "hero" | "wide" | "standard";
+
+// ─── Agent job payloads ───────────────────────────────────────────────────────
+export interface IngestJobPayload {
+  category: Category;
+  count: number;               // how many articles to generate (default 10)
+}
+
+export interface TaggerJobPayload {
+  articleId: string;
+}

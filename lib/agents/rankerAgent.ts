@@ -13,7 +13,10 @@
  *         × noveltyPenalty       (used_count > N gets penalised)
  */
 
-import { getArticlesForFeed } from "../db/articles";
+import {
+  getArticlesForFeed,
+  getUntaggedArticlesForFeed,
+} from "../db/articles";
 import { getOrCreateUserProfile, markArticlesSeen } from "../db/users";
 import type { StoredArticle, UserProfile } from "../types";
 import type { Category } from "../constants";
@@ -34,6 +37,83 @@ interface RankOptions {
 }
 
 /**
+ * When no category filter is set, walk categories in a deterministic order
+ * (primary pick first, then rotated remainder) so each scroll can surface
+ * stories from the whole catalog, not only from one weighted pick.
+ */
+function orderedCategoriesForMixedFeed(
+  profile: UserProfile,
+  sectionIndex: number
+): Category[] {
+  const primary = pickCategory(profile, sectionIndex);
+  const rest = CATEGORIES.filter((c) => c !== primary);
+  const offset = sectionIndex % Math.max(rest.length, 1);
+  const rotated =
+    rest.length === 0
+      ? []
+      : [...rest.slice(offset), ...rest.slice(0, offset)];
+  return [primary, ...rotated];
+}
+
+async function collectCandidatesAcrossCategories(
+  profile: UserProfile,
+  sectionIndex: number,
+  poolSize: number
+): Promise<StoredArticle[]> {
+  const excludeIds = profile.seenArticleIds;
+  const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
+  const collected: StoredArticle[] = [];
+  const collectedIds = new Set<string>();
+
+  for (const cat of order) {
+    if (collected.length >= poolSize) break;
+    const remaining = poolSize - collected.length;
+    const batch = await getArticlesForFeed(
+      cat,
+      remaining + 8,
+      excludeIds
+    );
+    for (const article of batch) {
+      if (collectedIds.has(article.id)) continue;
+      collectedIds.add(article.id);
+      collected.push(article);
+      if (collected.length >= poolSize) break;
+    }
+  }
+
+  return collected;
+}
+
+async function collectUntaggedAcrossCategories(
+  profile: UserProfile,
+  sectionIndex: number,
+  poolSize: number
+): Promise<StoredArticle[]> {
+  const excludeIds = profile.seenArticleIds;
+  const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
+  const collected: StoredArticle[] = [];
+  const collectedIds = new Set<string>();
+
+  for (const cat of order) {
+    if (collected.length >= poolSize) break;
+    const remaining = poolSize - collected.length;
+    const batch = await getUntaggedArticlesForFeed(
+      cat,
+      remaining + 8,
+      excludeIds
+    );
+    for (const article of batch) {
+      if (collectedIds.has(article.id)) continue;
+      collectedIds.add(article.id);
+      collected.push(article);
+      if (collected.length >= poolSize) break;
+    }
+  }
+
+  return collected;
+}
+
+/**
  * Main entry point. Returns a ranked page of articles for a user.
  */
 export async function getRankedFeed(
@@ -43,16 +123,33 @@ export async function getRankedFeed(
 
   const profile = await getOrCreateUserProfile(userId);
 
-  // Decide which category to serve
+  // Label for this section (single category when filtered; primary pick when mixed)
   const resolvedCategory = category ?? pickCategory(profile, sectionIndex);
 
   // Fetch a candidate pool (fetch more than needed so we can rank and trim)
   const poolSize = pageSize * 5;
-  const candidates = await getArticlesForFeed(
-    resolvedCategory,
-    poolSize,
-    profile.seenArticleIds
-  );
+  let candidates = category
+    ? await getArticlesForFeed(category, poolSize, profile.seenArticleIds)
+    : await collectCandidatesAcrossCategories(
+        profile,
+        sectionIndex,
+        poolSize
+      );
+
+  // If nothing is tagged yet (tagger backlog / 429), still show fresh ingested rows
+  if (candidates.length === 0) {
+    candidates = category
+      ? await getUntaggedArticlesForFeed(
+          category,
+          poolSize,
+          profile.seenArticleIds
+        )
+      : await collectUntaggedAcrossCategories(
+          profile,
+          sectionIndex,
+          poolSize
+        );
+  }
 
   // Score and rank
   const scored = candidates.map((a) => ({

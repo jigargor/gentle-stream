@@ -2,60 +2,50 @@
  * Ingest Agent
  *
  * Fetches one article per API call to avoid truncation, using real token
- * usage from each response to decide whether to request another immediately
- * or wait out the 65-second rate-limit window first.
+ * usage from each response to decide whether to continue immediately or
+ * wait out the 65-second rate-limit window.
  *
- * Flow per article:
- *   1. Check token budget — wait if exhausted
- *   2. Request exactly 1 article (web search + write JSON)
- *   3. Read response.usage.input_tokens and add to window counter
- *   4. Parse and insert article
- *   5. If budget remains, go to 1 immediately; otherwise wait then go to 1
+ * Deduplication layers (in order):
+ *   1. Headline fingerprint pre-flight  — catches casing/punctuation variants
+ *   2. Source URL overlap check         — catches same article, different title
+ *   3. DB upsert ignoreDuplicates       — last resort constraint enforcement
+ *   4. Prompt avoid-list (headlines)    — stops Claude searching the same story
+ *   5. Prompt URL blocklist             — stops Claude using the same sources
  */
 
 import type { Category } from "../constants";
 import { INGEST_BATCH_SIZE } from "../constants";
 import type { RawArticle, StoredArticle } from "../types";
-import { insertArticles, getRecentHeadlines } from "../db/articles";
+import {
+  insertArticles,
+  getRecentHeadlines,
+  getRecentSourceUrls,
+  normaliseUrl,
+} from "../db/articles";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
 // ─── Token budget ─────────────────────────────────────────────────────────────
-// Anthropic free tier: 30,000 input tokens/min.
-// We stay under by tracking real usage from response.usage.input_tokens.
-const TOKEN_LIMIT_PER_WINDOW = 25_000; // conservative buffer below 30k hard limit
-const WINDOW_MS = 65_000;              // 65s window (slight overrun for safety)
+const TOKEN_LIMIT_PER_WINDOW = 25_000;
+const WINDOW_MS = 65_000;
 
 let windowStart = Date.now();
 let tokensUsedInWindow = 0;
 
-/**
- * Record real token usage and wait if the window is exhausted.
- * Must be called AFTER a successful API response with its real input_tokens.
- */
 async function recordUsageAndWaitIfNeeded(inputTokens: number): Promise<void> {
   const now = Date.now();
-  const elapsed = now - windowStart;
-
-  // Reset window if it's expired
-  if (elapsed >= WINDOW_MS) {
+  if (now - windowStart >= WINDOW_MS) {
     windowStart = now;
     tokensUsedInWindow = 0;
     console.log("[IngestAgent] Token window reset");
   }
 
   tokensUsedInWindow += inputTokens;
-  console.log(
-    `[IngestAgent] Tokens used this window: ${tokensUsedInWindow}/${TOKEN_LIMIT_PER_WINDOW}`
-  );
+  console.log(`[IngestAgent] Tokens this window: ${tokensUsedInWindow}/${TOKEN_LIMIT_PER_WINDOW}`);
 
-  // If next request would breach the limit, wait out the remainder of the window
   if (tokensUsedInWindow >= TOKEN_LIMIT_PER_WINDOW) {
-    const remaining = WINDOW_MS - (Date.now() - windowStart);
-    const waitMs = Math.max(remaining + 500, 0);
-    console.log(
-      `[IngestAgent] Budget exhausted — waiting ${Math.round(waitMs / 1000)}s for window reset`
-    );
+    const waitMs = Math.max(WINDOW_MS - (Date.now() - windowStart) + 500, 0);
+    console.log(`[IngestAgent] Budget exhausted — waiting ${Math.round(waitMs / 1000)}s`);
     await new Promise((r) => setTimeout(r, waitMs));
     windowStart = Date.now();
     tokensUsedInWindow = 0;
@@ -75,12 +65,34 @@ interface ClaudeUsage {
   output_tokens: number;
 }
 
+interface FetchResult {
+  article: RawArticle;
+  usage: ClaudeUsage;
+}
+
+// ─── Content block types from the raw Claude response ─────────────────────────
+interface TextBlock {
+  type: "text";
+  text: string;
+}
+
+interface SearchResultItem {
+  type: "web_search_result";
+  url: string;
+  title?: string;
+  encrypted_content?: string;
+}
+
+interface SearchResultBlock {
+  type: "web_search_tool_result";
+  tool_use_id: string;
+  content: SearchResultItem[];
+}
+
+type ContentBlock = TextBlock | SearchResultBlock | { type: string };
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Ingest articles for one category, one article per API call.
- * Uses real token counts to decide when to pause vs continue immediately.
- */
 export async function runIngestAgent(
   category: Category,
   total: number = INGEST_BATCH_SIZE
@@ -90,19 +102,23 @@ export async function runIngestAgent(
 
   const allInserted: StoredArticle[] = [];
 
-  // Pre-seed the avoid list from the DB so re-runs never repeat stored stories
-  const seenHeadlines: string[] = await getRecentHeadlines(category, 20);
-  console.log(
-    `[IngestAgent] "${category}" — ${seenHeadlines.length} existing headlines loaded as avoid-list`
-  );
+  // Seed both avoid-lists from the DB so re-runs don't repeat stored content
+  const [seenHeadlines, seenUrls] = await Promise.all([
+    getRecentHeadlines(category, 20),
+    getRecentSourceUrls(category, 30),
+  ]);
 
-  console.log(`[IngestAgent] Starting ingest for "${category}", target: ${total} articles`);
+  console.log(
+    `[IngestAgent] "${category}" — ${seenHeadlines.length} headlines, ` +
+    `${seenUrls.length} URLs loaded as avoid-lists`
+  );
+  console.log(`[IngestAgent] Starting ingest for "${category}", target: ${total}`);
 
   for (let i = 0; i < total; i++) {
     try {
-      const { article, usage } = await fetchOneArticle(apiKey, category, seenHeadlines);
+      const result = await fetchOneArticle(apiKey, category, seenHeadlines, seenUrls);
+      const { article, usage } = result;
 
-      // Store the article
       const toInsert = {
         ...article,
         category,
@@ -114,34 +130,32 @@ export async function runIngestAgent(
         qualityScore: 0.5,
       };
 
-      const [inserted] = await insertArticles([toInsert]);
-      allInserted.push(inserted);
-      seenHeadlines.push(article.headline);
+      const inserted = await insertArticles([toInsert]);
 
-      console.log(
-        `[IngestAgent] "${category}" article ${i + 1}/${total} inserted: "${article.headline.slice(0, 50)}"`
-      );
+      if (inserted.length > 0) {
+        allInserted.push(inserted[0]);
+        seenHeadlines.push(article.headline);
+        seenUrls.push(...article.sourceUrls);
+        console.log(
+          `[IngestAgent] "${category}" ${i + 1}/${total} inserted: "${article.headline.slice(0, 50)}"`
+        );
+      } else {
+        console.log(
+          `[IngestAgent] "${category}" ${i + 1}/${total} skipped (duplicate): "${article.headline.slice(0, 50)}"`
+        );
+      }
 
-      // Update token budget with real usage — will wait here if needed
       await recordUsageAndWaitIfNeeded(usage.input_tokens);
-
     } catch (e) {
       console.error(`[IngestAgent] Error on article ${i + 1} for "${category}":`, e);
-      // On error, wait a beat before retrying the slot
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
 
-  console.log(
-    `[IngestAgent] "${category}" complete: ${allInserted.length}/${total} articles inserted`
-  );
-
+  console.log(`[IngestAgent] "${category}" complete: ${allInserted.length}/${total} inserted`);
   return { category, inserted: allInserted };
 }
 
-/**
- * Run ingest across ALL categories sequentially.
- */
 export async function runFullIngest(): Promise<IngestResult[]> {
   const { CATEGORIES } = await import("../constants");
   const results: IngestResult[] = [];
@@ -151,22 +165,23 @@ export async function runFullIngest(): Promise<IngestResult[]> {
   return results;
 }
 
-// ─── Core fetch — exactly 1 article per call ──────────────────────────────────
+// ─── Core fetch ───────────────────────────────────────────────────────────────
 
 async function fetchOneArticle(
   apiKey: string,
   category: string,
-  seenHeadlines: string[]
-): Promise<{ article: RawArticle; usage: ClaudeUsage }> {
-  const avoid = seenHeadlines.slice(-5).join("; ");
-  const avoidClause = avoid ? ` Do not repeat these stories: ${avoid}.` : "";
+  seenHeadlines: string[],
+  seenUrls: string[]
+): Promise<FetchResult> {
+  const avoidHeadlines = seenHeadlines.slice(-8).join("; ");
+  const avoidUrls = seenUrls.slice(-20).join(", ");
 
-  // Tight prompt — 1 object, no array wrapper needed, clear schema
   const prompt =
     `Search the web for 1 real, recent, uplifting news story in: "${category}". ` +
-    `Positive only — no deaths, crimes, or disasters.${avoidClause}\n\n` +
-    `IMPORTANT: Write the body in plain prose. Do NOT include any citation markup, ` +
-    `<cite> tags, reference numbers, or source links inside the text.\n\n` +
+    `Positive only — no deaths, crimes, or disasters.\n` +
+    (avoidHeadlines ? `Do not repeat these stories: ${avoidHeadlines}.\n` : "") +
+    (avoidUrls ? `Do not use content from these URLs: ${avoidUrls}.\n` : "") +
+    `\nIMPORTANT: Write body in plain prose. No <cite> tags, reference numbers, or source links in the text.\n\n` +
     `Return ONLY a single raw JSON object — no array, no markdown, no preamble:\n` +
     `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country",` +
     `"category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string"}`;
@@ -182,7 +197,7 @@ async function fetchOneArticle(
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1024, // 1 article easily fits in 1024 output tokens
+        max_tokens: 1024,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: prompt }],
       }),
@@ -190,7 +205,7 @@ async function fetchOneArticle(
 
     if (res.status === 429 && attempt < 3) {
       const wait = (attempt + 1) * 12_000;
-      console.log(`[IngestAgent] 429 rate limit — retrying in ${wait / 1000}s`);
+      console.log(`[IngestAgent] 429 — retrying in ${wait / 1000}s`);
       await new Promise((r) => setTimeout(r, wait));
       return makeRequest(attempt + 1);
     }
@@ -198,7 +213,6 @@ async function fetchOneArticle(
   };
 
   const response = await makeRequest(0);
-
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`Claude API ${response.status}: ${err}`);
@@ -208,14 +222,18 @@ async function fetchOneArticle(
   const usage: ClaudeUsage = data.usage ?? { input_tokens: 1500, output_tokens: 500 };
 
   if (data.stop_reason === "max_tokens") {
-    console.warn("[IngestAgent] max_tokens hit even for single article — attempting recovery");
+    console.warn("[IngestAgent] max_tokens hit — attempting recovery");
   }
 
-  // Collect all text blocks
-  const blocks: Array<{ type: string; text?: string }> = data.content ?? [];
+  const blocks: ContentBlock[] = data.content ?? [];
+
+  // Extract URLs from all web_search_tool_result blocks
+  const sourceUrls = extractSourceUrls(blocks);
+
+  // Combine all text blocks
   const combinedText = blocks
-    .filter((b) => b.type === "text" && b.text)
-    .map((b) => b.text!)
+    .filter((b): b is TextBlock => b.type === "text" && "text" in b)
+    .map((b) => b.text)
     .join("\n");
 
   if (!combinedText) {
@@ -223,73 +241,85 @@ async function fetchOneArticle(
     throw new Error("No text blocks in Claude response");
   }
 
-  const article = parseArticleFromText(combinedText, category);
+  const article = parseArticleFromText(combinedText, category, sourceUrls);
   return { article, usage };
+}
+
+// ─── URL extraction ───────────────────────────────────────────────────────────
+
+/**
+ * Extract and normalise all source URLs from web_search_tool_result blocks.
+ * These are the real pages Claude read — our ground truth for deduplication.
+ */
+function extractSourceUrls(blocks: ContentBlock[]): string[] {
+  const urls: string[] = [];
+
+  for (const block of blocks) {
+    if (block.type !== "web_search_tool_result") continue;
+    const searchBlock = block as SearchResultBlock;
+    for (const result of searchBlock.content ?? []) {
+      if (result.type === "web_search_result" && result.url) {
+        urls.push(normaliseUrl(result.url));
+      }
+    }
+  }
+
+  // Deduplicate
+  return Array.from(new Set(urls));
 }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
-function parseArticleFromText(text: string, category: string): RawArticle {
+function parseArticleFromText(
+  text: string,
+  category: string,
+  sourceUrls: string[]
+): RawArticle {
   const cleaned = text.replace(/```json|```/g, "").trim();
 
-  // Try a single object first (our preferred format)
   const objStart = cleaned.indexOf("{");
-  const objEnd = cleaned.lastIndexOf("}");
-
-  // Also handle if Claude wrapped it in an array anyway
+  const objEnd   = cleaned.lastIndexOf("}");
   const arrStart = cleaned.indexOf("[");
-  const arrEnd = cleaned.lastIndexOf("]");
+  const arrEnd   = cleaned.lastIndexOf("]");
 
-  let parsed: RawArticle | RawArticle[] | null = null;
+  let parsed: Record<string, string> | null = null;
 
-  // Prefer object, fall back to array
   if (objStart !== -1 && objEnd !== -1) {
-    try {
-      parsed = JSON.parse(cleaned.slice(objStart, objEnd + 1));
-    } catch {
-      // fall through to array attempt
-    }
+    try { parsed = JSON.parse(cleaned.slice(objStart, objEnd + 1)); } catch { /* fall through */ }
   }
-
   if (!parsed && arrStart !== -1 && arrEnd !== -1) {
     try {
       const arr = JSON.parse(cleaned.slice(arrStart, arrEnd + 1));
       parsed = Array.isArray(arr) ? arr[0] : arr;
-    } catch {
-      // fall through
-    }
+    } catch { /* fall through */ }
   }
 
   if (!parsed) {
-    console.error("[IngestAgent] Could not parse JSON from:\n", cleaned.slice(0, 400));
+    console.error("[IngestAgent] JSON parse failed:\n", cleaned.slice(0, 400));
     throw new Error("JSON parse failed — no valid object or array found");
   }
 
-  const article = Array.isArray(parsed) ? parsed[0] : parsed;
+  const a = Array.isArray(parsed) ? parsed[0] : parsed;
 
-  // Strip any <cite> tags Claude injects from web search citations
   return {
-    headline:    stripCitations(article.headline    ?? "Untitled"),
-    subheadline: stripCitations(article.subheadline ?? ""),
-    byline:      article.byline    ?? "By Staff Reporter",
-    location:    article.location  ?? "Global",
-    category:    (article.category ?? category) as RawArticle["category"],
-    body:        stripCitations(article.body        ?? ""),
-    pullQuote:   stripCitations(article.pullQuote   ?? ""),
-    imagePrompt: stripCitations(article.imagePrompt ?? ""),
+    headline:    stripCitations(a.headline    ?? "Untitled"),
+    subheadline: stripCitations(a.subheadline ?? ""),
+    byline:      a.byline    ?? "By Staff Reporter",
+    location:    a.location  ?? "Global",
+    category:    (a.category ?? category) as RawArticle["category"],
+    body:        stripCitations(a.body        ?? ""),
+    pullQuote:   stripCitations(a.pullQuote   ?? ""),
+    imagePrompt: stripCitations(a.imagePrompt ?? ""),
+    sourceUrls,  // URLs extracted from the search result blocks
   };
 }
 
-// ─── Utility ──────────────────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);
 }
 
-/**
- * Strip <cite index="...">...</cite> tags that Claude injects when web search
- * citations leak into the generated article text. Also removes bare </cite>.
- */
 function stripCitations(text: string): string {
   return text
     .replace(/<cite[^>]*>/gi, "")

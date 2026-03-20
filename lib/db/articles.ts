@@ -26,6 +26,7 @@ interface ArticleRow {
   used_count: number;
   tagged: boolean;
   fingerprint: string;
+  source_urls: string[];
 }
 
 function rowToArticle(row: ArticleRow): StoredArticle {
@@ -49,25 +50,86 @@ function rowToArticle(row: ArticleRow): StoredArticle {
     qualityScore: row.quality_score ?? 0.5,
     usedCount: row.used_count ?? 0,
     tagged: row.tagged ?? false,
+    sourceUrls: row.source_urls ?? [],
   };
 }
 
+// ─── Deduplication helpers ────────────────────────────────────────────────────
+
 /**
- * Compute a deduplication fingerprint from headline + category.
- * Lowercased and whitespace-collapsed so minor phrasing differences
- * don't create separate entries.
+ * Compute a headline fingerprint: lowercase, whitespace-collapsed,
+ * with punctuation stripped so "Bull Sharks' Social Lives" and
+ * "Bull Sharks Social Lives" hash identically.
  */
-function fingerprint(headline: string, category: string): string {
-  return `${headline}|${category}`
+function headlineFingerprint(headline: string, category: string): string {
+  const normalised = headline
     .toLowerCase()
+    .replace(/['''"",.:;!?()[\]]/g, "")  // strip punctuation
     .replace(/\s+/g, " ")
     .trim();
+  return `${normalised}|${category.toLowerCase()}`;
 }
 
 /**
- * Insert articles, skipping any whose fingerprint already exists in the DB.
- * Uses upsert with onConflict: ignore as the last line of defence.
- * Returns only the articles that were actually inserted.
+ * Normalise a URL so that http/https, www, trailing slashes, and common
+ * tracking query params don't create false negatives.
+ *
+ * Examples that resolve to the same key:
+ *   https://www.bbc.com/news/article-123?source=rss   →  bbc.com/news/article-123
+ *   http://bbc.com/news/article-123/                  →  bbc.com/news/article-123
+ */
+export function normaliseUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    // Strip scheme, www., query string, and hash
+    const host = u.hostname.replace(/^www\./, "");
+    // Keep only the path, removing trailing slash
+    const path = u.pathname.replace(/\/$/, "");
+    return `${host}${path}`.toLowerCase();
+  } catch {
+    // If URL parsing fails, fall back to simple lowercasing
+    return url
+      .replace(/^https?:\/\/(www\.)?/, "")
+      .replace(/[?#].*$/, "")
+      .replace(/\/$/, "")
+      .toLowerCase();
+  }
+}
+
+/**
+ * Check whether any incoming URL overlaps with URLs already stored.
+ * Returns the headline of the first conflicting article if found.
+ */
+async function findUrlConflict(
+  normalisedUrls: string[]
+): Promise<string | null> {
+  if (normalisedUrls.length === 0) return null;
+
+  // Postgres GIN array overlap: source_urls && ARRAY[...]
+  const { data, error } = await db
+    .from("articles")
+    .select("headline, source_urls")
+    .overlaps("source_urls", normalisedUrls)
+    .limit(1);
+
+  if (error) {
+    // Don't hard-fail — URL check is best-effort
+    console.warn("[insertArticles] URL overlap check failed:", error.message);
+    return null;
+  }
+
+  return data && data.length > 0 ? (data[0] as { headline: string }).headline : null;
+}
+
+// ─── Public DB helpers ────────────────────────────────────────────────────────
+
+/**
+ * Insert articles with three dedup layers:
+ *   1. Headline fingerprint pre-flight (catches exact + casing/punctuation variants)
+ *   2. Source URL overlap check (catches same article with different Claude-title)
+ *   3. Upsert with ignoreDuplicates (DB constraint — last line of defence)
+ *
+ * Returns only the articles actually inserted.
  */
 export async function insertArticles(
   articles: Omit<
@@ -81,33 +143,58 @@ export async function insertArticles(
   const expiresAt = new Date(now);
   expiresAt.setDate(expiresAt.getDate() + ARTICLE_TTL_DAYS);
 
-  // Compute fingerprints and check which ones already exist
+  // ── Layer 1: fingerprint pre-flight ───────────────────────────────────────
   const candidates = articles.map((a) => ({
     article: a,
-    fp: fingerprint(a.headline, a.category),
+    fp: headlineFingerprint(a.headline, a.category),
+    normUrls: (a.sourceUrls ?? []).map(normaliseUrl),
   }));
 
   const fps = candidates.map((c) => c.fp);
-  const { data: existing } = await db
+  const { data: existingFpRows } = await db
     .from("articles")
     .select("fingerprint")
     .in("fingerprint", fps);
 
-  const existingFps = new Set((existing ?? []).map((r: { fingerprint: string }) => r.fingerprint));
-  const novel = candidates.filter((c) => !existingFps.has(c.fp));
+  const existingFps = new Set(
+    (existingFpRows ?? []).map((r: { fingerprint: string }) => r.fingerprint)
+  );
+
+  // ── Layer 2: URL overlap check (per-candidate) ────────────────────────────
+  const novel: typeof candidates = [];
+
+  for (const candidate of candidates) {
+    if (existingFps.has(candidate.fp)) {
+      console.log(
+        `[insertArticles] Headline fingerprint match — skipping: "${candidate.article.headline}"`
+      );
+      continue;
+    }
+
+    const conflict = await findUrlConflict(candidate.normUrls);
+    if (conflict) {
+      console.log(
+        `[insertArticles] URL overlap with "${conflict}" — skipping: "${candidate.article.headline}"`
+      );
+      continue;
+    }
+
+    novel.push(candidate);
+  }
 
   if (novel.length === 0) {
-    console.log("[insertArticles] All articles already exist — skipping insert");
+    console.log("[insertArticles] All articles already exist — nothing inserted");
     return [];
   }
 
   if (novel.length < candidates.length) {
     console.log(
-      `[insertArticles] Skipping ${candidates.length - novel.length} duplicate(s), inserting ${novel.length}`
+      `[insertArticles] ${candidates.length - novel.length} duplicate(s) blocked, inserting ${novel.length}`
     );
   }
 
-  const rows = novel.map(({ article: a, fp }) => ({
+  // ── Layer 3: upsert with ignoreDuplicates ─────────────────────────────────
+  const rows = novel.map(({ article: a, fp, normUrls }) => ({
     id: uuidv4(),
     headline: a.headline,
     subheadline: a.subheadline,
@@ -128,9 +215,9 @@ export async function insertArticles(
     used_count: 0,
     tagged: false,
     fingerprint: fp,
+    source_urls: normUrls,
   }));
 
-  // Upsert with ignoreDuplicates as final safety net
   const { data, error } = await db
     .from("articles")
     .upsert(rows, { onConflict: "fingerprint", ignoreDuplicates: true })
@@ -142,8 +229,7 @@ export async function insertArticles(
 
 /**
  * Fetch the most recent N headlines for a category from the DB.
- * Used by the ingest agent to build its avoid-list before each API call,
- * so it doesn't request stories that are already stored.
+ * Used by the ingest agent as a prompt avoid-list.
  */
 export async function getRecentHeadlines(
   category: Category,
@@ -158,6 +244,27 @@ export async function getRecentHeadlines(
 
   if (error) throw new Error(`getRecentHeadlines: ${error.message}`);
   return (data ?? []).map((r: { headline: string }) => r.headline);
+}
+
+/**
+ * Fetch the most recent N sets of source URLs for a category.
+ * Used by the ingest agent to build a URL blocklist before each API call.
+ */
+export async function getRecentSourceUrls(
+  category: Category,
+  limit = 30
+): Promise<string[]> {
+  const { data, error } = await db
+    .from("articles")
+    .select("source_urls")
+    .eq("category", category)
+    .order("fetched_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`getRecentSourceUrls: ${error.message}`);
+  // Flatten all URL arrays into a single deduplicated list
+  const all = (data ?? []).flatMap((r: { source_urls: string[] }) => r.source_urls ?? []);
+  return Array.from(new Set(all));
 }
 
 /**
@@ -182,11 +289,38 @@ export async function getArticlesForFeed(
     .limit(limit);
 
   if (excludeIds.length > 0) {
-    query = query.not("id", "in", `(${excludeIds.join(",")})`);
+    query = query.notIn("id", excludeIds);
   }
 
   const { data, error } = await query;
   if (error) throw new Error(`getArticlesForFeed: ${error.message}`);
+  return (data as ArticleRow[]).map(rowToArticle);
+}
+
+/**
+ * Same as getArticlesForFeed but for rows not yet processed by the tagger.
+ * Used when the feed would otherwise be empty (e.g. tagger rate-limited / backlog).
+ */
+export async function getUntaggedArticlesForFeed(
+  category: Category,
+  limit: number,
+  excludeIds: string[] = []
+): Promise<StoredArticle[]> {
+  let query = db
+    .from("articles")
+    .select("*")
+    .eq("category", category)
+    .eq("tagged", false)
+    .gt("expires_at", new Date().toISOString())
+    .order("fetched_at", { ascending: false })
+    .limit(limit);
+
+  if (excludeIds.length > 0) {
+    query = query.notIn("id", excludeIds);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`getUntaggedArticlesForFeed: ${error.message}`);
   return (data as ArticleRow[]).map(rowToArticle);
 }
 
@@ -218,16 +352,18 @@ export async function countAvailableByCategory(): Promise<
 export async function markArticlesUsed(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const { error } = await db.rpc("increment_used_count", { article_ids: ids });
-  // Fallback if the RPC doesn't exist yet — do it in-process
-  if (error) {
-    for (const id of ids) {
-      await db.rpc("increment_used_count_single", { p_id: id }).catch(() => {
-        // Best-effort: direct update
-        db.from("articles")
-          .update({ used_count: db.rpc as never })
-          .eq("id", id);
-      });
-    }
+  // Fallback if the RPC doesn't exist yet — bump used_count per row
+  if (!error) return;
+
+  for (const id of ids) {
+    const { data: row, error: fetchError } = await db
+      .from("articles")
+      .select("used_count")
+      .eq("id", id)
+      .single();
+    if (fetchError || !row) continue;
+    const next = (row.used_count ?? 0) + 1;
+    await db.from("articles").update({ used_count: next }).eq("id", id);
   }
 }
 

@@ -17,7 +17,39 @@ export default function NewsSection({
   articles,
   sectionIndex,
 }: NewsSectionProps) {
-  if (!articles || articles.length < 3) return null;
+  if (!articles || articles.length === 0) return null;
+
+  // Fewer than 3: still render so infinite scroll can show partial pages
+  if (articles.length === 1) {
+    return (
+      <div
+        className="news-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          ...borderStyles,
+        }}
+      >
+        <ArticleCard article={articles[0]} layout="hero" index={0} />
+      </div>
+    );
+  }
+
+  if (articles.length === 2) {
+    return (
+      <div
+        className="news-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          ...borderStyles,
+        }}
+      >
+        <ArticleCard article={articles[0]} layout="standard" index={0} />
+        <ArticleCard article={articles[1]} layout="standard" index={1} />
+      </div>
+    );
+  }
 
   const layout = sectionIndex % 3;
 

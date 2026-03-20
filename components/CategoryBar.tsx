@@ -15,11 +15,16 @@ export default function CategoryBar({ selected, onSelect }: CategoryBarProps) {
         background: "#1a1a1a",
         overflowX: "auto",
         display: "flex",
+        justifyContent: "center",
+        alignItems: "stretch",
+        flexWrap: "wrap",
         padding: 0,
+        width: "100%",
       }}
     >
-      {CATEGORIES.map((cat) => {
+      {CATEGORIES.map((cat, index) => {
         const isActive = selected === cat;
+        const isLast = index === CATEGORIES.length - 1;
         return (
           <button
             key={cat}
@@ -37,7 +42,7 @@ export default function CategoryBar({ selected, onSelect }: CategoryBarProps) {
               cursor: "pointer",
               whiteSpace: "nowrap",
               transition: "background 0.2s ease, color 0.2s ease",
-              borderRight: "1px solid #333",
+              borderRight: isLast ? "none" : "1px solid #333",
               flexShrink: 0,
             }}
           >

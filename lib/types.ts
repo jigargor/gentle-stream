@@ -10,6 +10,7 @@ export interface RawArticle {
   body: string;
   pullQuote: string;
   imagePrompt: string;
+  sourceUrls: string[];  // normalized URLs extracted from web search result blocks
 }
 
 // ─── Fully enriched article as stored in the database ────────────────────────

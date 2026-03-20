@@ -2,8 +2,9 @@
  * GET /api/feed
  *
  * Primary feed endpoint. Serves articles from the DB via the ranker agent.
- * Falls back to live ingest only if the DB has no articles at all for the
- * requested category (cold start or depleted stock).
+ * Falls back to live ingest only when the DB returns **zero** articles for this
+ * request. If we have 1..pageSize-1 (e.g. only 2 unseen left), we return them
+ * immediately so the client never blocks on a multi-minute synchronous ingest.
  *
  * Query params:
  *   userId       string  — required for personalisation
@@ -48,21 +49,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(result);
     }
 
-    // ── 2. Cold start / stock depleted — run ingest synchronously ────────────
+    // Partial page: serve what we have — do not block the UI on live ingest
+    if (result.articles.length > 0) {
+      return NextResponse.json(result);
+    }
+
+    // ── 2. True cold start (zero articles) — refill with a *small* ingest ────
     console.log(
-      `[/api/feed] Stock depleted for "${result.category}" — running live ingest`
+      `[/api/feed] No articles for this request ("${result.category}") — running live ingest`
     );
 
     const resolvedCategory = (result.category || category || CATEGORIES[sectionIndex % CATEGORIES.length]) as Category;
-    await runIngestAgent(resolvedCategory);
+    // Default ingest agent pulls 6 articles; that can take many minutes under rate limits.
+    // Only fetch enough to satisfy this one section (+ small buffer for tagging misses).
+    const ingestCount = Math.min(pageSize + 2, 6);
+    await runIngestAgent(resolvedCategory, ingestCount);
 
-    // Tag the new articles immediately so they're usable
-    await runTaggerAgent(15);
+    // Tag enough to cover what we just inserted (ingest is 1 row per article)
+    await runTaggerAgent(Math.min(20, ingestCount + 5));
 
-    // Retry the ranked fetch with fresh articles
+    // Retry the ranked fetch with fresh articles (preserve mixed vs filtered)
     const retryResult = await getRankedFeed({
       userId,
-      category: resolvedCategory,
+      category,
       sectionIndex,
       pageSize,
       markSeen: userId !== ANONYMOUS_USER_ID,

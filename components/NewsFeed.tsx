@@ -35,8 +35,11 @@ function cleanArticle(article: Article): Article {
     pullQuote: stripCiteTags(article.pullQuote ?? ""),
     subheadline: stripCiteTags(article.subheadline ?? ""),
     headline: stripCiteTags(article.headline ?? ""),
+    sourceUrls: article.sourceUrls ?? [],
   };
 }
+
+const FEED_FETCH_TIMEOUT_MS = 90_000;
 
 export default function NewsFeed() {
   const [sections, setSections] = useState<NewsSectionType[]>([]);
@@ -78,7 +81,19 @@ export default function NewsFeed() {
       params.set("sectionIndex", String(sectionCountRef.current));
       if (category) params.set("category", category);
 
-      const res = await fetch(`/api/feed?${params.toString()}`);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        FEED_FETCH_TIMEOUT_MS
+      );
+      let res: Response;
+      try {
+        res = await fetch(`/api/feed?${params.toString()}`, {
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
@@ -94,13 +109,44 @@ export default function NewsFeed() {
 
       const cleaned = data.articles.map(cleanArticle);
 
+      if (cleaned.length === 0) {
+        setError(
+          sectionCountRef.current > 0
+            ? "No more stories right now."
+            : "No stories available yet — try again in a moment."
+        );
+        return;
+      }
+
       setSections((prev) => [
         ...prev,
         { articles: cleaned, index: sectionCountRef.current },
       ]);
       sectionCountRef.current += 1;
+
+      // IntersectionObserver only fires on visibility *changes*. If the sentinel
+      // stayed in the viewport while we loaded, it won't fire again — queue another
+      // fetch when there's still room below (infinite scroll).
+      if (cleaned.length > 0) {
+        requestAnimationFrame(() => {
+          const el = sentinelRef.current;
+          if (!el || loadingRef.current) return;
+          const margin = 280;
+          const rect = el.getBoundingClientRect();
+          const vh = window.innerHeight;
+          const isNearViewport =
+            rect.top < vh + margin && rect.bottom > -margin;
+          if (isNearViewport) void loadMore();
+        });
+      }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Something went wrong.";
+      const aborted =
+        e instanceof Error && e.name === "AbortError";
+      const msg = aborted
+        ? "Request timed out — the server may still be sourcing stories. Scroll or retry in a moment."
+        : e instanceof Error
+          ? e.message
+          : "Something went wrong.";
       setError(`Could not load stories — ${msg}`);
     } finally {
       loadingRef.current = false;
@@ -121,23 +167,21 @@ export default function NewsFeed() {
     activeCategoryRef.current = activeCategory;
   }, [activeCategory]);
 
-  // Wire up IntersectionObserver directly — no library, no stale closure
+  // Re-attach when sections change so layout updates don’t leave the sentinel unobserved
   useEffect(() => {
-    observerRef.current = new IntersectionObserver(
+    const el = sentinelRef.current;
+    const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && !loadingRef.current) {
-          loadMore();
+        if (entries[0]?.isIntersecting && !loadingRef.current) {
+          void loadMore();
         }
       },
-      { threshold: 0, rootMargin: "200px" } // trigger 200px before sentinel is visible
+      { threshold: 0, rootMargin: "280px" }
     );
-
-    if (sentinelRef.current) {
-      observerRef.current.observe(sentinelRef.current);
-    }
-
-    return () => observerRef.current?.disconnect();
-  }, [loadMore]);
+    observerRef.current = io;
+    if (el) io.observe(el);
+    return () => io.disconnect();
+  }, [sections.length, loadMore]);
 
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;

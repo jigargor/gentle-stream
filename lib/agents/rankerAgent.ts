@@ -124,6 +124,30 @@ async function collectUntaggedAcrossCategories(
 }
 
 /**
+ * When we intentionally sample randomly, score-based sorting would always surface
+ * the same few highest-quality IDs. Rotate by sectionIndex so infinite scroll varies.
+ */
+function pickRotatedPage(
+  candidates: StoredArticle[],
+  sectionIndex: number,
+  pageSize: number
+): StoredArticle[] {
+  const n = candidates.length;
+  if (n === 0) return [];
+
+  const start =
+    n <= pageSize
+      ? sectionIndex % n
+      : (sectionIndex * pageSize) % n;
+
+  const out: StoredArticle[] = [];
+  for (let i = 0; i < pageSize; i++) {
+    out.push(candidates[(start + i) % n]!);
+  }
+  return out;
+}
+
+/**
  * Main entry point. Returns a ranked page of articles for a user.
  *
  * Selection pipeline (see `lib/feed/README.md` for future engagement hooks):
@@ -169,6 +193,8 @@ export async function getRankedFeed(
 
   let selectionMode: FeedSelectionMode = "profile_ranked";
   let sectionCategoryLabel: string = resolvedCategory;
+  /** False for random_pool / random_resurface — those paths must not re-sort by score */
+  let rankByProfileScore = true;
 
   // No profile-based recommendations for this section — pull from the whole catalog
   if (candidates.length === 0) {
@@ -179,6 +205,7 @@ export async function getRankedFeed(
     if (candidates.length > 0) {
       selectionMode = "random_pool";
       sectionCategoryLabel = MIXED_SECTION_LABEL;
+      rankByProfileScore = false;
     }
   }
 
@@ -188,17 +215,23 @@ export async function getRankedFeed(
     if (candidates.length > 0) {
       selectionMode = "random_resurface";
       sectionCategoryLabel = MIXED_SECTION_LABEL;
+      rankByProfileScore = false;
     }
   }
 
-  // Score and rank
-  const scored = candidates.map((a) => ({
-    article: a,
-    score: scoreArticle(a, profile),
-  }));
-  scored.sort((a, b) => b.score - a.score);
-
-  const selected = scored.slice(0, pageSize).map((s) => s.article);
+  const selected =
+    candidates.length === 0
+      ? []
+      : rankByProfileScore
+        ? (() => {
+            const scored = candidates.map((a) => ({
+              article: a,
+              score: scoreArticle(a, profile),
+            }));
+            scored.sort((a, b) => b.score - a.score);
+            return scored.slice(0, pageSize).map((s) => s.article);
+          })()
+        : pickRotatedPage(candidates, sectionIndex, pageSize);
 
   // Mark as seen so they don't repeat in this user's feed
   if (markSeen && selected.length > 0) {

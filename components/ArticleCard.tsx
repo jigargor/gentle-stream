@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { CATEGORY_COLORS } from "@/lib/constants";
 import type { Article, LayoutVariant } from "@/lib/types";
 import {
   picsumFallbackUrl,
   pollinationsImageUrl,
 } from "@/lib/article-image";
+import {
+  sourceLinkLabel,
+  toClickableSourceUrl,
+  uniqueSourceUrls,
+} from "@/lib/source-links";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
@@ -63,6 +68,27 @@ export default function ArticleCard({
     ? "1.35rem"
     : "1.05rem";
 
+  const sourceUrls = uniqueSourceUrls(article.sourceUrls);
+  const primarySourceHref =
+    sourceUrls[0] ? toClickableSourceUrl(sourceUrls[0]) : "";
+
+  const headlineStyle = {
+    fontFamily: "'Playfair Display', Georgia, serif",
+    fontSize: headlineSizePx,
+    fontWeight: 700,
+    lineHeight: 1.18,
+    color: "#0d0d0d",
+    margin: 0,
+    letterSpacing: "-0.01em",
+  } as const;
+
+  const sourceLinkStyle = {
+    color: accentColor,
+    textDecoration: "underline",
+    textDecorationColor: "rgba(0,0,0,0.25)",
+    textUnderlineOffset: "0.12em",
+  } as const;
+
   return (
     <article
       style={{
@@ -94,19 +120,30 @@ export default function ArticleCard({
         {article.category}
       </div>
 
-      {/* Headline */}
-      <h2
-        style={{
-          fontFamily: "'Playfair Display', Georgia, serif",
-          fontSize: headlineSizePx,
-          fontWeight: 700,
-          lineHeight: 1.18,
-          color: "#0d0d0d",
-          margin: 0,
-          letterSpacing: "-0.01em",
-        }}
-      >
-        {article.headline}
+      {/* Headline — links to primary source when we have URLs from ingest */}
+      <h2 style={headlineStyle}>
+        {primarySourceHref ? (
+          <a
+            href={primarySourceHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              ...headlineStyle,
+              color: "inherit",
+              textDecoration: "none",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = accentColor;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "#0d0d0d";
+            }}
+          >
+            {article.headline}
+          </a>
+        ) : (
+          article.headline
+        )}
       </h2>
 
       {/* Subheadline / deck */}
@@ -156,26 +193,57 @@ export default function ArticleCard({
           }}
         >
           {heroImageSrc ? (
-            <img
-              src={heroImageSrc}
-              alt={article.imagePrompt}
-              width={HERO_IMG_W}
-              height={HERO_IMG_H}
-              loading="lazy"
-              decoding="async"
-              onError={() => {
-                setImageStage((s) =>
-                  s === "pollinations" ? "picsum" : "broken"
-                );
-              }}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                objectPosition: "center",
-                display: "block",
-              }}
-            />
+            primarySourceHref ? (
+              <a
+                href={primarySourceHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "block", width: "100%", height: "100%" }}
+                aria-label={`Open source article: ${article.headline}`}
+              >
+                <img
+                  src={heroImageSrc}
+                  alt={article.imagePrompt}
+                  width={HERO_IMG_W}
+                  height={HERO_IMG_H}
+                  loading="lazy"
+                  decoding="async"
+                  onError={() => {
+                    setImageStage((s) =>
+                      s === "pollinations" ? "picsum" : "broken"
+                    );
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    objectPosition: "center",
+                    display: "block",
+                  }}
+                />
+              </a>
+            ) : (
+              <img
+                src={heroImageSrc}
+                alt={article.imagePrompt}
+                width={HERO_IMG_W}
+                height={HERO_IMG_H}
+                loading="lazy"
+                decoding="async"
+                onError={() => {
+                  setImageStage((s) =>
+                    s === "pollinations" ? "picsum" : "broken"
+                  );
+                }}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  objectPosition: "center",
+                  display: "block",
+                }}
+              />
+            )
           ) : (
             <div
               style={{
@@ -260,6 +328,37 @@ export default function ArticleCard({
           </div>
         ))}
       </div>
+
+      {sourceUrls.length > 0 && (
+        <footer
+          style={{
+            marginTop: "0.65rem",
+            paddingTop: "0.55rem",
+            borderTop: "1px solid #d4cfc4",
+            fontFamily: "Georgia, serif",
+            fontSize: isHero ? "0.72rem" : "0.66rem",
+            color: "#666",
+            lineHeight: 1.5,
+          }}
+        >
+          <span style={{ fontWeight: 600, color: "#555", marginRight: "0.35rem" }}>
+            {sourceUrls.length === 1 ? "Source" : "Sources"}
+          </span>
+          {sourceUrls.map((u, i) => (
+            <Fragment key={`${u}-${i}`}>
+              {i > 0 && <span style={{ color: "#bbb" }}> · </span>}
+              <a
+                href={toClickableSourceUrl(u)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={sourceLinkStyle}
+              >
+                {sourceLinkLabel(u)}
+              </a>
+            </Fragment>
+          ))}
+        </footer>
+      )}
     </article>
   );
 }

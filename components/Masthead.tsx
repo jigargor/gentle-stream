@@ -60,7 +60,7 @@ export default function Masthead() {
             textShadow: "1px 1px 0 rgba(0,0,0,0.06)",
           }}
         >
-          The Good News Daily
+          Gentle Stream
         </h1>
         <div
           style={{

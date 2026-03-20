@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "The Good News Daily",
+  title: "Gentle Stream",
   description:
-    "All the news that lifts the spirit — uplifting stories from around the world, delivered in a classic broadsheet experience.",
+    "Uplifting stories from around the world — a calmer broadsheet feed, delivered with care.",
   openGraph: {
-    title: "The Good News Daily",
+    title: "Gentle Stream",
     description: "Only the uplifting. Only the inspiring.",
     type: "website",
   },

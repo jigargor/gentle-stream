@@ -1,4 +1,4 @@
-# The Good News Daily
+# Gentle Stream
 
 > *"All the news that lifts the spirit."*
 
@@ -10,7 +10,7 @@ Built as a portfolio project to demonstrate production-grade engineering: agenti
 
 ## What it does
 
-The Good News Daily continuously curates real news from across the web, filters it for only positive stories, and presents them in a polished broadsheet UI that feels like an editorial product — not an AI demo. Each user's feed is personalised based on category preferences, emotional tone, locale, and reading history, without ever showing the same article twice.
+Gentle Stream continuously curates real news from across the web, filters it for only positive stories, and presents them in a polished broadsheet UI that feels like an editorial product — not an AI demo. Each user's feed is personalised based on category preferences, emotional tone, locale, and reading history, without ever showing the same article twice.
 
 The system is designed around one principle borrowed from Reddit and Substack: **content generation and content consumption are decoupled**. A background agent pipeline continuously fills a pool of enriched, tagged articles. The feed API never calls the LLM — it just queries the pool and ranks it per-user in milliseconds.
 
@@ -106,7 +106,7 @@ Each ingest call requests exactly **one article**. This was a deliberate choice 
 ## Project structure
 
 ```
-good-news-daily/
+gentle-stream/
 │
 ├── app/                          Next.js 14 App Router
 │   ├── layout.tsx                Root layout, Google Fonts preconnect
@@ -197,8 +197,8 @@ The newspaper aesthetic isn't cosmetic — it's the product. Key decisions:
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-username/good-news-daily.git
-cd good-news-daily
+git clone https://github.com/your-username/gentle-stream.git
+cd gentle-stream
 npm install
 ```
 

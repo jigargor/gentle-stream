@@ -89,7 +89,7 @@ async function main() {
   const startTime = Date.now();
 
   separator("═");
-  console.log("  The Good News Daily — Ingest Script");
+  console.log("  Gentle Stream — Ingest Script");
   separator("═");
   console.log();
 

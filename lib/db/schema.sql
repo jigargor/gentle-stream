@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- The Good News Daily — Database Schema
+-- Gentle Stream — Database Schema
 -- Run this once in the Supabase SQL editor (Dashboard → SQL Editor → New query)
 -- ─────────────────────────────────────────────────────────────────────────────
 

@@ -30,7 +30,7 @@ export default function LoadingSection() {
           fontSize: "0.9rem",
         }}
       >
-        Searching the world for good news&hellip;
+        Gathering stories for your stream&hellip;
       </p>
     </div>
   );

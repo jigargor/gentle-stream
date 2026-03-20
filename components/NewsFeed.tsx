@@ -11,7 +11,7 @@ import type { Article, NewsSection as NewsSectionType } from "@/lib/types";
 
 function getOrCreateUserId(): string {
   if (typeof window === "undefined") return "anonymous";
-  const key = "gnd_user_id";
+  const key = "gentle_stream_user_id";
   let id = localStorage.getItem(key);
   if (!id) {
     id = `anon_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -238,7 +238,7 @@ export default function NewsFeed() {
               fontStyle: "italic",
             }}
           >
-            Loading today&apos;s uplifting stories&hellip;
+            Loading today&apos;s stream&hellip;
           </div>
         )}
 
@@ -267,7 +267,7 @@ export default function NewsFeed() {
             letterSpacing: "0.05em",
           }}
         >
-          &copy; The Good News Daily &nbsp;&middot;&nbsp; Powered by AI
+          &copy; Gentle Stream &nbsp;&middot;&nbsp; Powered by AI
           &nbsp;&middot;&nbsp; Only the uplifting, only the inspiring
         </footer>
       </main>

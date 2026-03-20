@@ -22,6 +22,11 @@ import { runTaggerAgent } from "@/lib/agents/taggerAgent";
 
 const ANONYMOUS_USER_ID = "anonymous";
 
+function isDevLight(): boolean {
+  const v = process.env.DEV_LIGHT;
+  return v === "1" || v === "true";
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
@@ -51,6 +56,14 @@ export async function GET(request: NextRequest) {
 
     // Partial page: serve what we have — do not block the UI on live ingest
     if (result.articles.length > 0) {
+      return NextResponse.json(result);
+    }
+
+    // `npm run dev-light` sets DEV_LIGHT=1 — never run ingest/tagger from this route
+    if (isDevLight()) {
+      console.log(
+        `[/api/feed] DEV_LIGHT: skipping live ingest (no rows for "${result.category}")`
+      );
       return NextResponse.json(result);
     }
 

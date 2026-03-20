@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev-light": "cross-env DEV_LIGHT=1 next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -31,6 +32,7 @@
     "tsx": "^4.15.7",
     "typescript": "^5",
     "eslint": "^8",
-    "eslint-config-next": "14.2.5"
+    "eslint-config-next": "14.2.5",
+    "cross-env": "^7.0.3"
   }
 }

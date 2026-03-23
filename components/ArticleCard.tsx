@@ -68,14 +68,17 @@ export default function ArticleCard({
     const mq = window.matchMedia("(max-width: 768px)");
 
     function measure() {
+      const articleEl = articleRef.current;
+      const wrapEl = contentWrapRef.current;
+      if (!articleEl || !wrapEl) return;
       if (mq.matches) {
         setShowHeroGapGame(false);
         return;
       }
-      const ar = el.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
+      const ar = articleEl.getBoundingClientRect();
+      const wr = wrapEl.getBoundingClientRect();
       const usedFromTop = wr.bottom - ar.top;
-      const slack = el.clientHeight - usedFromTop;
+      const slack = articleEl.clientHeight - usedFromTop;
       setShowHeroGapGame(slack >= HERO_VERTICAL_GAP_PX);
     }
 

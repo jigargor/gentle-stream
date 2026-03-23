@@ -239,6 +239,11 @@ export default function SudokuCard({
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 
+  // Reset board when a new puzzle arrives (e.g. difficulty change without remounting GameSlot)
+  useEffect(() => {
+    dispatch({ type: "RESET", puzzle });
+  }, [puzzle, dispatch]);
+
   // Keyboard input (Shift+digit = toggle note without turning Notes mode on)
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {

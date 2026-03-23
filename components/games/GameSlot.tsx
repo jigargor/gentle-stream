@@ -33,7 +33,8 @@ export default function GameSlot({
   const [currentDifficulty, setCurrentDifficulty] = useState<Difficulty>(difficulty);
 
   const fetchPuzzle = useCallback(async (diff: Difficulty) => {
-    setLoading(true);
+    const isInitialLoad = puzzle === null;
+    if (isInitialLoad) setLoading(true);
     setError(null);
     try {
       const url = puzzleEndpoint(gameType, diff, category);
@@ -45,9 +46,9 @@ export default function GameSlot({
     } catch {
       setError("Could not load puzzle — try again.");
     } finally {
-      setLoading(false);
+      if (isInitialLoad) setLoading(false);
     }
-  }, [gameType, category]);
+  }, [gameType, category, puzzle]);
 
   useEffect(() => {
     fetchPuzzle(currentDifficulty);
@@ -58,7 +59,9 @@ export default function GameSlot({
     [fetchPuzzle]
   );
 
-  if (loading) {
+  // Full-height placeholder only on first load — swapping difficulty keeps the card
+  // mounted so the feed layout (and scroll position) does not jump.
+  if (loading && puzzle === null) {
     return (
       <div style={{
         borderTop: "3px double #1a1a1a",

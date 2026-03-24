@@ -20,6 +20,7 @@ import {
   getUntaggedArticlesForFeed,
 } from "../db/articles";
 import { getOrCreateUserProfile, markArticlesSeen } from "../db/users";
+import { getUserAffinityRows } from "../db/engagement";
 import type {
   FeedSelectionMode,
   StoredArticle,
@@ -27,6 +28,7 @@ import type {
 } from "../types";
 import type { Category } from "../constants";
 import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS } from "../constants";
+import { buildAffinityIndex, scoreArticleWithEngagement } from "../feed/recommendationScore";
 
 /** Section label when articles come from multiple categories (random backfill). */
 const MIXED_SECTION_LABEL = "Mixed";
@@ -161,6 +163,13 @@ export async function getRankedFeed(
   const { userId, category, sectionIndex, pageSize = 3, markSeen = true } = options;
 
   const profile = await getOrCreateUserProfile(userId);
+  let affinityIndex = new Map<string, number>();
+  try {
+    const affinityRows = await getUserAffinityRows(userId);
+    affinityIndex = buildAffinityIndex(affinityRows);
+  } catch (error) {
+    console.warn("[rankerAgent] Failed loading user affinity rows:", error);
+  }
   // Future: build `FeedSelectionContext` from profile + engagement signals here.
 
   // Label for this section (single category when filtered; primary pick when mixed)
@@ -226,7 +235,7 @@ export async function getRankedFeed(
         ? (() => {
             const scored = candidates.map((a) => ({
               article: a,
-              score: scoreArticle(a, profile),
+              score: scoreArticleWithEngagement(a, profile, affinityIndex),
             }));
             scored.sort((a, b) => b.score - a.score);
             return scored.slice(0, pageSize).map((s) => s.article);
@@ -244,51 +253,6 @@ export async function getRankedFeed(
     category: sectionCategoryLabel,
     selectionMode,
   };
-}
-
-// ─── Scoring ──────────────────────────────────────────────────────────────────
-
-function scoreArticle(article: StoredArticle, profile: UserProfile): number {
-  const base = article.qualityScore;
-
-  const categoryWeight =
-    profile.categoryWeights[article.category as Category] ??
-    DEFAULT_CATEGORY_WEIGHTS[article.category as Category] ??
-    0.125;
-
-  const emotionBoost = emotionMatch(article.emotions, profile.preferredEmotions);
-  const localeBoost = localeMatch(article.locale, profile.preferredLocales);
-  const freshness = freshnessFactor(article.fetchedAt);
-  const novelty = noveltyPenalty(article.usedCount);
-
-  return base * categoryWeight * 8 * emotionBoost * localeBoost * freshness * novelty;
-  // × 8 to re-scale: categoryWeight averages 0.125, × 8 brings it back to ≈ 1
-}
-
-function emotionMatch(articleEmotions: string[], preferred: string[]): number {
-  if (preferred.length === 0) return 1.0; // no preference = no penalty
-  const match = articleEmotions.some((e) => preferred.includes(e));
-  return match ? 1.3 : 0.85;
-}
-
-function localeMatch(articleLocale: string, preferred: string[]): number {
-  if (preferred.length === 0 || preferred.includes("global")) return 1.0;
-  if (preferred.includes(articleLocale) || articleLocale === "global") return 1.2;
-  return 0.8;
-}
-
-function freshnessFactor(fetchedAt: string): number {
-  const ageMs = Date.now() - new Date(fetchedAt).getTime();
-  const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  // Linear decay: day 0 = 1.0, day 7 = 0.3
-  return Math.max(0.3, 1.0 - ageDays * 0.1);
-}
-
-function noveltyPenalty(usedCount: number): number {
-  // Articles seen by many users get gradually penalised
-  if (usedCount < 10) return 1.0;
-  if (usedCount < 50) return 0.85;
-  return 0.6;
 }
 
 // ─── Category selection ───────────────────────────────────────────────────────

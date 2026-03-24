@@ -45,6 +45,13 @@ jobs:
       - run: npx tsx scripts/test-word-search.ts
       - run: npx tsx scripts/test-killer-nonogram.ts
       - run: npx tsx scripts/test-citations.ts
+      - run: npx tsx scripts/test-article-engagement-api.ts
+      - run: npx tsx scripts/test-recommendation-ranking.ts
+      - run: npx tsx scripts/test-engagement-guardrails.ts
+        env:
+          # Route imports lib/db/client.ts at load time; placeholders match npm run build.
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
 
   integration:
     name: DB integration tests
@@ -64,6 +71,14 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - run: npx tsx scripts/test-url-dedup.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - run: npx tsx scripts/test-article-engagement-db.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - run: npx tsx scripts/test-recommendation-e2e.ts
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

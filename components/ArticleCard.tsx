@@ -22,6 +22,7 @@ import {
   toClickableSourceUrl,
   uniqueSourceUrls,
 } from "@/lib/source-links";
+import { trackArticleEngagement } from "@/lib/engagement/client";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
@@ -127,12 +128,14 @@ interface ArticleCardProps {
   article: Article;
   layout?: LayoutVariant;
   index?: number;
+  sectionIndex?: number;
 }
 
 export default function ArticleCard({
   article,
   layout = "standard",
   index = 0,
+  sectionIndex = 0,
 }: ArticleCardProps) {
   const accentColor =
     CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
@@ -158,6 +161,12 @@ export default function ArticleCard({
   /** 401 → hide like (not signed in). */
   const [showLikeButton, setShowLikeButton] = useState(false);
   const [likeStatusLoaded, setLikeStatusLoaded] = useState(false);
+  const impressionLoggedRef = useRef(false);
+  const openLoggedRef = useRef(false);
+  const read30LoggedRef = useRef(false);
+  const read75LoggedRef = useRef(false);
+  const visibleSinceRef = useRef<number | null>(null);
+  const visibleAccumMsRef = useRef(0);
 
   /** Try AI image from prompt first, then deterministic stock photo, then text fallback */
   const [imageStage, setImageStage] = useState<
@@ -239,6 +248,43 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
+  const engagementContext = useMemo(
+    () => ({
+      source: "feed" as const,
+      sectionIndex,
+      cardIndex: index,
+      locale: "locale" in article ? article.locale : null,
+    }),
+    [article, index, sectionIndex]
+  );
+
+  const emitEngagement = useCallback(
+    (eventType: "impression" | "open" | "read_30s" | "read_75pct", eventValue?: number) => {
+      if (!articleId) return;
+      trackArticleEngagement({
+        articleId,
+        eventType,
+        eventValue: eventValue ?? null,
+        context: engagementContext,
+      });
+    },
+    [articleId, engagementContext]
+  );
+
+  const markOpen = useCallback(() => {
+    if (openLoggedRef.current) return;
+    openLoggedRef.current = true;
+    emitEngagement("open");
+  }, [emitEngagement]);
+
+  useEffect(() => {
+    impressionLoggedRef.current = false;
+    openLoggedRef.current = false;
+    read30LoggedRef.current = false;
+    read75LoggedRef.current = false;
+    visibleSinceRef.current = null;
+    visibleAccumMsRef.current = 0;
+  }, [articleId]);
 
   useEffect(() => {
     if (!articleId) {
@@ -281,6 +327,79 @@ export default function ArticleCard({
       cancelled = true;
     };
   }, [articleId]);
+
+  useEffect(() => {
+    if (!articleId) return;
+    const el = articleRef.current;
+    if (!el) return;
+
+    function updateReadProgress() {
+      if (read75LoggedRef.current) return;
+      const node = articleRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      const vh = window.innerHeight;
+      if (rect.bottom <= 0 || rect.top >= vh) return;
+
+      const viewedBottom = vh - rect.top;
+      const ratio = Math.max(0, Math.min(1, viewedBottom / Math.max(rect.height, 1)));
+      if (ratio >= 0.75) {
+        read75LoggedRef.current = true;
+        emitEngagement("read_75pct", ratio);
+      }
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        const isVisible = entry.isIntersecting && entry.intersectionRatio >= 0.5;
+        if (isVisible) {
+          if (!impressionLoggedRef.current) {
+            impressionLoggedRef.current = true;
+            emitEngagement("impression", entry.intersectionRatio);
+          }
+          if (visibleSinceRef.current == null) visibleSinceRef.current = Date.now();
+          updateReadProgress();
+          return;
+        }
+
+        if (visibleSinceRef.current != null) {
+          visibleAccumMsRef.current += Date.now() - visibleSinceRef.current;
+          visibleSinceRef.current = null;
+        }
+      },
+      { threshold: [0, 0.5, 0.75] }
+    );
+    observer.observe(el);
+
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const activeMs =
+        visibleSinceRef.current == null ? 0 : now - visibleSinceRef.current;
+      const totalVisibleMs = visibleAccumMsRef.current + activeMs;
+      if (!read30LoggedRef.current && totalVisibleMs >= 30_000) {
+        read30LoggedRef.current = true;
+        emitEngagement("read_30s", totalVisibleMs / 1000);
+      }
+      updateReadProgress();
+    }, 1000);
+
+    const onScroll = () => updateReadProgress();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+
+    return () => {
+      observer.disconnect();
+      window.clearInterval(timer);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (visibleSinceRef.current != null) {
+        visibleAccumMsRef.current += Date.now() - visibleSinceRef.current;
+        visibleSinceRef.current = null;
+      }
+    };
+  }, [articleId, emitEngagement]);
 
   useEffect(() => {
     if (!articleId) {
@@ -495,6 +614,7 @@ export default function ArticleCard({
             onMouseLeave={(e) => {
               e.currentTarget.style.color = "#0d0d0d";
             }}
+            onClick={() => markOpen()}
           >
             {article.headline}
           </a>
@@ -777,6 +897,7 @@ export default function ArticleCard({
                 target="_blank"
                 rel="noopener noreferrer"
                 style={sourceLinkStyle}
+                onClick={() => markOpen()}
               >
                 {sourceLinkLabel(u)}
               </a>

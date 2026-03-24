@@ -15,7 +15,12 @@
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",
     "games:word-pool": "tsx scripts/word-pool-ingest.ts",
     "games:blocked-crosswords": "tsx scripts/blocked-crossword-ingest.ts",
-    "games:test-connections": "tsx scripts/test-connections.ts"
+    "games:test-connections": "tsx scripts/test-connections.ts",
+    "test:engagement:api": "tsx scripts/test-article-engagement-api.ts",
+    "test:engagement:db": "tsx -r dotenv/config scripts/test-article-engagement-db.ts dotenv_config_path=.env.local",
+    "test:reco:ranking": "tsx scripts/test-recommendation-ranking.ts",
+    "test:reco:e2e": "tsx -r dotenv/config scripts/test-recommendation-e2e.ts dotenv_config_path=.env.local",
+    "test:engagement:guardrails": "tsx scripts/test-engagement-guardrails.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

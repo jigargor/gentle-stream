@@ -121,6 +121,35 @@ async function findUrlConflict(
   return data && data.length > 0 ? (data[0] as { headline: string }).headline : null;
 }
 
+/**
+ * Which of the given fingerprints already exist in `articles`.
+ * Uses one `.eq()` per distinct value instead of `.in()` so characters such as `&`
+ * in category names (e.g. "Science & Discovery") are not mis-parsed in PostgREST
+ * filter URLs.
+ */
+async function fetchExistingFingerprints(fps: string[]): Promise<Set<string>> {
+  const unique = [...new Set(fps)];
+  if (unique.length === 0) return new Set();
+
+  const rows = await Promise.all(
+    unique.map(async (fp) => {
+      const { data, error } = await db
+        .from("articles")
+        .select("fingerprint")
+        .eq("fingerprint", fp)
+        .limit(1);
+
+      if (error) {
+        throw new Error(`insertArticles: fingerprint lookup: ${error.message}`);
+      }
+      const row = data?.[0] as { fingerprint: string } | undefined;
+      return row?.fingerprint;
+    })
+  );
+
+  return new Set(rows.filter((fp): fp is string => fp != null));
+}
+
 // ─── Public DB helpers ────────────────────────────────────────────────────────
 
 /**
@@ -151,14 +180,7 @@ export async function insertArticles(
   }));
 
   const fps = candidates.map((c) => c.fp);
-  const { data: existingFpRows } = await db
-    .from("articles")
-    .select("fingerprint")
-    .in("fingerprint", fps);
-
-  const existingFps = new Set(
-    (existingFpRows ?? []).map((r: { fingerprint: string }) => r.fingerprint)
-  );
+  const existingFps = await fetchExistingFingerprints(fps);
 
   // ── Layer 2: URL overlap check (per-candidate) ────────────────────────────
   const novel: typeof candidates = [];

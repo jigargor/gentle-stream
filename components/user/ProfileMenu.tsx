@@ -8,11 +8,8 @@ import {
   nearestPresetValue,
 } from "@/lib/user/feed-settings";
 import { isCreator } from "@/lib/user/creator";
-import type { UserProfile, SavedArticleListItem, UserGameStats } from "@/lib/types";
+import type { UserProfile, UserGameStats } from "@/lib/types";
 import { AvatarInput } from "./AvatarInput";
-
-/** Max rows in the profile dropdown; full list lives at /me/saved */
-const DROPDOWN_SAVED_LIMIT = 8;
 
 interface ProfileMenuProps {
   userEmail: string;
@@ -43,7 +40,6 @@ function formatDuration(totalSec: number): string {
 export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [saves, setSaves] = useState<SavedArticleListItem[]>([]);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -89,9 +85,8 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [pr, sv, st] = await Promise.all([
+      const [pr, st] = await Promise.all([
         fetch("/api/user/profile", { credentials: "include" }),
-        fetch("/api/user/article-saves", { credentials: "include" }),
         fetch("/api/user/game-stats", { credentials: "include" }),
       ]);
 
@@ -104,11 +99,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
         });
       } else {
         setLoadError("Could not load profile.");
-      }
-
-      if (sv.ok) {
-        const j = (await sv.json()) as { items: SavedArticleListItem[] };
-        setSaves(j.items ?? []);
       }
 
       if (st.ok) {
@@ -192,14 +182,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     } finally {
       setSaving(false);
     }
-  }
-
-  async function removeSave(id: string) {
-    await fetch(`/api/user/article-saves?id=${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    setSaves((prev) => prev.filter((s) => s.id !== id));
   }
 
   const currentRatio = profile?.gameRatio ?? 0.2;
@@ -555,103 +537,44 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
-            <Link
-              href="/me/saved"
-              onClick={() => setOpen(false)}
+            <h3
               style={{
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.78rem",
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#1a472a",
-                textDecoration: "underline",
-                textUnderlineOffset: "3px",
-                display: "inline-block",
+                color: "#555",
               }}
             >
               Saved articles
+            </h3>
+            <Link
+              href="/me/saved"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+              }}
+            >
+              Open saved library
             </Link>
-            {saves.length === 0 ? (
-              <p
-                style={{
-                  fontStyle: "italic",
-                  color: "#aaa",
-                  fontSize: "0.78rem",
-                  margin: "0.35rem 0 0",
-                }}
-              >
-                Use <strong>Save</strong> on an article card.
-              </p>
-            ) : (
-              <>
-                <ul style={{ listStyle: "none", margin: "0.35rem 0 0", padding: 0 }}>
-                  {saves.slice(0, DROPDOWN_SAVED_LIMIT).map((s) => (
-                    <li
-                      key={s.id}
-                      style={{
-                        borderBottom: "1px solid #e8e4dc",
-                        padding: "0.4rem 0",
-                        fontSize: "0.75rem",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: "0.35rem",
-                          alignItems: "flex-start",
-                        }}
-                      >
-                        <Link
-                          href={`/me/read/${encodeURIComponent(s.articleId)}`}
-                          onClick={() => setOpen(false)}
-                          style={{
-                            color: "#1a472a",
-                            fontWeight: 600,
-                            textDecoration: "none",
-                            lineHeight: 1.35,
-                          }}
-                        >
-                          {s.articleTitle}
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => void removeSave(s.id)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#999",
-                            cursor: "pointer",
-                            fontSize: "0.65rem",
-                            textTransform: "uppercase",
-                            flexShrink: 0,
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {saves.length > DROPDOWN_SAVED_LIMIT ? (
-                  <Link
-                    href="/me/saved"
-                    onClick={() => setOpen(false)}
-                    style={{
-                      display: "inline-block",
-                      marginTop: "0.45rem",
-                      fontFamily: "'IM Fell English', Georgia, serif",
-                      fontSize: "0.72rem",
-                      color: "#666",
-                      textDecoration: "underline",
-                    }}
-                  >
-                    View all {saves.length} saved →
-                  </Link>
-                ) : null}
-              </>
-            )}
+            <p
+              style={{
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#888",
+                margin: "0.35rem 0 0",
+                lineHeight: 1.4,
+              }}
+            >
+              Use <strong>Save</strong> on an article card; manage the full list here.
+            </p>
           </section>
 
           <section style={{ marginBottom: "0.75rem" }}>

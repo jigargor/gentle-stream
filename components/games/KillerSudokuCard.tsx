@@ -17,6 +17,8 @@ const MAX_MISTAKES = 3;
 
 interface KillerMistakeUndoSnapshot {
   values: number[][];
+  /** Mistake count before the wrong move that pushed this snapshot. */
+  mistakes: number;
 }
 
 interface BoardState {
@@ -180,7 +182,7 @@ function reducer(
       const mistakeUndoStack = !correct
         ? [
             ...state.mistakeUndoStack,
-            { values: cloneValues(state.values) },
+            { values: cloneValues(state.values), mistakes: state.mistakes },
           ]
         : state.mistakeUndoStack;
 
@@ -205,7 +207,10 @@ function reducer(
         state.mistakeUndoStack[state.mistakeUndoStack.length - 1];
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
-      const mistakes = Math.max(0, state.mistakes - 1);
+      const mistakes = Math.min(
+        MAX_MISTAKES,
+        Math.max(0, snap.mistakes)
+      );
       const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);

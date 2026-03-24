@@ -22,6 +22,8 @@ type NoteMask = number;
 interface MistakeUndoSnapshot {
   values: number[][];
   notes: NoteMask[][];
+  /** Mistake count *before* the wrong move that pushed this snapshot (authoritative on undo). */
+  mistakes: number;
 }
 
 interface BoardState {
@@ -51,6 +53,7 @@ type Action =
       elapsedSecs: number;
       startedAt: number | null;
       mistakes?: number;
+      mistakeUndoStack?: unknown;
     };
 
 export interface SudokuCloudSlice {
@@ -59,6 +62,7 @@ export interface SudokuCloudSlice {
   elapsedSecs: number;
   startedAt: number | null;
   mistakes?: number;
+  mistakeUndoStack?: MistakeUndoSnapshot[];
 }
 
 interface SudokuCardProps {
@@ -172,6 +176,39 @@ function cloneValues(values: number[][]): number[][] {
   return values.map((row) => [...row]);
 }
 
+function isSudokuGrid9x9(v: unknown): v is number[][] {
+  if (!Array.isArray(v) || v.length !== 9) return false;
+  return v.every(
+    (row) =>
+      Array.isArray(row) &&
+      row.length === 9 &&
+      row.every((x) => typeof x === "number" && Number.isFinite(x))
+  );
+}
+
+/** Restore undo stack from cloud JSON (tolerates snapshots without per-entry `mistakes`). */
+function coerceMistakeUndoStackFromCloud(raw: unknown): MistakeUndoSnapshot[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MistakeUndoSnapshot[] = [];
+  for (let i = 0; i < raw.length && i < MAX_MISTAKES; i++) {
+    const row = raw[i];
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    if (!isSudokuGrid9x9(o.values) || !isSudokuGrid9x9(o.notes)) continue;
+    const m = o.mistakes;
+    const mistakes =
+      typeof m === "number" && Number.isFinite(m) && m >= 0 && m <= MAX_MISTAKES
+        ? Math.min(MAX_MISTAKES, Math.floor(m))
+        : i;
+    out.push({
+      values: (o.values as number[][]).map((r) => [...r]),
+      notes: (o.notes as number[][]).map((r) => [...r]),
+      mistakes,
+    });
+  }
+  return out;
+}
+
 /** True if `digit` is already placed in the same row, column, or 3×3 box (excluding r,c). */
 function digitAppearsInSudokuPeers(
   values: number[][],
@@ -273,6 +310,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
             {
               values: cloneValues(state.values),
               notes: cloneNotes(state.notes),
+              mistakes: state.mistakes,
             },
           ]
         : state.mistakeUndoStack;
@@ -310,7 +348,10 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
       const notes = cloneNotes(snap.notes);
-      const mistakes = Math.max(0, state.mistakes - 1);
+      const mistakes = Math.min(
+        MAX_MISTAKES,
+        Math.max(0, snap.mistakes)
+      );
       const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
@@ -362,9 +403,17 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const notes = action.notes.map((row) => [...row]);
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
+      const mistakeUndoStack = coerceMistakeUndoStackFromCloud(
+        action.mistakeUndoStack
+      );
+      const typedMistakes =
+        typeof action.mistakes === "number"
+          ? Math.min(MAX_MISTAKES, Math.max(0, action.mistakes))
+          : 0;
+      // At least stack depth so resume + undo match; fixes saves that had grid errors but mistakes omitted.
       const mistakes = Math.min(
         MAX_MISTAKES,
-        Math.max(0, action.mistakes ?? 0)
+        Math.max(typedMistakes, mistakeUndoStack.length)
       );
       const failed = mistakes >= MAX_MISTAKES && !completed;
       return {
@@ -377,7 +426,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
         completed,
         failed,
         mistakes,
-        mistakeUndoStack: [],
+        mistakeUndoStack,
         selected: null,
       };
     }
@@ -445,6 +494,7 @@ export default function SudokuCard({
           elapsedSecs: initialCloudSlice.elapsedSecs,
           startedAt: initialCloudSlice.startedAt,
           mistakes: initialCloudSlice.mistakes,
+          mistakeUndoStack: initialCloudSlice.mistakeUndoStack,
         });
         boot.cloudHydrated = true;
       }
@@ -460,6 +510,7 @@ export default function SudokuCard({
         elapsedSecs: initialCloudSlice.elapsedSecs,
         startedAt: initialCloudSlice.startedAt,
         mistakes: initialCloudSlice.mistakes,
+        mistakeUndoStack: initialCloudSlice.mistakeUndoStack,
       });
       boot.cloudHydrated = true;
     }
@@ -510,6 +561,7 @@ export default function SudokuCard({
               elapsedSecs: s.elapsedSecs,
               startedAt: s.startedAt,
               mistakes: s.mistakes,
+              mistakeUndoStack: s.mistakeUndoStack,
             },
           },
         }),

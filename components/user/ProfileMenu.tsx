@@ -49,7 +49,39 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     displayName: "",
     username: "",
   });
+  /** Masthead avatar/name: false until initial GET /api/user/profile finishes */
+  const [headerLoading, setHeaderLoading] = useState(true);
+  /** After profile loads, hide shimmer once the image has painted (or failed). */
+  const [avatarPainted, setAvatarPainted] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!profile?.avatarUrl) setAvatarPainted(true);
+    else setAvatarPainted(false);
+  }, [profile?.avatarUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/user/profile", { credentials: "include" });
+        if (cancelled) return;
+        if (res.ok) {
+          const data = (await res.json()) as UserProfile;
+          setProfile(data);
+          setProfileForm({
+            displayName: data.displayName ?? "",
+            username: data.username ?? "",
+          });
+        }
+      } finally {
+        if (!cancelled) setHeaderLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
@@ -197,7 +229,8 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label="Open profile menu"
+        aria-busy={headerLoading}
+        aria-label={headerLoading ? "Profile, loading" : "Open profile menu"}
         onClick={() => setOpen((o) => !o)}
         style={{
           display: "flex",
@@ -210,18 +243,45 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
           textAlign: "left",
         }}
       >
-        {profile?.avatarUrl ? (
-          <img
-            src={profile.avatarUrl}
-            alt=""
-            width={36}
-            height={36}
-            style={{
-              borderRadius: "50%",
-              objectFit: "cover",
-              border: "1px solid #ccc",
-            }}
+        {headerLoading ? (
+          <div
+            className="profile-header-shimmer profile-header-skeleton-avatar"
+            aria-hidden
           />
+        ) : profile?.avatarUrl ? (
+          <div
+            style={{
+              position: "relative",
+              width: 36,
+              height: 36,
+              flexShrink: 0,
+            }}
+          >
+            {!avatarPainted && (
+              <div
+                className="profile-header-shimmer profile-header-skeleton-avatar"
+                style={{ position: "absolute", inset: 0 }}
+                aria-hidden
+              />
+            )}
+            <img
+              src={profile.avatarUrl}
+              alt=""
+              width={36}
+              height={36}
+              onLoad={() => setAvatarPainted(true)}
+              onError={() => setAvatarPainted(true)}
+              style={{
+                position: "relative",
+                display: "block",
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: "1px solid #ccc",
+                opacity: avatarPainted ? 1 : 0,
+                transition: "opacity 0.28s ease",
+              }}
+            />
+          </div>
         ) : (
           <div
             style={{
@@ -249,33 +309,48 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
             lineHeight: 1.2,
           }}
         >
-          <span
-            style={{
-              fontFamily: "'Playfair Display', Georgia, serif",
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: "#1a1a1a",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: "min(36vw, 160px)",
-            }}
-          >
-            {label}
-          </span>
-          <span
-            style={{
-              fontFamily: "'IM Fell English', Georgia, serif",
-              fontSize: "0.62rem",
-              color: "#888",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: "min(36vw, 160px)",
-            }}
-          >
-            {sublabel}
-          </span>
+          {headerLoading ? (
+            <>
+              <span
+                className="profile-header-shimmer profile-header-skeleton-line profile-header-skeleton-line--primary"
+                aria-hidden
+              />
+              <span
+                className="profile-header-shimmer profile-header-skeleton-line profile-header-skeleton-line--secondary"
+                aria-hidden
+              />
+            </>
+          ) : (
+            <>
+              <span
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  color: "#1a1a1a",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "min(36vw, 160px)",
+                }}
+              >
+                {label}
+              </span>
+              <span
+                style={{
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.62rem",
+                  color: "#888",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "min(36vw, 160px)",
+                }}
+              >
+                {sublabel}
+              </span>
+            </>
+          )}
         </span>
         <span style={{ color: "#999", fontSize: "0.55rem" }} aria-hidden>
           ▾

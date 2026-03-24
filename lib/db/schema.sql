@@ -52,6 +52,9 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   -- Personalisation weights (JSON object: category → weight 0–1)
   category_weights  JSONB   NOT NULL DEFAULT '{}',
   game_ratio        FLOAT   NOT NULL DEFAULT 0.2,
+  -- general = reader; creator = future self-publishing (promoted server-side only)
+  user_role         TEXT    NOT NULL DEFAULT 'general'
+                      CHECK (user_role IN ('general', 'creator')),
 
   -- Arrays stored as JSON for simplicity
   preferred_emotions TEXT[] NOT NULL DEFAULT '{}',

@@ -1,5 +1,5 @@
 import { db } from "./client";
-import type { UserProfile } from "../types";
+import type { UserProfile, UserRole } from "../types";
 import type { Category } from "../constants";
 import {
   CATEGORIES,
@@ -11,6 +11,7 @@ interface UserProfileRow {
   user_id: string;
   category_weights: Record<string, number>;
   game_ratio: number;
+  user_role?: string;
   preferred_emotions: string[];
   preferred_locales: string[];
   seen_article_ids: string[];
@@ -27,10 +28,14 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     }
   }
 
+  const role: UserRole =
+    row.user_role === "creator" ? "creator" : "general";
+
   return {
     userId: row.user_id,
     categoryWeights: weights,
     gameRatio: row.game_ratio ?? DEFAULT_GAME_RATIO,
+    userRole: role,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
     seenArticleIds: row.seen_article_ids ?? [],
@@ -58,6 +63,7 @@ export async function getOrCreateUserProfile(
     user_id: userId,
     category_weights: DEFAULT_CATEGORY_WEIGHTS,
     game_ratio: DEFAULT_GAME_RATIO,
+    user_role: "general" as const,
     preferred_emotions: [],
     preferred_locales: ["global"],
     seen_article_ids: [],

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead from "./Masthead";
-import { SignOutButton } from "./auth/SignOutButton";
+import { UserAccountMenu } from "./user/UserAccountMenu";
 import CategoryBar from "./CategoryBar";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
@@ -75,12 +75,39 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   useEffect(() => {
     userIdRef.current = userId;
 
-    // Load user's game ratio preference if stored locally
-    const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
-    if (storedRatio !== null) {
-      const ratio = parseFloat(storedRatio);
-      if (!isNaN(ratio)) gameRatioRef.current = ratio;
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/user/preferences", {
+          credentials: "include",
+        });
+        if (res.ok) {
+          const profile = await res.json();
+          if (cancelled) return;
+          if (
+            typeof profile.gameRatio === "number" &&
+            !Number.isNaN(profile.gameRatio)
+          ) {
+            const r = Math.min(1, Math.max(0, profile.gameRatio));
+            gameRatioRef.current = r;
+            localStorage.setItem("gentle_stream_game_ratio", String(r));
+          }
+          return;
+        }
+      } catch {
+        /* offline or unauthenticated preview */
+      }
+      if (cancelled) return;
+      const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
+      if (storedRatio !== null) {
+        const ratio = parseFloat(storedRatio);
+        if (!isNaN(ratio)) gameRatioRef.current = ratio;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
@@ -242,25 +269,28 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     loadMore(next);
   };
 
+  const handleGameRatioSaved = useCallback(
+    (ratio: number) => {
+      gameRatioRef.current = ratio;
+      localStorage.setItem("gentle_stream_game_ratio", String(ratio));
+      setSections([]);
+      sectionCountRef.current = 0;
+      loadingRef.current = false;
+      setError(null);
+      void loadMore();
+    },
+    [loadMore]
+  );
+
   return (
     <div style={{ background: "#ede9e1", minHeight: "100vh" }}>
       <Masthead
         accountSlot={
           userEmail ? (
-            <>
-              <span
-                title={userEmail}
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  fontStyle: "normal",
-                }}
-              >
-                {userEmail}
-              </span>
-              <SignOutButton />
-            </>
+            <UserAccountMenu
+              userEmail={userEmail}
+              onGameRatioSaved={handleGameRatioSaved}
+            />
           ) : undefined
         }
       />

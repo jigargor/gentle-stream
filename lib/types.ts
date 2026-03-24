@@ -39,10 +39,15 @@ export type ArticleSentiment =
   | "triumphant";
 
 // ─── User profile ─────────────────────────────────────────────────────────────
+
+/** Reader vs future publisher (Substack-style). Only `general` is assignable from the app API. */
+export type UserRole = "general" | "creator";
+
 export interface UserProfile {
   userId: string;
   categoryWeights: Record<Category, number>; // must sum to ~1.0
   gameRatio: number;                          // 0.0–1.0, portion of feed that is games
+  userRole: UserRole;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.

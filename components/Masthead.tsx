@@ -55,7 +55,7 @@ export default function Masthead({ accountSlot }: MastheadProps) {
             alignItems: "center",
             justifyContent: "flex-end",
             gap: "0.35rem",
-            maxWidth: "min(42vw, 220px)",
+            maxWidth: "min(72vw, 420px)",
           }}
         >
           {accountSlot ?? <>Vol. I &nbsp;&middot;&nbsp; Est. 2025</>}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 function safeNextPath(raw: string | null): string {
@@ -9,13 +8,21 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
-export function LoginForm() {
-  const searchParams = useSearchParams();
+export interface LoginFormProps {
+  /** From `?next=` — passed by the server page to avoid `useSearchParams` + Suspense chunk issues in dev. */
+  initialNext?: string | null;
+  initialAuthError?: string | null;
+}
+
+export function LoginForm({
+  initialNext = null,
+  initialAuthError = null,
+}: LoginFormProps) {
   const nextPath = useMemo(
-    () => safeNextPath(searchParams.get("next")),
-    [searchParams]
+    () => safeNextPath(initialNext ?? null),
+    [initialNext]
   );
-  const authError = searchParams.get("error");
+  const authError = initialAuthError;
 
   const [email, setEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false);

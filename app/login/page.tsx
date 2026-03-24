@@ -1,29 +1,25 @@
-import { Suspense } from "react";
 import { LoginForm } from "@/components/auth/LoginForm";
 
-function LoginFallback() {
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#ede9e1",
-        fontFamily: "'IM Fell English', Georgia, serif",
-        fontStyle: "italic",
-        color: "#999",
-      }}
-    >
-      Loading&hellip;
-    </div>
-  );
+function firstParam(
+  v: string | string[] | undefined
+): string | undefined {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? v[0] : v;
 }
 
-export default function LoginPage() {
+/**
+ * Reads `searchParams` on the server so the client bundle does not need
+ * `useSearchParams` (avoids fragile Suspense/async chunks in Next dev on Windows).
+ */
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams: Record<string, string | string[] | undefined>;
+}) {
   return (
-    <Suspense fallback={<LoginFallback />}>
-      <LoginForm />
-    </Suspense>
+    <LoginForm
+      initialNext={firstParam(searchParams.next) ?? null}
+      initialAuthError={firstParam(searchParams.error) ?? null}
+    />
   );
 }

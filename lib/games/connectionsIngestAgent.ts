@@ -25,6 +25,7 @@
 
 import { db } from "../db/client";
 import { trickinessScore } from "./connectionsWordProperties";
+import { ensureConnectionsIdentity } from "./connectionsUniqueness";
 import type { Category } from "../constants";
 import { CATEGORIES } from "../constants";
 
@@ -51,6 +52,8 @@ export interface ConnectionsPuzzle {
   difficulty: "medium";
   // Misdirection metadata — shown post-solve
   redHerrings: { word: string; couldAlsoBelong: string }[];
+  puzzleId?: string;
+  uniquenessSignature?: string;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -118,7 +121,11 @@ async function generateOnePuzzle(
 
   // Stage 4: self-critique and validate
   const validated = await stage4_critique(apiKey, assembled);
-  return validated;
+  if (!validated) return null;
+  return ensureConnectionsIdentity({
+    ...validated,
+    category,
+  });
 }
 
 // ─── Stage 1: Theme generation ────────────────────────────────────────────────

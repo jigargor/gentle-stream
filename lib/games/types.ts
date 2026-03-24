@@ -133,6 +133,10 @@ export interface ConnectionsPuzzle {
   category: string;
   difficulty: "medium";
   redHerrings: { word: string; couldAlsoBelong: string }[];
+  /** Content-hash id to avoid repeating the same puzzle for users. */
+  puzzleId?: string;
+  /** Alias used by generic feed/game uniqueness memory. */
+  uniquenessSignature?: string;
 }
 
 // ─── Feed slot ────────────────────────────────────────────────────────────────

@@ -30,7 +30,10 @@ interface GameSlotProps {
 }
 
 type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle | ConnectionsPuzzle;
-type PuzzleWithUniqueness = AnyPuzzle & { uniquenessSignature?: string };
+type PuzzleWithUniqueness = AnyPuzzle & {
+  uniquenessSignature?: string;
+  puzzleId?: string;
+};
 
 const RECENT_SIGNATURE_LIMIT = 12;
 
@@ -50,10 +53,15 @@ function readRecentSignatures(gameType: GameType): string[] {
   }
 }
 
-function writeRecentSignature(gameType: GameType, signature?: string): void {
-  if (!signature) return;
-  const prev = readRecentSignatures(gameType).filter((s) => s !== signature);
-  const next = [...prev, signature].slice(-RECENT_SIGNATURE_LIMIT);
+function writeRecentSignature(
+  gameType: GameType,
+  signature?: string,
+  puzzleId?: string
+): void {
+  const token = signature ?? puzzleId;
+  if (!token) return;
+  const prev = readRecentSignatures(gameType).filter((s) => s !== token);
+  const next = [...prev, token].slice(-RECENT_SIGNATURE_LIMIT);
   try {
     localStorage.setItem(signatureStorageKey(gameType), JSON.stringify(next));
   } catch {
@@ -121,7 +129,7 @@ export default function GameSlot({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
         setPuzzle(data);
-        writeRecentSignature(gameType, data.uniquenessSignature);
+        writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
         setCurrentDifficulty(diff);
       } catch {
         setError("Could not load puzzle — try again.");
@@ -187,7 +195,7 @@ export default function GameSlot({
         const data = (await res.json()) as PuzzleWithUniqueness;
         if (!cancelled) {
           setPuzzle(data);
-          writeRecentSignature(gameType, data.uniquenessSignature);
+          writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
           setSudokuCloud(null);
           setWordCloud(null);
           setCurrentDifficulty(difficulty);

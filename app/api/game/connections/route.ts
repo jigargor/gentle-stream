@@ -15,24 +15,41 @@ import {
   runConnectionsIngest,
   type ConnectionsPuzzle,
 } from "@/lib/games/connectionsIngestAgent";
+import { ensureConnectionsIdentity } from "@/lib/games/connectionsUniqueness";
 import type { Category } from "@/lib/constants";
 import { CATEGORIES } from "@/lib/constants";
 
 export const maxDuration = 60; // Vercel max for hobby plan
 
+function parseExcludeSignatures(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 24);
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const rawCategory = searchParams.get("category") ?? undefined;
+  const excludeSignatures = parseExcludeSignatures(
+    searchParams.get("excludeSignatures")
+  );
   const category = rawCategory && CATEGORIES.includes(rawCategory as Category)
     ? rawCategory
     : undefined;
 
   // ── 1. Try pool ─────────────────────────────────────────────────────────────
   try {
-    const row = await getGameFromPool("connections", category);
+    const row = await getGameFromPool("connections", category, {
+      randomTieBreak: true,
+      excludeSignatures,
+    });
     if (row) {
       void markGameUsed(row.id);
-      return NextResponse.json({ ...(row.payload as ConnectionsPuzzle), fromPool: true });
+      const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
+      return NextResponse.json({ ...puzzle, fromPool: true });
     }
   } catch (e) {
     console.warn("[/api/game/connections] Pool fetch failed:", e);
@@ -61,13 +78,17 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch the freshly generated puzzle
-    const row = await getGameFromPool("connections", category);
+    const row = await getGameFromPool("connections", category, {
+      randomTieBreak: true,
+      excludeSignatures,
+    });
     if (!row) {
       return NextResponse.json({ error: "Generation succeeded but fetch failed" }, { status: 500 });
     }
 
     void markGameUsed(row.id);
-    return NextResponse.json({ ...(row.payload as ConnectionsPuzzle), fromPool: false });
+    const puzzle = ensureConnectionsIdentity(row.payload as ConnectionsPuzzle);
+    return NextResponse.json({ ...puzzle, fromPool: false });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Generation failed";
     return NextResponse.json({ error: message }, { status: 500 });

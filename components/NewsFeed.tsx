@@ -11,6 +11,7 @@ import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
 import type { Article, FeedSection, ArticleFeedSection, GameFeedSection } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
+import { randomFeedGamePick } from "@/lib/games/feedPick";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -40,13 +41,6 @@ function shouldBeGame(sectionIndex: number, gameRatio: number): boolean {
   if (gameRatio >= 1) return true;
   const period = Math.round(1 / gameRatio);
   return sectionIndex % period === period - 1;
-}
-
-/** Alternate game types across game slots so the feed stays varied */
-function pickGameType(sectionIndex: number): "sudoku" | "word_search" {
-  // Count how many game slots have appeared before this index
-  // (approximate — just use the section index directly for simplicity)
-  return sectionIndex % 2 === 0 ? "sudoku" : "word_search";
 }
 
 const FEED_FETCH_TIMEOUT_MS = 90_000;
@@ -105,11 +99,11 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
     // ── Decide: game slot or article section? ────────────────────────────────
     if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-      const gameType = pickGameType(currentIndex);
+      const { gameType, difficulty } = randomFeedGamePick();
       const gameSection: GameFeedSection = {
         sectionType: "game",
         gameType,
-        difficulty: (["easy", "medium", "hard"] as const)[currentIndex % 3],
+        difficulty,
         index: currentIndex,
         // Pass the last seen article category for word bank theming
         category: lastArticleCategoryRef.current,

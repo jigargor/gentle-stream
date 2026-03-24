@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_COLORS } from "@/lib/constants";
 import GameSlot from "./games/GameSlot";
+import { embeddedGamePickFromSeed } from "@/lib/games/feedPick";
 import type { Article, LayoutVariant } from "@/lib/types";
 import {
   picsumFallbackUrl,
@@ -93,6 +94,11 @@ export default function ArticleCard({
       mq.removeEventListener("change", measure);
     };
   }, [isHero, articleSeed]);
+
+  const embeddedGame = useMemo(
+    () => embeddedGamePickFromSeed(articleSeed),
+    [articleSeed]
+  );
 
   const heroImageSrc = useMemo(() => {
     if (!article.imagePrompt?.trim()) return null;
@@ -432,7 +438,12 @@ export default function ArticleCard({
           >
             A puzzle for the space beside today&apos;s story
           </p>
-          <GameSlot gameType="sudoku" difficulty="medium" embedded />
+          <GameSlot
+            gameType={embeddedGame.gameType}
+            difficulty={embeddedGame.difficulty}
+            category={article.category}
+            embedded
+          />
         </div>
       )}
     </article>

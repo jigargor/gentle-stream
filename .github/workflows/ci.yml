@@ -1,8 +1,13 @@
 # ci.yml
 #
-# Runs on every PR and on pushes to all branches except main (main runs CI once
-# inside deploy.yml to avoid duplicate runs). Includes DB integration on same-repo
-# PRs, pushes to develop/feature branches, etc.; skips integration on fork PRs.
+# Triggers (avoids duplicate runs when a branch has an open PR: both `push` and
+# `pull_request` would fire for the same commit).
+#
+# - pull_request — all PRs; primary signal while iterating on a feature branch.
+# - push (develop only) — validates develop after a merge or a direct push; main
+#   is excluded here and validated in deploy.yml instead.
+#
+# If you push to a branch before opening a PR, CI does not run until the PR exists.
 #
 # Deliberately not covered in integration (see ci-reusable / former integration.yml):
 #   - Ingest / LLM (expensive, non-deterministic)
@@ -13,8 +18,8 @@ name: CI
 on:
   pull_request:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - develop
 
 permissions:
   contents: read

@@ -22,6 +22,23 @@ interface PoolRow {
   category: string | null;
 }
 
+export function makeWordSearchSignature(words: string[]): string {
+  const normalized = Array.from(
+    new Set(words.map((w) => w.toUpperCase().trim()).filter(Boolean))
+  ).sort();
+  return normalized.join("|");
+}
+
+function signatureOverlapRatio(aSig: string, bSig: string): number {
+  if (!aSig || !bSig) return 0;
+  const a = new Set(aSig.split("|"));
+  const b = new Set(bSig.split("|"));
+  if (a.size === 0 || b.size === 0) return 0;
+  let overlap = 0;
+  for (const w of a) if (b.has(w)) overlap++;
+  return overlap / Math.min(a.size, b.size);
+}
+
 function normalizeCategory(category: string | undefined): string | null {
   if (!category || !category.trim()) return null;
   return CATEGORIES.includes(category as Category) ? category : null;
@@ -170,7 +187,8 @@ function jitter(): number {
 export async function selectWordsForUserPuzzle(
   userId: string,
   difficulty: Difficulty,
-  feedCategory: string | undefined
+  feedCategory: string | undefined,
+  options?: { avoidSignatures?: string[] }
 ): Promise<string[] | null> {
   await seedGameWordPoolFromStaticIfEmpty();
 
@@ -206,7 +224,35 @@ export async function selectWordsForUserPuzzle(
     if (chosen.length >= need) break;
   }
 
-  return chosen.length >= config.wordCount ? chosen : null;
+  if (chosen.length < config.wordCount) return null;
+
+  const avoid = (options?.avoidSignatures ?? []).filter(Boolean);
+  if (avoid.length === 0) return chosen.slice(0, config.wordCount);
+
+  let bestWords = chosen.slice(0, config.wordCount);
+  let bestScore = Number.POSITIVE_INFINITY;
+  const maxStart = Math.max(0, chosen.length - config.wordCount);
+  const tries = Math.min(24, maxStart + 1);
+
+  for (let i = 0; i < tries; i++) {
+    const start = i === 0 ? 0 : Math.floor(Math.random() * (maxStart + 1));
+    const candidate = chosen.slice(start, start + config.wordCount);
+    if (candidate.length < config.wordCount) continue;
+
+    const sig = makeWordSearchSignature(candidate);
+    const maxOverlap = avoid.reduce(
+      (mx, s) => Math.max(mx, signatureOverlapRatio(sig, s)),
+      0
+    );
+    const exactRepeatPenalty = avoid.includes(sig) ? 1_000_000 : 0;
+    const score = exactRepeatPenalty + maxOverlap * 1000 + start;
+    if (score < bestScore) {
+      bestScore = score;
+      bestWords = candidate;
+    }
+  }
+
+  return bestWords;
 }
 
 export async function recordWordSearchExposure(

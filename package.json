@@ -13,7 +13,8 @@
     "ingest:tag": "tsx scripts/ingest/run.ts --tag-only",
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",
     "games:word-pool": "tsx scripts/word-pool-ingest.ts",
-    "games:blocked-crosswords": "tsx scripts/blocked-crossword-ingest.ts"
+    "games:blocked-crosswords": "tsx scripts/blocked-crossword-ingest.ts",
+    "games:test-connections": "tsx scripts/test-connections.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

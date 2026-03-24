@@ -7,6 +7,8 @@ const GAME_TYPES = new Set([
   "word_search",
   "killer_sudoku",
   "nonogram",
+  "crossword",
+  "connections",
 ]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
 

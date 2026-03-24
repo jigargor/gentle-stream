@@ -57,6 +57,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [liveGenerating, setLiveGenerating] = useState(false);
+  /** True once game ratio is resolved for the current session/user bootstrap. */
+  const [isFeedReady, setIsFeedReady] = useState(false);
 
   // Use refs for values that loadMore closes over — avoids stale closure bugs
   const loadingRef = useRef(false);
@@ -68,6 +70,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
+  const feedReadyRef = useRef(false);
   // Track the last article category so game slots can use a matching word bank
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
 
@@ -76,6 +79,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
+    if (!feedReadyRef.current) return;
     if (loadingRef.current) return;
 
     loadingRef.current = true;
@@ -198,6 +202,18 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
     userIdRef.current = userId;
+    feedReadyRef.current = false;
+    setIsFeedReady(false);
+
+    // Fresh bootstrap for this user/session: reset feed cursors and visible sections.
+    setSections([]);
+    setError(null);
+    setLoading(false);
+    loadingRef.current = false;
+    sectionCountRef.current = 0;
+    gameSlotOrdinalRef.current = 0;
+    lastArticleCategoryRef.current = undefined;
+    gameRatioRef.current = DEFAULT_GAME_RATIO;
 
     const gen = ++feedBootstrapGenRef.current;
     let cancelled = false;
@@ -243,6 +259,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
+      feedReadyRef.current = true;
+      setIsFeedReady(true);
       void loadMore();
     })();
 
@@ -258,6 +276,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
   // Re-attach when sections change so layout updates don't leave the sentinel unobserved
   useEffect(() => {
+    if (!isFeedReady) return;
     const el = sentinelRef.current;
     const io = new IntersectionObserver(
       (entries) => {
@@ -270,7 +289,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     observerRef.current = io;
     if (el) io.observe(el);
     return () => io.disconnect();
-  }, [sections.length, loadMore]);
+  }, [isFeedReady, sections.length, loadMore]);
 
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;

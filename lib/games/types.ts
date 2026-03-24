@@ -71,6 +71,8 @@ export interface WordSearchPuzzle {
   cols: number;
   theme: string;
   difficulty: Difficulty;
+  /** Stable content signature used to reduce repeat puzzles in the feed. */
+  uniquenessSignature?: string;
 }
 
 // ─── Nonogram (Picross) ───────────────────────────────────────────────────────
@@ -113,6 +115,28 @@ export interface CrosswordPuzzle {
   slots: CrosswordSlot[];
   category: string;
   difficulty: "medium";
+}
+
+// ─── Connections ──────────────────────────────────────────────────────────────
+
+export type ConnectionsTier = 1 | 2 | 3 | 4; // 1=yellow, 2=green, 3=blue, 4=purple
+
+export interface ConnectionsGroup {
+  label: string;
+  words: string[];              // exactly 4 words, ALL CAPS
+  tier: ConnectionsTier;
+  explanation: string;
+}
+
+export interface ConnectionsPuzzle {
+  groups: ConnectionsGroup[];   // exactly 4 groups
+  category: string;
+  difficulty: "medium";
+  redHerrings: { word: string; couldAlsoBelong: string }[];
+  /** Content-hash id to avoid repeating the same puzzle for users. */
+  puzzleId?: string;
+  /** Alias used by generic feed/game uniqueness memory. */
+  uniquenessSignature?: string;
 }
 
 // ─── Feed slot ────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 
 import { db } from "../client";
 import type { CrosswordPuzzle } from "@/lib/games/crosswordIngestAgent";
+import type { ConnectionsPuzzle } from "@/lib/games/connectionsIngestAgent";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,10 +44,42 @@ function pickRowPreferringLowUse(
 export async function getGameFromPool(
   type: string,
   category?: string,
-  options?: { randomTieBreak?: boolean }
+  options?: {
+    randomTieBreak?: boolean;
+    excludeSignatures?: string[];
+    /** If false, return null when all fetched rows are excluded. */
+    allowExcludedFallback?: boolean;
+  }
 ): Promise<GameRow | null> {
   const randomTieBreak = options?.randomTieBreak === true;
   const batchLimit = randomTieBreak ? 40 : 1;
+  const excludeSet = new Set((options?.excludeSignatures ?? []).filter(Boolean));
+  const allowExcludedFallback = options?.allowExcludedFallback !== false;
+
+  function signatureForRow(row: GameRow): string | null {
+    const payload = row.payload as { uniquenessSignature?: unknown; puzzleId?: unknown } | null;
+    if (!payload || typeof payload !== "object") return null;
+    const sig =
+      typeof payload.uniquenessSignature === "string"
+        ? payload.uniquenessSignature
+        : typeof payload.puzzleId === "string"
+          ? payload.puzzleId
+          : null;
+    return sig?.trim() || null;
+  }
+
+  function pickFromRows(rows: GameRow[]): GameRow | null {
+    if (rows.length === 0) return null;
+    if (excludeSet.size === 0) return pickRowPreferringLowUse(rows, randomTieBreak);
+    const filtered = rows.filter((r) => {
+      const sig = signatureForRow(r);
+      return !sig || !excludeSet.has(sig);
+    });
+    if (filtered.length > 0) return pickRowPreferringLowUse(filtered, randomTieBreak);
+    if (!allowExcludedFallback) return null;
+    // Pool exhausted for this user/session history — optional graceful fallback.
+    return pickRowPreferringLowUse(rows, randomTieBreak);
+  }
 
   // Try category match first
   if (category) {
@@ -58,9 +91,7 @@ export async function getGameFromPool(
       .order("used_count", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(batchLimit);
-    if (catRows?.length) {
-      return pickRowPreferringLowUse(catRows as GameRow[], randomTieBreak);
-    }
+    if (catRows?.length) return pickFromRows(catRows as GameRow[]);
   }
 
   // Fall back to any category
@@ -73,7 +104,7 @@ export async function getGameFromPool(
     .limit(batchLimit);
 
   if (error || !rows?.length) return null;
-  return pickRowPreferringLowUse(rows as GameRow[], randomTieBreak);
+  return pickFromRows(rows as GameRow[]);
 }
 
 /**
@@ -122,4 +153,15 @@ export async function getCrosswordFromPool(
   if (!row) return null;
   void markGameUsed(row.id); // fire-and-forget
   return row.payload as CrosswordPuzzle;
+}
+
+export async function getConnectionsFromPool(
+  category?: string
+): Promise<ConnectionsPuzzle | null> {
+  const row = await getGameFromPool("connections", category, {
+    randomTieBreak: true,
+  });
+  if (!row) return null;
+  void markGameUsed(row.id);
+  return row.payload as ConnectionsPuzzle;
 }

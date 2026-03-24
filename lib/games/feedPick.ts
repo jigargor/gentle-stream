@@ -23,6 +23,7 @@ const ALL_FEED_GAME_TYPES: GameType[] = [
   "sudoku",
   "word_search",
   "crossword",
+  "connections",
   "killer_sudoku",
   "nonogram",
 ];

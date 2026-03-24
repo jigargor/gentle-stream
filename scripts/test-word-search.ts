@@ -12,6 +12,7 @@
 
 import { generateWordSearch } from "../lib/games/wordSearchGenerator";
 import type { Difficulty, PlacedWord } from "../lib/games/types";
+import { WORD_BANKS } from "../lib/games/wordSearchStaticBanks";
 
 let passed = 0;
 let failed = 0;
@@ -117,14 +118,11 @@ function testCategoryTheme() {
   console.log("\n── Category theming ────────────────────────────────────────────");
 
   const puzzle = generateWordSearch("medium", "Science & Discovery");
-  const scienceWords = [
-    "QUANTUM", "NEURON", "GENOME", "PHOTON", "ENZYME",
-    "PLASMA", "FOSSIL", "PRISM", "ORBIT", "COMET",
-    "LASER", "ATOM", "HELIX", "VORTEX", "NEBULA",
-    "CATALYST", "MUTATION", "SPECTRUM", "VELOCITY", "PROTON",
-  ];
+  const scienceWords = new Set(
+    (WORD_BANKS["Science & Discovery"] ?? []).map((w) => w.toUpperCase())
+  );
   const placedWords = puzzle.words.map((w) => w.word);
-  const allFromBank = placedWords.every((w) => scienceWords.includes(w));
+  const allFromBank = placedWords.every((w) => scienceWords.has(w));
   assert(allFromBank, "All placed words come from the Science & Discovery bank");
   assert(puzzle.theme === "Science & Discovery", "Theme label matches category");
 }

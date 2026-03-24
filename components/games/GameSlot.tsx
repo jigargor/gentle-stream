@@ -6,12 +6,14 @@ import KillerSudokuCard from "./KillerSudokuCard";
 import WordSearchCard, { type WordSearchCloudSlice } from "./WordSearchCard";
 import NonogramCard from "./NonogramCard";
 import CrosswordCard from "./CrosswordCard";
+import ConnectionsCard from "./ConnectionsCard";
 import type {
   SudokuPuzzle,
   KillerSudokuPuzzle,
   WordSearchPuzzle,
   NonogramPuzzle,
   CrosswordPuzzle,
+  ConnectionsPuzzle,
   Difficulty,
   GameType,
 } from "@/lib/games/types";
@@ -27,20 +29,63 @@ interface GameSlotProps {
   persistCloud?: boolean;
 }
 
-type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle;
+type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle | ConnectionsPuzzle;
+type PuzzleWithUniqueness = AnyPuzzle & {
+  uniquenessSignature?: string;
+  puzzleId?: string;
+};
+
+const RECENT_SIGNATURE_LIMIT = 12;
+
+function signatureStorageKey(gameType: GameType): string {
+  return `gentle_stream_recent_puzzle_signatures_${gameType}`;
+}
+
+function readRecentSignatures(gameType: GameType): string[] {
+  try {
+    const raw = localStorage.getItem(signatureStorageKey(gameType));
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((s): s is string => typeof s === "string").slice(-RECENT_SIGNATURE_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentSignature(
+  gameType: GameType,
+  signature?: string,
+  puzzleId?: string
+): void {
+  const token = signature ?? puzzleId;
+  if (!token) return;
+  const prev = readRecentSignatures(gameType).filter((s) => s !== token);
+  const next = [...prev, token].slice(-RECENT_SIGNATURE_LIMIT);
+  try {
+    localStorage.setItem(signatureStorageKey(gameType), JSON.stringify(next));
+  } catch {
+    // ignore quota / private mode issues
+  }
+}
 
 function puzzleEndpoint(
   gameType: GameType,
   diff: Difficulty,
-  category?: string
+  category?: string,
+  excludeSignatures?: string[]
 ): string {
   const params = new URLSearchParams({ difficulty: diff });
   if (category) params.set("category", category);
+  if (excludeSignatures && excludeSignatures.length > 0) {
+    params.set("excludeSignatures", excludeSignatures.join(","));
+  }
   if (gameType === "sudoku")        return `/api/game/sudoku?${params}`;
   if (gameType === "killer_sudoku")  return `/api/game/killer-sudoku?${params}`;
   if (gameType === "word_search")    return `/api/game/word-search?${params}`;
   if (gameType === "nonogram")       return `/api/game/nonogram?${params}`;
   if (gameType === "crossword")      return `/api/game/crossword?${params}`;
+  if (gameType === "connections")    return `/api/game/connections?${params}`;
   return `/api/game/sudoku?${params}`;
 }
 
@@ -50,6 +95,7 @@ const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
   word_search:   "Hiding the words…",
   nonogram:      "Composing the picture…",
   crossword:     "Setting the clues…",
+  connections:   "Building the groups…",
 };
 
 export default function GameSlot({
@@ -73,11 +119,17 @@ export default function GameSlot({
       setSudokuCloud(null);
       setWordCloud(null);
       try {
-        const url = puzzleEndpoint(gameType, diff, category);
+        const url = puzzleEndpoint(
+          gameType,
+          diff,
+          category,
+          readRecentSignatures(gameType)
+        );
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as AnyPuzzle;
+        const data = (await res.json()) as PuzzleWithUniqueness;
         setPuzzle(data);
+        writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
         setCurrentDifficulty(diff);
       } catch {
         setError("Could not load puzzle — try again.");
@@ -132,12 +184,18 @@ export default function GameSlot({
       if (cancelled) return;
       setLoading(true);
       try {
-        const url = puzzleEndpoint(gameType, difficulty, category);
+        const url = puzzleEndpoint(
+          gameType,
+          difficulty,
+          category,
+          readRecentSignatures(gameType)
+        );
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as AnyPuzzle;
+        const data = (await res.json()) as PuzzleWithUniqueness;
         if (!cancelled) {
           setPuzzle(data);
+          writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
           setSudokuCloud(null);
           setWordCloud(null);
           setCurrentDifficulty(difficulty);
@@ -284,6 +342,17 @@ export default function GameSlot({
       <CrosswordCard
         puzzle={puzzle as CrosswordPuzzle}
         onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
+      />
+    );
+  }
+
+  if (gameType === "connections") {
+    return (
+      <ConnectionsCard
+        puzzle={puzzle as ConnectionsPuzzle}
+        onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
       />
     );
   }

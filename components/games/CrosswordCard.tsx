@@ -39,6 +39,7 @@ type Action =
 interface CrosswordCardProps {
   puzzle: CrosswordPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
+  metricsEnabled?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -434,9 +435,14 @@ function CrosswordGridBoard({
 
 const emptySlotCells = new Set<string>();
 
-export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProps) {
+export default function CrosswordCard({
+  puzzle,
+  onNewPuzzle,
+  metricsEnabled = true,
+}: CrosswordCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
+  const completionLogged = useRef(false);
 
   const [state, dispatchRaw] = useReducer(
     (s: BoardState, a: Action) => reducer(s, a, puzzleRef.current),
@@ -447,7 +453,38 @@ export default function CrosswordCard({ puzzle, onNewPuzzle }: CrosswordCardProp
 
   const [activeTab, setActiveTab] = useState<"across" | "down">("across");
 
-  useEffect(() => { dispatch({ type: "RESET" }); }, [puzzle, dispatch]);
+  useEffect(() => {
+    dispatch({ type: "RESET" });
+    completionLogged.current = false;
+  }, [puzzle, dispatch]);
+
+  useEffect(() => {
+    if (!metricsEnabled || !state.completed || completionLogged.current) return;
+    completionLogged.current = true;
+    const p = puzzleRef.current;
+    void fetch("/api/user/game-completion", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameType: "crossword",
+        difficulty: p.difficulty,
+        durationSeconds: state.elapsedSecs,
+        metadata: {
+          category: p.category,
+          variant: p.variant ?? "unknown",
+          revealedCells: state.revealed.size,
+          revealAll: state.fullGridReveal,
+        },
+      }),
+    });
+  }, [
+    metricsEnabled,
+    state.completed,
+    state.elapsedSecs,
+    state.fullGridReveal,
+    state.revealed.size,
+  ]);
 
   useEffect(() => {
     if (state.completed || !state.startedAt) return;

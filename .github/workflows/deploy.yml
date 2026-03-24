@@ -24,6 +24,8 @@ name: deploy
 on:
   push:
     branches: [main]
+  # Use when you need a production deploy without a new commit (e.g. after fixing secrets).
+  workflow_dispatch:
 
 concurrency:
   group: production-deploy-${{ github.repository }}

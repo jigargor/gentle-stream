@@ -11,6 +11,9 @@ import { isCreator } from "@/lib/user/creator";
 import type { UserProfile, SavedArticleListItem, UserGameStats } from "@/lib/types";
 import { AvatarInput } from "./AvatarInput";
 
+/** Max rows in the profile dropdown; full list lives at /me/saved */
+const DROPDOWN_SAVED_LIMIT = 8;
+
 interface ProfileMenuProps {
   userEmail: string;
   onGameRatioSaved: (ratio: number) => void;
@@ -552,67 +555,102 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
-            <h3
+            <Link
+              href="/me/saved"
+              onClick={() => setOpen(false)}
               style={{
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.78rem",
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#555",
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                display: "inline-block",
               }}
             >
               Saved articles
-            </h3>
+            </Link>
             {saves.length === 0 ? (
               <p
                 style={{
                   fontStyle: "italic",
                   color: "#aaa",
                   fontSize: "0.78rem",
-                  margin: 0,
+                  margin: "0.35rem 0 0",
                 }}
               >
                 Use <strong>Save</strong> on an article card.
               </p>
             ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {saves.map((s) => (
-                  <li
-                    key={s.id}
-                    style={{
-                      borderBottom: "1px solid #e8e4dc",
-                      padding: "0.4rem 0",
-                      fontSize: "0.75rem",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "0.35rem" }}>
-                      <a
-                        href={s.articleUrl || "#"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "#1a472a", fontWeight: 600 }}
-                      >
-                        {s.articleTitle}
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => void removeSave(s.id)}
+              <>
+                <ul style={{ listStyle: "none", margin: "0.35rem 0 0", padding: 0 }}>
+                  {saves.slice(0, DROPDOWN_SAVED_LIMIT).map((s) => (
+                    <li
+                      key={s.id}
+                      style={{
+                        borderBottom: "1px solid #e8e4dc",
+                        padding: "0.4rem 0",
+                        fontSize: "0.75rem",
+                      }}
+                    >
+                      <div
                         style={{
-                          background: "none",
-                          border: "none",
-                          color: "#999",
-                          cursor: "pointer",
-                          fontSize: "0.65rem",
-                          textTransform: "uppercase",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "0.35rem",
+                          alignItems: "flex-start",
                         }}
                       >
-                        Remove
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        <Link
+                          href={`/me/read/${encodeURIComponent(s.articleId)}`}
+                          onClick={() => setOpen(false)}
+                          style={{
+                            color: "#1a472a",
+                            fontWeight: 600,
+                            textDecoration: "none",
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {s.articleTitle}
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => void removeSave(s.id)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#999",
+                            cursor: "pointer",
+                            fontSize: "0.65rem",
+                            textTransform: "uppercase",
+                            flexShrink: 0,
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {saves.length > DROPDOWN_SAVED_LIMIT ? (
+                  <Link
+                    href="/me/saved"
+                    onClick={() => setOpen(false)}
+                    style={{
+                      display: "inline-block",
+                      marginTop: "0.45rem",
+                      fontFamily: "'IM Fell English', Georgia, serif",
+                      fontSize: "0.72rem",
+                      color: "#666",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    View all {saves.length} saved →
+                  </Link>
+                ) : null}
+              </>
             )}
           </section>
 

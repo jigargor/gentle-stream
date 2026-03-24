@@ -8,7 +8,24 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
+/**
+ * Server sends the canonical OAuth return origin (see `getAuthRedirectOriginServer`).
+ * Client fallbacks only if the server hint is empty (e.g. prod without SITE_URL).
+ */
+function resolveAuthRedirectBase(serverHint: string): string {
+  const trimmed = serverHint.trim().replace(/\/$/, "");
+  if (trimmed) return trimmed;
+  const fromEnv =
+    process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN?.trim().replace(/\/$/, "") ??
+    "";
+  if (fromEnv) return fromEnv;
+  if (typeof window !== "undefined") return window.location.origin;
+  return "";
+}
+
 export interface LoginFormProps {
+  /** From server: OAuth/magic-link return origin (dev defaults to http://localhost:3000). */
+  authRedirectBaseFromServer?: string;
   /** From `?next=` — passed by the server page to avoid `useSearchParams` + Suspense chunk issues in dev. */
   initialNext?: string | null;
   initialAuthError?: string | null;
@@ -19,6 +36,7 @@ export interface LoginFormProps {
 }
 
 export function LoginForm({
+  authRedirectBaseFromServer = "",
   initialNext = null,
   initialAuthError = null,
   initialSessionExpired = false,
@@ -32,31 +50,45 @@ export function LoginForm({
 
   const [email, setEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false);
-  const [oauthProvider, setOauthProvider] = useState<
-    null | "google" | "facebook"
-  >(null);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const origin =
     typeof window !== "undefined" ? window.location.origin : "";
 
-  async function signInWithOAuthProvider(
-    provider: "google" | "facebook"
-  ) {
+  /**
+   * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
+   * cookie storage; the server callback needs that verifier for exchangeCodeForSession.
+   * A successful exchange replaces any prior session.
+   */
+  async function signInWithGoogle() {
     setMessage(null);
-    setOauthProvider(provider);
+    setOauthBusy(true);
     try {
+      const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
+      if (!base) {
+        setMessage(
+          "Could not determine the app URL for sign-in. Set NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN (e.g. http://localhost:3000) in .env.local."
+        );
+        setOauthBusy(false);
+        return;
+      }
       const supabase = createClient();
-      await supabase.auth.signOut({ scope: "local" });
-      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOAuth({
-        provider,
+        provider: "google",
         options: { redirectTo },
       });
-      if (error) setMessage(error.message);
-    } finally {
-      setOauthProvider(null);
+      if (error) {
+        setMessage(error.message);
+        setOauthBusy(false);
+        return;
+      }
+      // Browser navigates to Google; avoid finally { setBusy(false) } racing the redirect.
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Sign-in failed");
+      setOauthBusy(false);
     }
   }
 
@@ -65,9 +97,16 @@ export function LoginForm({
     setMessage(null);
     setEmailBusy(true);
     try {
+      const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
+      if (!base) {
+        setMessage(
+          "Could not determine the app URL for sign-in. Set NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN (e.g. http://localhost:3000) in .env.local."
+        );
+        return;
+      }
       const supabase = createClient();
       await supabase.auth.signOut({ scope: "local" });
-      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: { emailRedirectTo: redirectTo },
@@ -179,8 +218,8 @@ export function LoginForm({
 
         <button
           type="button"
-          disabled={oauthProvider !== null}
-          onClick={() => void signInWithOAuthProvider("google")}
+          disabled={oauthBusy}
+          onClick={() => void signInWithGoogle()}
           style={{
             width: "100%",
             padding: "0.65rem 1rem",
@@ -190,33 +229,11 @@ export function LoginForm({
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "0.8rem",
             letterSpacing: "0.04em",
-            cursor: oauthProvider !== null ? "wait" : "pointer",
-            marginBottom: "0.65rem",
-          }}
-        >
-          {oauthProvider === "google" ? "Redirecting…" : "Continue with Google"}
-        </button>
-
-        <button
-          type="button"
-          disabled={oauthProvider !== null}
-          onClick={() => void signInWithOAuthProvider("facebook")}
-          style={{
-            width: "100%",
-            padding: "0.65rem 1rem",
-            border: "1px solid #1a1a1a",
-            background: "#fff",
-            color: "#1a1a1a",
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.8rem",
-            letterSpacing: "0.04em",
-            cursor: oauthProvider !== null ? "wait" : "pointer",
+            cursor: oauthBusy ? "wait" : "pointer",
             marginBottom: "1.25rem",
           }}
         >
-          {oauthProvider === "facebook"
-            ? "Redirecting…"
-            : "Continue with Facebook"}
+          {oauthBusy ? "Redirecting…" : "Continue with Google"}
         </button>
 
         <div
@@ -317,6 +334,20 @@ export function LoginForm({
             {message}
           </p>
         )}
+
+        <p
+          style={{
+            margin: "1.35rem 0 0",
+            textAlign: "center",
+            fontFamily: "'IM Fell English', Georgia, serif",
+            fontSize: "0.72rem",
+            color: "#999",
+          }}
+        >
+          <a href="/privacy" style={{ color: "#777", textDecoration: "underline" }}>
+            Privacy policy
+          </a>
+        </p>
       </div>
     </div>
   );

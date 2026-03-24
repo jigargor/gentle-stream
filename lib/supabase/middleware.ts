@@ -12,7 +12,12 @@ import {
   rejectIfSupabaseKeyIsServiceRole,
 } from "./validate-anon-key";
 
-const PUBLIC_PREFIXES = ["/login", "/auth/callback", "/auth/auth-code-error"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/auth/callback",
+  "/auth/auth-code-error",
+  "/privacy",
+];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(

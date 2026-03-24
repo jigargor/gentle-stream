@@ -1,4 +1,5 @@
 import { LoginForm } from "@/components/auth/LoginForm";
+import { getAuthRedirectOriginServer } from "@/lib/auth/redirect-origin";
 
 function firstParam(
   v: string | string[] | undefined
@@ -17,9 +18,11 @@ export default function LoginPage({
   searchParams: Record<string, string | string[] | undefined>;
 }) {
   const errorParam = firstParam(searchParams.error) ?? null;
+  const authRedirectBase = getAuthRedirectOriginServer();
 
   return (
     <LoginForm
+      authRedirectBaseFromServer={authRedirectBase}
       initialNext={firstParam(searchParams.next) ?? null}
       initialAuthError={errorParam}
       initialSessionExpired={

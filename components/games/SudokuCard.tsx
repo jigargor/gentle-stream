@@ -19,6 +19,13 @@ const MAX_MISTAKES = 3;
 /** Bitmask: bit (n-1) set ⇔ pencil mark for digit n (1–9). */
 type NoteMask = number;
 
+interface MistakeUndoSnapshot {
+  values: number[][];
+  notes: NoteMask[][];
+  mistakes: number;
+  failed: boolean;
+}
+
 interface BoardState {
   values: number[][];       // current board values (0 = empty)
   notes: NoteMask[][];      // pencil marks per cell (only for empty non-given cells)
@@ -27,6 +34,7 @@ interface BoardState {
   completed: boolean;
   failed: boolean;          // 3 mistakes — puzzle locked
   mistakes: number;         // incorrect placements (vs solution), capped at MAX_MISTAKES
+  mistakeUndoStack: MistakeUndoSnapshot[];
   startedAt: number | null; // timestamp ms
   elapsedSecs: number;
 }
@@ -34,6 +42,7 @@ interface BoardState {
 type Action =
   | { type: "SELECT"; row: number; col: number }
   | { type: "INPUT"; num: number; asNote?: boolean }
+  | { type: "UNDO_MISTAKE" }
   | { type: "ERASE" }
   | { type: "TICK" }
   | { type: "RESET"; puzzle: SudokuPuzzle }
@@ -161,6 +170,10 @@ function cloneNotes(notes: NoteMask[][]): NoteMask[][] {
   return notes.map((row) => [...row]);
 }
 
+function cloneValues(values: number[][]): number[][] {
+  return values.map((row) => [...row]);
+}
+
 /** True if `digit` is already placed in the same row, column, or 3×3 box (excluding r,c). */
 function digitAppearsInSudokuPeers(
   values: number[][],
@@ -205,6 +218,7 @@ function makeInitialState(puzzle: SudokuPuzzle): BoardState {
     completed: false,
     failed: false,
     mistakes: 0,
+    mistakeUndoStack: [],
     startedAt: null,
     elapsedSecs: 0,
   };
@@ -246,6 +260,18 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       if (!correct) mistakes = Math.min(MAX_MISTAKES, mistakes + 1);
       const failed = mistakes >= MAX_MISTAKES;
 
+      const mistakeUndoStack = !correct
+        ? [
+            ...state.mistakeUndoStack,
+            {
+              values: cloneValues(state.values),
+              notes: cloneNotes(state.notes),
+              mistakes: state.mistakes,
+              failed: state.failed,
+            },
+          ]
+        : state.mistakeUndoStack;
+
       const values = state.values.map((row) => [...row]);
       values[r][c] = action.num;
       const notes = cloneNotes(state.notes);
@@ -267,7 +293,31 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
         completed,
         failed,
         mistakes,
+        mistakeUndoStack,
         elapsedSecs,
+      };
+    }
+
+    case "UNDO_MISTAKE": {
+      if (state.mistakeUndoStack.length === 0) return state;
+      const snap =
+        state.mistakeUndoStack[state.mistakeUndoStack.length - 1];
+      const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
+      const values = cloneValues(snap.values);
+      const notes = cloneNotes(snap.notes);
+      const mistakes = snap.mistakes;
+      const failed = snap.failed;
+      const errors = computeErrors(values, puzzle.given);
+      const completed = isComplete(values, puzzle.solution);
+      return {
+        ...state,
+        values,
+        notes,
+        mistakes,
+        failed,
+        mistakeUndoStack,
+        errors,
+        completed,
       };
     }
 
@@ -322,6 +372,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
         completed,
         failed,
         mistakes,
+        mistakeUndoStack: [],
         selected: null,
       };
     }
@@ -477,6 +528,14 @@ export default function SudokuCard({
         return;
       }
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        if (state.mistakeUndoStack.length > 0) {
+          e.preventDefault();
+          dispatch({ type: "UNDO_MISTAKE" });
+        }
+        return;
+      }
+
       if (state.failed) return;
 
       if (!state.selected) return;
@@ -504,7 +563,7 @@ export default function SudokuCard({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [state.selected, state.failed, dispatch, notesMode]);
+  }, [state.selected, state.failed, state.mistakeUndoStack.length, dispatch, notesMode]);
 
   // Highlight — same row, col, box, or same number as selected cell
   const highlights = useMemo(() => {
@@ -602,12 +661,16 @@ export default function SudokuCard({
     const hl = highlights[r][c];
     const val = state.values[r][c];
     const celebrating = cellInFlashUnits(r, c, lineFlashUnits);
+    const wrongSolution =
+      !isGiven && val !== 0 && val !== puzzle.solution[r][c];
+    const badDigit = wrongSolution || isError;
 
     let bg = "#faf8f3";
     if (celebrating) bg = "#f0e6c8";
     else if (isSelected) bg = "#d4c27a";
     else if (hl === "same-num" && val !== 0) bg = "#e8d98a";
     else if (hl === "peer") bg = "#ede9e1";
+    if (wrongSolution && !celebrating) bg = "#fce8e6";
 
     const borderRight = (c + 1) % 3 === 0 && c < 8
       ? "2px solid #1a1a1a"
@@ -628,7 +691,7 @@ export default function SudokuCard({
       fontFamily: "'Playfair Display', Georgia, serif",
       fontSize: "clamp(12px, 2.5vw, 18px)",
       fontWeight: isGiven ? 700 : 400,
-      color: isError
+      color: badDigit
         ? "#c0392b"
         : isGiven
         ? "#0d0d0d"
@@ -735,6 +798,27 @@ export default function SudokuCard({
             Start fresh when you&apos;re ready.
           </div>
         </div>
+
+        {state.mistakeUndoStack.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "UNDO_MISTAKE" })}
+            style={{
+              padding: "0.5rem 1.25rem",
+              border: "1px solid #8b4513",
+              background: "#faf6f0",
+              color: "#5c4a32",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.82rem",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              marginBottom: "0.35rem",
+            }}
+          >
+            Undo last mistake
+          </button>
+        ) : null}
 
         {onNewPuzzle && (
           <div
@@ -957,6 +1041,27 @@ export default function SudokuCard({
         >
           Erase
         </button>
+        {state.mistakeUndoStack.length > 0 ? (
+          <button
+            type="button"
+            style={{
+              ...padBtnStyle(0),
+              width: "auto",
+              padding: "0 0.75rem",
+              fontSize: "0.7rem",
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              borderColor: "#8b4513",
+              color: "#5c4a32",
+              background: "#faf6f0",
+            }}
+            onClick={() => dispatch({ type: "UNDO_MISTAKE" })}
+            aria-label="Undo last mistake"
+          >
+            Undo
+          </button>
+        ) : null}
       </div>
 
       {/* Controls */}
@@ -1003,6 +1108,11 @@ export default function SudokuCard({
         <strong style={{ fontWeight: 600, color: "#888" }}>N</strong>) for pencil marks.
         <span style={{ display: "block", marginTop: "0.25rem" }}>
           <strong style={{ fontWeight: 600, color: "#888" }}>Shift</strong>+digit always toggles a note.
+        </span>
+        <span style={{ display: "block", marginTop: "0.25rem" }}>
+          Wrong digits appear in <strong style={{ fontWeight: 600, color: "#c0392b" }}>red</strong>;{" "}
+          <strong style={{ fontWeight: 600, color: "#888" }}>Undo</strong> or{" "}
+          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> reverts the last mistake.
         </span>
       </p>
     </div>

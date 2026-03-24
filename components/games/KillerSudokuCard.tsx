@@ -15,6 +15,12 @@ const MAX_MISTAKES = 3;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface KillerMistakeUndoSnapshot {
+  values: number[][];
+  mistakes: number;
+  failed: boolean;
+}
+
 interface BoardState {
   values: number[][];
   selected: [number, number] | null;
@@ -22,6 +28,7 @@ interface BoardState {
   completed: boolean;
   failed: boolean;
   mistakes: number;
+  mistakeUndoStack: KillerMistakeUndoSnapshot[];
   startedAt: number | null;
   elapsedSecs: number;
 }
@@ -29,6 +36,7 @@ interface BoardState {
 type Action =
   | { type: "SELECT"; row: number; col: number }
   | { type: "INPUT"; num: number }
+  | { type: "UNDO_MISTAKE" }
   | { type: "ERASE" }
   | { type: "TICK" }
   | { type: "RESET" };
@@ -120,6 +128,10 @@ function formatTime(secs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function cloneValues(values: number[][]): number[][] {
+  return values.map((row) => [...row]);
+}
+
 function makeInitialState(): BoardState {
   return {
     values: Array.from({ length: 9 }, () => Array(9).fill(0)),
@@ -128,6 +140,7 @@ function makeInitialState(): BoardState {
     completed: false,
     failed: false,
     mistakes: 0,
+    mistakeUndoStack: [],
     startedAt: null,
     elapsedSecs: 0,
   };
@@ -160,11 +173,51 @@ function reducer(
       if (!correct) mistakes = Math.min(MAX_MISTAKES, mistakes + 1);
       const failed = mistakes >= MAX_MISTAKES;
 
+      const mistakeUndoStack = !correct
+        ? [
+            ...state.mistakeUndoStack,
+            {
+              values: cloneValues(state.values),
+              mistakes: state.mistakes,
+              failed: state.failed,
+            },
+          ]
+        : state.mistakeUndoStack;
+
       const values = state.values.map((row) => [...row]);
       values[r][c] = action.num;
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
-      return { ...state, values, errors, completed, mistakes, failed };
+      return {
+        ...state,
+        values,
+        errors,
+        completed,
+        mistakes,
+        failed,
+        mistakeUndoStack,
+      };
+    }
+
+    case "UNDO_MISTAKE": {
+      if (state.mistakeUndoStack.length === 0) return state;
+      const snap =
+        state.mistakeUndoStack[state.mistakeUndoStack.length - 1];
+      const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
+      const values = cloneValues(snap.values);
+      const mistakes = snap.mistakes;
+      const failed = snap.failed;
+      const errors = computeErrors(values, puzzle.cages);
+      const completed = isComplete(values, puzzle.solution);
+      return {
+        ...state,
+        values,
+        mistakes,
+        failed,
+        mistakeUndoStack,
+        errors,
+        completed,
+      };
     }
 
     case "ERASE": {
@@ -291,9 +344,26 @@ export default function KillerSudokuCard({
   // Keyboard
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, [contenteditable=true], [contenteditable='']"
+        )
+      ) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        if (state.mistakeUndoStack.length > 0) {
+          e.preventDefault();
+          dispatch({ type: "UNDO_MISTAKE" });
+        }
+        return;
+      }
+
       if (state.failed) return;
       if (!state.selected) return;
-      const num = parseInt(e.key);
+      const num = parseInt(e.key, 10);
       if (num >= 1 && num <= 9) dispatch({ type: "INPUT", num });
       else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") dispatch({ type: "ERASE" });
       else if (e.key === "ArrowUp" && state.selected[0] > 0) dispatch({ type: "SELECT", row: state.selected[0] - 1, col: state.selected[1] });
@@ -303,7 +373,7 @@ export default function KillerSudokuCard({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [state.selected, state.failed, dispatch]);
+  }, [state.selected, state.failed, state.mistakeUndoStack.length, dispatch]);
 
   // Reset on new puzzle
   useEffect(() => {
@@ -368,6 +438,26 @@ export default function KillerSudokuCard({
             The sums were rooting for you. They have now left the chat.
           </div>
         </div>
+        {state.mistakeUndoStack.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "UNDO_MISTAKE" })}
+            style={{
+              padding: "0.5rem 1.25rem",
+              border: "1px solid #8b4513",
+              background: "#faf6f0",
+              color: "#5c4a32",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.82rem",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              marginBottom: "0.35rem",
+            }}
+          >
+            Undo last mistake
+          </button>
+        ) : null}
         {onNewPuzzle && <DifficultyButtons current={puzzle.difficulty} onSelect={onNewPuzzle} primary />}
       </div>
     );
@@ -432,11 +522,15 @@ export default function KillerSudokuCard({
             const borders = getCageBorders(r, c, cageMap);
             const cageSum = sumLabelCells.get(key);
             const celebrating = cellInFlashUnits(r, c, lineFlashUnits);
+            const wrongSolution =
+              val !== 0 && val !== puzzle.solution[r][c];
+            const badDigit = wrongSolution || isError;
 
             let bg = "#faf8f3";
             if (celebrating) bg = "#f0e6c8";
             else if (isSelected) bg = "#d4c27a";
             else if (isPeer) bg = "#ede9e1";
+            if (wrongSolution && !celebrating) bg = "#fce8e6";
 
             // Box borders
             const boxRight = (c + 1) % 3 === 0 && c < 8;
@@ -459,7 +553,7 @@ export default function KillerSudokuCard({
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "1.1rem",
                   fontWeight: 400,
-                  color: isError ? "#c0392b" : "#2c5282",
+                  color: badDigit ? "#c0392b" : "#2c5282",
                   transition: "background 0.08s ease",
                   transformOrigin: "center center",
                   // Cage border (dashed, inside) wins over box border (solid, outside)
@@ -508,6 +602,7 @@ export default function KillerSudokuCard({
           </button>
         ))}
         <button
+          type="button"
           onClick={() => dispatch({ type: "ERASE" })}
           style={{
             padding: "0 0.75rem", height: "2.6rem",
@@ -520,12 +615,38 @@ export default function KillerSudokuCard({
         >
           Erase
         </button>
+        {state.mistakeUndoStack.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "UNDO_MISTAKE" })}
+            style={{
+              padding: "0 0.75rem",
+              height: "2.6rem",
+              border: "1px solid #8b4513",
+              background: "#faf6f0",
+              color: "#5c4a32",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.7rem",
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+            }}
+            aria-label="Undo last mistake"
+          >
+            Undo
+          </button>
+        ) : null}
       </div>
 
       {onNewPuzzle && <DifficultyButtons current={puzzle.difficulty} onSelect={onNewPuzzle} />}
 
-      <p style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.72rem", color: "#bbb", margin: 0 }}>
-        No digits are given — use the cage sums as your only clues
+      <p style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.72rem", color: "#bbb", margin: 0, textAlign: "center", maxWidth: 380, lineHeight: 1.45 }}>
+        No digits are given — use the cage sums as your only clues.
+        <span style={{ display: "block", marginTop: "0.35rem" }}>
+          Wrong digits in <strong style={{ fontWeight: 600, color: "#c0392b" }}>red</strong>;{" "}
+          <strong style={{ fontWeight: 600, color: "#888" }}>Undo</strong> or{" "}
+          <strong style={{ fontWeight: 600, color: "#888" }}>Ctrl+Z</strong> after a mistake.
+        </span>
       </p>
     </div>
   );

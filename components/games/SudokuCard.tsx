@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { SudokuPuzzle, Difficulty } from "@/lib/games/types";
+import {
+  GAME_HOW_TO_URL,
+  GameHowToPlayLink,
+} from "@/components/games/GameHowToPlayLink";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -566,6 +570,9 @@ export default function SudokuCard({
           <span style={titleStyle}>Sudoku</span>
           <span style={metaStyle}>{difficultyLabel}</span>
         </div>
+        <div style={{ width: "100%" }}>
+          <GameHowToPlayLink href={GAME_HOW_TO_URL.sudoku} />
+        </div>
 
         <div style={{
           textAlign: "center",
@@ -628,6 +635,9 @@ export default function SudokuCard({
             </span>
           )}
         </span>
+      </div>
+      <div style={{ width: "100%" }}>
+        <GameHowToPlayLink href={GAME_HOW_TO_URL.sudoku} />
       </div>
 
       {/* Grid */}

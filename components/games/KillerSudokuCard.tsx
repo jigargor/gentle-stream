@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { KillerSudokuPuzzle, Cage, Difficulty } from "@/lib/games/types";
+import {
+  GAME_HOW_TO_URL,
+  GameHowToPlayLink,
+} from "@/components/games/GameHowToPlayLink";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -305,6 +309,9 @@ export default function KillerSudokuCard({
             {puzzle.difficulty}
           </span>
         </div>
+        <div style={{ width: "100%" }}>
+          <GameHowToPlayLink href={GAME_HOW_TO_URL.killer_sudoku} />
+        </div>
         <div style={{ textAlign: "center", padding: "2rem 1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>
           <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
           <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>Puzzle complete</div>
@@ -326,6 +333,9 @@ export default function KillerSudokuCard({
           <span>{puzzle.difficulty}</span>
           {state.startedAt && <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatTime(state.elapsedSecs)}</span>}
         </span>
+      </div>
+      <div style={{ width: "100%" }}>
+        <GameHowToPlayLink href={GAME_HOW_TO_URL.killer_sudoku} />
       </div>
 
       {/* Grid */}

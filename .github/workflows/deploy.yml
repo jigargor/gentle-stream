@@ -1,7 +1,9 @@
 # deploy.yml
 #
-# On push to main: runs CI once (reusable workflow), then deploys to Vercel and
-# smoke-tests the live URL.
+# Production deploy path: push to `main` only (includes merging a PR into main).
+# Vercel Git auto-deploy is off in vercel.json (`git.deploymentEnabled: false`)
+# so previews and duplicate prod builds from the Vercel GitHub app do not run;
+# this workflow is the only trigger for `vercel deploy --prod`.
 #
 # Setup required (one-time):
 #   1. Install Vercel CLI: npm i -g vercel

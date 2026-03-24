@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import {
   SESSION_START_COOKIE,
   sessionStartCookieOptions,
@@ -17,6 +18,61 @@ function isPkceVerifierMissing(error: unknown): boolean {
     "name" in error &&
     (error as { name: string }).name === "AuthPKCECodeVerifierMissingError"
   );
+}
+
+function readPrimaryProvider(user: {
+  app_metadata?: Record<string, unknown>;
+}): string | null {
+  const provider = user.app_metadata?.provider;
+  return typeof provider === "string" && provider.length > 0 ? provider : null;
+}
+
+function hasEmailIdentity(user: {
+  identities?: Array<{ provider?: string | null }>;
+}): boolean {
+  return (user.identities ?? []).some((identity) => identity.provider === "email");
+}
+
+function createSupabaseAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRole) return null;
+  return createSupabaseClient(url, serviceRole, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+async function isSsoEmailConflict(user: {
+  id: string;
+  email?: string | null;
+  app_metadata?: Record<string, unknown>;
+  identities?: Array<{ provider?: string | null }>;
+}): Promise<boolean> {
+  const provider = readPrimaryProvider(user);
+  if (!provider || provider === "email") return false;
+  if (!user.email) return false;
+
+  // Supabase can auto-link OAuth identities to an email/password account.
+  // Product requirement: block SSO sign-in when that email already belongs to another path.
+  if (hasEmailIdentity(user)) return true;
+
+  const admin = createSupabaseAdminClient();
+  if (!admin) return false;
+
+  const { data, error } = await admin.auth.admin.listUsers({
+    page: 1,
+    perPage: 200,
+  });
+  if (error) {
+    console.error("[/auth/callback] listUsers failed while checking SSO conflict:", error);
+    return false;
+  }
+
+  const normalized = user.email.trim().toLowerCase();
+  return data.users.some((candidate) => {
+    const candidateEmail = candidate.email?.trim().toLowerCase();
+    return candidateEmail === normalized && candidate.id !== user.id;
+  });
 }
 
 /**
@@ -39,7 +95,7 @@ async function redirectToLoginCleared(
 }
 
 /**
- * OAuth (Google) and email magic links land here with ?code=...
+ * OAuth (Google/Facebook) and email magic links land here with ?code=...
  * Cookies must be written onto the returned redirect response (Route Handler quirk).
  *
  * Do not call signOut before exchangeCodeForSession: signOut removes the PKCE code
@@ -75,6 +131,10 @@ export async function GET(request: NextRequest) {
 
   if (!user) {
     return redirectToLoginCleared(request, { error: "auth" });
+  }
+
+  if (await isSsoEmailConflict(user)) {
+    return redirectToLoginCleared(request, { error: "sso_email_conflict" });
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

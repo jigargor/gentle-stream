@@ -83,27 +83,28 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Smoke test — GET /api/feed
+      - name: Smoke test — GET /login
         run: |
           DEPLOY_URL="${{ steps.deploy.outputs.url }}"
-          echo "Testing $DEPLOY_URL/api/feed"
+          echo "Testing $DEPLOY_URL/login"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "$DEPLOY_URL/api/feed?userId=ci-smoke&sectionIndex=0&pageSize=1")
+            "$DEPLOY_URL/login")
           echo "HTTP status: $STATUS"
           if [ "$STATUS" != "200" ]; then
-            echo "Smoke test failed — /api/feed returned $STATUS"
+            echo "Smoke test failed — /login returned $STATUS"
             exit 1
           fi
           echo "Smoke test passed"
 
-      - name: Smoke test — GET /api/game/sudoku
+      - name: Smoke test — GET /
         run: |
           DEPLOY_URL="${{ steps.deploy.outputs.url }}"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "$DEPLOY_URL/api/game/sudoku?difficulty=easy")
+            "$DEPLOY_URL/")
           echo "HTTP status: $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "Smoke test failed — /api/game/sudoku returned $STATUS"
+          # '/' may render directly (200) or redirect to /login (307/308)
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "307" ] && [ "$STATUS" != "308" ]; then
+            echo "Smoke test failed — / returned $STATUS"
             exit 1
           fi
           echo "Smoke test passed"

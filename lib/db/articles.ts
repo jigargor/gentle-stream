@@ -427,6 +427,42 @@ export async function countAvailableByCategory(): Promise<
 }
 
 /**
+ * For each category, return:
+ * - available tagged+unexpired count
+ * - newest fetched_at timestamp among tagged+unexpired rows
+ */
+export async function getAvailableStockSnapshotByCategory(): Promise<
+  Record<string, { count: number; newestFetchedAt: string | null }>
+> {
+  const { data, error } = await db
+    .from("articles")
+    .select("category,fetched_at")
+    .eq("tagged", true)
+    .gt("expires_at", new Date().toISOString());
+
+  if (error) {
+    throw new Error(`getAvailableStockSnapshotByCategory: ${error.message}`);
+  }
+
+  const out: Record<string, { count: number; newestFetchedAt: string | null }> =
+    {};
+  for (const row of data ?? []) {
+    const category = row.category as string;
+    const fetchedAt = row.fetched_at as string;
+    const prev = out[category];
+    if (!prev) {
+      out[category] = { count: 1, newestFetchedAt: fetchedAt };
+      continue;
+    }
+    prev.count += 1;
+    if (!prev.newestFetchedAt || fetchedAt > prev.newestFetchedAt) {
+      prev.newestFetchedAt = fetchedAt;
+    }
+  }
+  return out;
+}
+
+/**
  * Mark articles as used (increment used_count).
  */
 export async function markArticlesUsed(ids: string[]): Promise<void> {

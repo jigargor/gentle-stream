@@ -11,6 +11,7 @@
     "ingest": "tsx scripts/ingest/run.ts",
     "ingest:all": "tsx scripts/ingest/run.ts --all",
     "ingest:tag": "tsx scripts/ingest/run.ts --tag-only",
+    "articles:dedup-cleanup": "tsx -r dotenv/config scripts/articles-dedup-cleanup.ts dotenv_config_path=.env.local",
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",
     "games:word-pool": "tsx scripts/word-pool-ingest.ts",
     "games:blocked-crosswords": "tsx scripts/blocked-crossword-ingest.ts",

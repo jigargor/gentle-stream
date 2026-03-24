@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
+import type { Provider } from "@supabase/supabase-js";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -59,6 +60,7 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -67,9 +69,15 @@ export function LoginForm({
    * cookie storage; the server callback needs that verifier for exchangeCodeForSession.
    * A successful exchange replaces any prior session.
    */
-  async function signInWithGoogle() {
+  function providerLabel(provider: Provider): string {
+    if (provider === "facebook") return "Facebook";
+    return "Google";
+  }
+
+  async function signInWithOAuth(provider: Provider) {
     setMessage(null);
     setOauthBusy(true);
+    setOauthProvider(provider);
     try {
       const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
       if (!base) {
@@ -77,23 +85,26 @@ export function LoginForm({
           "Could not determine the app URL for sign-in. Set NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN (e.g. http://localhost:3000) in .env.local."
         );
         setOauthBusy(false);
+        setOauthProvider(null);
         return;
       }
       const supabase = createClient();
       const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
+        provider,
         options: { redirectTo },
       });
       if (error) {
         setMessage(error.message);
         setOauthBusy(false);
+        setOauthProvider(null);
         return;
       }
       // Browser navigates to Google; avoid finally { setBusy(false) } racing the redirect.
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Sign-in failed");
       setOauthBusy(false);
+      setOauthProvider(null);
     }
   }
 
@@ -220,14 +231,38 @@ export function LoginForm({
               textAlign: "center",
             }}
           >
-            Sign-in did not complete. Please try again.
+            {authError === "sso_email_conflict"
+              ? "This email already belongs to an existing account. For security, social sign-in is blocked for that email. Sign in with email link instead."
+              : "Sign-in did not complete. Please try again."}
           </p>
         )}
 
         <button
           type="button"
           disabled={oauthBusy}
-          onClick={() => void signInWithGoogle()}
+          onClick={() => void signInWithOAuth("google")}
+          style={{
+            width: "100%",
+            padding: "0.65rem 1rem",
+            border: "1px solid #1a1a1a",
+            background: "#fff",
+            color: "#1a1a1a",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.8rem",
+            letterSpacing: "0.04em",
+            cursor: oauthBusy ? "wait" : "pointer",
+            marginBottom: "0.6rem",
+          }}
+        >
+          {oauthBusy && oauthProvider === "google"
+            ? "Redirecting…"
+            : "Continue with Google"}
+        </button>
+
+        <button
+          type="button"
+          disabled={oauthBusy}
+          onClick={() => void signInWithOAuth("facebook")}
           style={{
             width: "100%",
             padding: "0.65rem 1rem",
@@ -241,7 +276,9 @@ export function LoginForm({
             marginBottom: "1.25rem",
           }}
         >
-          {oauthBusy ? "Redirecting…" : "Continue with Google"}
+          {oauthBusy && oauthProvider === "facebook"
+            ? "Redirecting…"
+            : `Continue with ${providerLabel("facebook")}`}
         </button>
 
         <div

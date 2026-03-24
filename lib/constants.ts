@@ -32,6 +32,15 @@ export const STOCK_THRESHOLD = 20;
 /** How many articles the ingest agent produces per run */
 export const INGEST_BATCH_SIZE = 6; // fetched 1 at a time, token-aware
 
+/** Soft target stock per category for cron top-ups (not a hard cap). */
+export const STOCK_TARGET = 30;
+
+/** Max articles to ingest per category in a single scheduler run. */
+export const STOCK_TOP_UP_MAX_PER_RUN = 8;
+
+/** If latest tagged/unexpired article is older than this, ingest a freshness refill. */
+export const FRESHNESS_INGEST_HOURS = 6;
+
 /** Articles expire after this many days */
 export const ARTICLE_TTL_DAYS = 7;
 

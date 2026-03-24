@@ -44,16 +44,8 @@ async function redirectToLoginCleared(
  *
  * Do not call signOut before exchangeCodeForSession: signOut removes the PKCE code
  * verifier from storage, so the exchange always fails and the old session remains.
- *
- * If the browser never hits this route on localhost (you jump straight to production),
- * Supabase is ignoring `redirect_to` — add `http://localhost:3000/auth/callback**` (or the
- * exact URL with query) under Authentication → URL Configuration → Redirect URLs.
  */
 export async function GET(request: NextRequest) {
-  if (process.env.NODE_ENV === "development") {
-    console.info("[auth/callback]", request.method, request.url);
-  }
-
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const next = safeNextPath(searchParams.get("next"));

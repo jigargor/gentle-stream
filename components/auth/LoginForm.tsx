@@ -9,24 +9,17 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
-function isBrowserLoopbackHost(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "[::1]" ||
-    hostname === "::1"
-  );
-}
-
 /**
- * OAuth / magic-link `redirect_to` must match the tab you are in. When the address bar is
- * loopback, always use `window.location.origin` so a stale server hint or wrong
- * NEXT_PUBLIC_* env cannot send you to production.
+ * OAuth / magic-link `redirect_to` must match this tab exactly (scheme + host + port).
+ * PKCE stores the code verifier in cookies for that origin; if `redirectTo` points elsewhere
+ * (e.g. server hinted `http://localhost:3000` while you use a LAN IP), Supabase sends you
+ * to the wrong host, the exchange fails, and you can end up on production with no session.
+ *
+ * In the browser we always use `window.location.origin` so the address bar wins.
  */
 function resolveAuthRedirectBase(serverHint: string): string {
   if (typeof window !== "undefined") {
-    const { hostname, origin } = window.location;
-    if (isBrowserLoopbackHost(hostname)) return origin.replace(/\/$/, "");
+    return window.location.origin.replace(/\/$/, "");
   }
 
   const trimmed = serverHint.trim().replace(/\/$/, "");
@@ -35,7 +28,6 @@ function resolveAuthRedirectBase(serverHint: string): string {
     process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN?.trim().replace(/\/$/, "") ??
     "";
   if (fromEnv) return fromEnv;
-  if (typeof window !== "undefined") return window.location.origin.replace(/\/$/, "");
   return "";
 }
 

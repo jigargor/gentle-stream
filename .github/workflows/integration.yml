@@ -1,0 +1,61 @@
+# integration.yml
+#
+# Runs on merge to main only — requires real Supabase credentials.
+# Tests that write to the DB always clean up after themselves (see test scripts).
+#
+# Covers:
+#   - Fingerprint dedup (writes test rows, asserts blocked, deletes rows)
+#   - URL-based dedup (same pattern)
+#
+# Not covered here (intentionally):
+#   - Ingest agent / tagger: LLM calls are expensive and non-deterministic.
+#     These are tested manually with `npm run ingest` during development.
+#   - Supabase Storage: avatar upload requires a real bucket with RLS policies
+#     that can't easily be replicated in CI without a dedicated test project.
+#
+# To add integration tests for new DB-touching features, follow the pattern
+# in scripts/test-dedup.ts: insert tagged rows, assert, delete in `finally`.
+
+name: integration
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  integration:
+    name: DB integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Only run if fast-checks passed — avoids burning Supabase quotas on
+    # broken builds. Requires fast-checks to be defined in the same repo.
+    # Remove this `needs` line if you want integration to run independently.
+    # needs: fast-checks  # uncomment if you want strict ordering
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Fingerprint deduplication ─────────────────────────────────────────────
+      - name: Tests — fingerprint dedup
+        run: npx tsx scripts/test-dedup.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      # ── URL-based deduplication ───────────────────────────────────────────────
+      - name: Tests — URL dedup
+        run: npx tsx scripts/test-url-dedup.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

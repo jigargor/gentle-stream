@@ -1,0 +1,72 @@
+# fast-checks.yml
+#
+# Runs on every push and every PR — including from forks.
+# No secrets required. Fails fast so feedback is immediate.
+#
+# Covers:
+#   - TypeScript type checking (tsc --noEmit)
+#   - Next.js production build (catches broken imports, missing types)
+#   - All pure game generator tests (sudoku, word search, killer sudoku, nonogram)
+#   - Citation stripping unit tests
+#
+# Deliberately excludes anything that needs Supabase or Anthropic credentials —
+# those live in the integration workflow and only run on main.
+
+name: fast-checks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  fast-checks:
+    name: Type check, build, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Type checking ────────────────────────────────────────────────────────
+      - name: TypeScript — check types
+        run: npx tsc --noEmit
+        # This catches: wrong prop types, missing exports, broken @/ aliases.
+        # The Next.js build below also type-checks but tsc is faster and
+        # gives cleaner error messages.
+
+      # ── Build ────────────────────────────────────────────────────────────────
+      - name: Next.js — production build
+        run: npm run build
+        env:
+          # Provide dummy values so the build doesn't crash on missing env vars.
+          # The build checks that these are defined strings; it doesn't make
+          # real API calls at build time.
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+          ANTHROPIC_API_KEY: "placeholder-anthropic-key"
+          CRON_SECRET: "placeholder-cron-secret"
+
+      # ── Pure unit tests (no DB, no API) ──────────────────────────────────────
+      - name: Tests — Sudoku generator
+        run: npx tsx scripts/test-sudoku.ts
+
+      - name: Tests — Word search generator
+        run: npx tsx scripts/test-word-search.ts
+
+      - name: Tests — Killer sudoku + nonogram generators
+        run: npx tsx scripts/test-killer-nonogram.ts
+
+      - name: Tests — Citation stripping
+        run: npx tsx scripts/test-citations.ts

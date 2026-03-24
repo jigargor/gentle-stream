@@ -1,0 +1,141 @@
+# deploy.yml
+#
+# Deploys to Vercel on merge to main, but only after both fast-checks
+# and integration pass. A post-deploy smoke test hits the live /api/feed
+# endpoint to confirm the deployment is actually serving requests.
+#
+# Setup required (one-time):
+#   1. Install Vercel CLI: npm i -g vercel
+#   2. Link project: vercel link
+#   3. Get your token: vercel token create ci-deploy
+#   4. Add to GitHub secrets:
+#        VERCEL_TOKEN         — from step 3
+#        VERCEL_ORG_ID        — from .vercel/project.json after linking
+#        VERCEL_PROJECT_ID    — from .vercel/project.json after linking
+#        ANTHROPIC_API_KEY    — your Anthropic key
+#        NEXT_PUBLIC_SUPABASE_URL
+#        SUPABASE_SERVICE_ROLE_KEY
+#        NEXT_PUBLIC_SUPABASE_ANON_KEY
+#        CRON_SECRET
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Gate: fast-checks must pass ─────────────────────────────────────────────
+  fast-checks:
+    name: Type check + unit tests (gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+          ANTHROPIC_API_KEY: "placeholder-anthropic-key"
+          CRON_SECRET: "placeholder-cron-secret"
+      - run: npx tsx scripts/test-sudoku.ts
+      - run: npx tsx scripts/test-word-search.ts
+      - run: npx tsx scripts/test-killer-nonogram.ts
+      - run: npx tsx scripts/test-citations.ts
+
+  # ── Gate: integration must pass ─────────────────────────────────────────────
+  integration:
+    name: DB integration tests (gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npx tsx scripts/test-dedup.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - run: npx tsx scripts/test-url-dedup.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+  # ── Deploy ───────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [fast-checks, integration]   # both gates must pass
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build project (Vercel)
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy to production
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # ── Post-deploy smoke test ───────────────────────────────────────────────
+      # Hits the live feed endpoint with an anonymous user request.
+      # A 200 response confirms the deployment is up and DB is reachable.
+      # A non-200 triggers a workflow failure so you know immediately.
+      - name: Smoke test — GET /api/feed
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          echo "Testing $DEPLOY_URL/api/feed"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$DEPLOY_URL/api/feed?userId=ci-smoke&sectionIndex=0&pageSize=1")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test failed — /api/feed returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed"
+
+      - name: Smoke test — GET /api/game/sudoku
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$DEPLOY_URL/api/game/sudoku?difficulty=easy")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test failed — /api/game/sudoku returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed"

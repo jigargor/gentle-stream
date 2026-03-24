@@ -247,12 +247,18 @@ function reducer(
  */
 function getCageBorders(r: number, c: number, cageMap: Map<string, Cage>) {
   const myCage = cageMap.get(`${r},${c}`);
-  if (!myCage) return { right: false, bottom: false };
+  if (!myCage) {
+    return { top: false, right: false, bottom: false, left: false };
+  }
 
+  const topCage = cageMap.get(`${r - 1},${c}`);
+  const leftCage = cageMap.get(`${r},${c - 1}`);
   const rightCage = cageMap.get(`${r},${c + 1}`);
   const bottomCage = cageMap.get(`${r + 1},${c}`);
 
   return {
+    top: !topCage || topCage.id !== myCage.id,
+    left: !leftCage || leftCage.id !== myCage.id,
     right: !rightCage || rightCage.id !== myCage.id,
     bottom: !bottomCage || bottomCage.id !== myCage.id,
   };
@@ -537,6 +543,8 @@ export default function KillerSudokuCard({
             if (wrongSolution && !celebrating) bg = "#fce8e6";
 
             // Box borders
+            const boxTop = r % 3 === 0 && r > 0;
+            const boxLeft = c % 3 === 0 && c > 0;
             const boxRight = (c + 1) % 3 === 0 && c < 8;
             const boxBottom = (r + 1) % 3 === 0 && r < 8;
 
@@ -560,9 +568,27 @@ export default function KillerSudokuCard({
                   color: badDigit ? "#c0392b" : "#2c5282",
                   transition: "background 0.08s ease",
                   transformOrigin: "center center",
-                  // Cage border (dashed, inside) wins over box border (solid, outside)
-                  borderRight: boxRight ? "2px solid #1a1a1a" : borders.right ? "1.5px dashed #888" : "0.5px solid #ddd",
-                  borderBottom: boxBottom ? "2px solid #1a1a1a" : borders.bottom ? "1.5px dashed #888" : "0.5px solid #ddd",
+                  // Explicitly render all edges so cage outlines stay visible.
+                  borderTop: boxTop
+                    ? "2px solid #1a1a1a"
+                    : borders.top
+                    ? "1.5px dashed #888"
+                    : "0.5px solid #ddd",
+                  borderLeft: boxLeft
+                    ? "2px solid #1a1a1a"
+                    : borders.left
+                    ? "1.5px dashed #888"
+                    : "0.5px solid #ddd",
+                  borderRight: boxRight
+                    ? "2px solid #1a1a1a"
+                    : borders.right
+                    ? "1.5px dashed #888"
+                    : "0.5px solid #ddd",
+                  borderBottom: boxBottom
+                    ? "2px solid #1a1a1a"
+                    : borders.bottom
+                    ? "1.5px dashed #888"
+                    : "0.5px solid #ddd",
                 }}
               >
                 {/* Cage sum label — top-left corner of each cage */}

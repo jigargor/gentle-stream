@@ -1,79 +1,41 @@
 /**
- * lib/avatar.ts
+ * Avatar storage + validation helpers.
  *
- * Avatar storage helpers.
- *
- * Two flows, one result:
- *   1. User pastes a URL  → validate it → store as-is in user_profiles.avatar_url
- *   2. User uploads file  → upload to Supabase Storage → get public URL → store that
- *
- * Both paths produce a URL string in user_profiles.avatar_url.
- * The <img> tag always just reads that one field.
- *
- * File path convention: avatars/{userId}/avatar.{ext}
- * Re-uploading replaces the file at the same path — no orphans accumulate.
+ * Stored value is always `user_profiles.avatar_url` (single URL string).
+ * Uploads go to Supabase Storage at `avatars/{userId}/avatar.{ext}` (server-side).
  */
 
-import { createClient } from "@supabase/supabase-js";
+export const AVATAR_BUCKET = "avatars";
 
-const BUCKET = "avatars";
-const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+/** Max upload size for API + UI hints */
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 
-// ─── Client-side upload (called from ProfileMenu) ─────────────────────────────
+export const AVATAR_ALLOWED_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+] as const;
+
+export type AvatarMime = (typeof AVATAR_ALLOWED_MIME)[number];
 
 /**
- * Upload a File object to Supabase Storage and return the public URL.
- * Uses the anon client — RLS policies ensure users can only write to
- * their own folder (avatars/{userId}/).
+ * Curated preset URLs (e.g. CDN or `/public/avatars/*.svg`).
+ * Empty until art exists — UI shows a “coming soon” state.
  */
-export async function uploadAvatar(
-  file: File,
-  userId: string
-): Promise<{ url: string } | { error: string }> {
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return { error: "Please upload a JPEG, PNG, WebP, or GIF image." };
-  }
-  if (file.size > MAX_FILE_BYTES) {
-    return { error: "Image must be under 2 MB." };
-  }
+export const HOUSE_AVATAR_URLS: string[] = [];
 
-  // Derive extension from MIME type (more reliable than file.name)
-  const ext = file.type.split("/")[1].replace("jpeg", "jpg");
-  const path = `${userId}/avatar.${ext}`;
-
-  // Use the browser Supabase client (anon key, RLS enforced)
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-
-  const { error: uploadError } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, file, {
-      upsert: true,          // replace existing file at same path
-      cacheControl: "3600",
-      contentType: file.type,
-    });
-
-  if (uploadError) {
-    console.error("[uploadAvatar]", uploadError);
-    return { error: "Upload failed — please try again." };
-  }
-
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  // Bust the browser cache so the new avatar shows immediately
-  const bustUrl = `${data.publicUrl}?t=${Date.now()}`;
-  return { url: bustUrl };
+export function extFromAvatarMime(mime: string): string {
+  const part = mime.split("/")[1] ?? "jpg";
+  return part === "jpeg" ? "jpg" : part;
 }
 
-// ─── URL validation (for the paste flow) ──────────────────────────────────────
+export function isAllowedAvatarMime(mime: string): mime is AvatarMime {
+  return (AVATAR_ALLOWED_MIME as readonly string[]).includes(mime);
+}
 
 /**
- * Light validation for a pasted image URL.
- * We check the URL is parseable and points at a plausible image path.
- * We do NOT fetch it — that's a server-side concern and unnecessary for
- * a user-provided avatar where a broken link just shows a fallback.
+ * Light validation for a pasted or preset image URL (external or Supabase public URL).
  */
 export function validateAvatarUrl(raw: string): { url: string } | { error: string } {
   const trimmed = raw.trim();
@@ -93,21 +55,35 @@ export function validateAvatarUrl(raw: string): { url: string } | { error: strin
   return { url: trimmed };
 }
 
-// ─── Delete old avatar from Storage (optional cleanup) ────────────────────────
-
 /**
- * Delete the user's stored avatar file.
- * Only relevant if they uploaded previously — URL-pasted avatars have nothing
- * to delete from our storage.
+ * If the URL points at **this** project's `avatars` bucket, require `userId/` prefix.
+ * Other buckets or hosts are treated as external / presets — only URL shape is validated.
  */
-export async function deleteStoredAvatar(userId: string): Promise<void> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+export function avatarsBucketAccessForUser(
+  publicUrl: string,
+  projectUrl: string | undefined,
+  userId: string
+): "ok" | "foreign_user_file" | "not_this_bucket" {
+  if (!projectUrl) return "not_this_bucket";
+  let origin: string;
+  try {
+    origin = new URL(projectUrl).origin;
+  } catch {
+    return "not_this_bucket";
+  }
+  let u: URL;
+  try {
+    u = new URL(publicUrl);
+  } catch {
+    return "not_this_bucket";
+  }
+  if (u.origin !== origin) return "not_this_bucket";
 
-  // Try all supported extensions — we don't know which was used
-  const paths = ["jpg", "png", "webp", "gif"].map((ext) => `${userId}/avatar.${ext}`);
-  await supabase.storage.from(BUCKET).remove(paths);
-  // Errors here are non-fatal — RLS will prevent cross-user deletion
+  const marker = `/storage/v1/object/public/${AVATAR_BUCKET}/`;
+  const idx = u.pathname.indexOf(marker);
+  if (idx === -1) return "not_this_bucket";
+
+  const objectPath = u.pathname.slice(idx + marker.length);
+  if (objectPath.startsWith(`${userId}/`)) return "ok";
+  return "foreign_user_file";
 }

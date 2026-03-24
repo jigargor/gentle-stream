@@ -1,309 +1,320 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { uploadAvatar } from "@/lib/avatar";
+import { useCallback, useId, useRef, useState } from "react";
+import {
+  AVATAR_ALLOWED_MIME,
+  AVATAR_MAX_BYTES,
+  HOUSE_AVATAR_URLS,
+} from "@/lib/avatar";
+import type { UserProfile } from "@/lib/types";
 
 interface AvatarInputProps {
-  userId: string;
-  currentUrl?: string | null;
-  /** Called with the new public URL after a successful save */
-  onSaved: (url: string) => void;
+  userEmail: string;
+  displayName: string | null;
+  currentAvatarUrl: string | null;
+  /** Called with updated profile after server save */
+  onProfileUpdate: (profile: UserProfile) => void;
+  onError: (message: string) => void;
 }
 
-type Mode = "url" | "upload";
-type SaveState = "idle" | "saving" | "saved" | "error";
+function initialsFrom(email: string, displayName: string | null): string {
+  if (displayName?.trim()) {
+    const parts = displayName.trim().split(/\s+/);
+    const a = parts[0]?.[0] ?? "?";
+    const b = parts[1]?.[0] ?? "";
+    return (a + b).toUpperCase();
+  }
+  const local = email.split("@")[0] ?? email;
+  return local.slice(0, 2).toUpperCase() || "?";
+}
 
-export function AvatarInput({ userId, currentUrl, onSaved }: AvatarInputProps) {
-  const [mode, setMode] = useState<Mode>("url");
-  const [urlValue, setUrlValue] = useState(currentUrl ?? "");
-  const [preview, setPreview] = useState<string | null>(currentUrl ?? null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+export function AvatarInput({
+  userEmail,
+  displayName,
+  currentAvatarUrl,
+  onProfileUpdate,
+  onError,
+}: AvatarInputProps) {
+  const inputId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [previewBust, setPreviewBust] = useState(0);
 
-  // ── Shared save: persist URL to DB ──────────────────────────────────────────
+  const displaySrc = currentAvatarUrl
+    ? `${currentAvatarUrl.split("?")[0]}?t=${previewBust}`
+    : null;
 
-  async function saveUrl(url: string) {
-    setSaveState("saving");
-    setErrorMsg(null);
+  const pickFile = useCallback(() => fileRef.current?.click(), []);
+
+  const onFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+
+      if (!(AVATAR_ALLOWED_MIME as readonly string[]).includes(file.type)) {
+        onError("Please choose a JPEG, PNG, WebP, or GIF.");
+        return;
+      }
+      if (file.size > AVATAR_MAX_BYTES) {
+        onError(`Image must be under ${Math.floor(AVATAR_MAX_BYTES / (1024 * 1024))} MB.`);
+        return;
+      }
+
+      setBusy(true);
+      onError("");
+      try {
+        const fd = new FormData();
+        fd.set("file", file);
+        const res = await fetch("/api/user/avatar", {
+          method: "POST",
+          body: fd,
+          credentials: "include",
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          hint?: string;
+          profile?: UserProfile;
+        };
+        if (!res.ok) {
+          onError(
+            [data.error, data.hint].filter(Boolean).join(" ") || "Upload failed."
+          );
+          return;
+        }
+        if (data.profile) {
+          onProfileUpdate(data.profile);
+          setPreviewBust(Date.now());
+        }
+      } catch {
+        onError("Upload failed — check your connection.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onError, onProfileUpdate]
+  );
+
+  const selectHouseAvatar = useCallback(
+    async (url: string) => {
+      setBusy(true);
+      onError("");
+      try {
+        const res = await fetch("/api/user/avatar", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatarUrl: url }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          hint?: string;
+          profile?: UserProfile;
+        };
+        if (!res.ok) {
+          onError(
+            [data.error, data.hint].filter(Boolean).join(" ") || "Could not save avatar."
+          );
+          return;
+        }
+        if (data.profile) {
+          onProfileUpdate(data.profile);
+          setPreviewBust(Date.now());
+        }
+      } catch {
+        onError("Could not save avatar.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onError, onProfileUpdate]
+  );
+
+  const clearAvatar = useCallback(async () => {
+    setBusy(true);
+    onError("");
     try {
       const res = await fetch("/api/user/avatar", {
-        method: "POST",
+        method: "DELETE",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ avatarUrl: url }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        profile?: UserProfile;
+      };
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `HTTP ${res.status}`);
+        onError(typeof data.error === "string" ? data.error : "Could not remove avatar.");
+        return;
       }
-      setSaveState("saved");
-      setPreview(url);
-      onSaved(url);
-      setTimeout(() => setSaveState("idle"), 2000);
-    } catch (e) {
-      setSaveState("error");
-      setErrorMsg(e instanceof Error ? e.message : "Save failed.");
+      if (data.profile) {
+        onProfileUpdate(data.profile);
+        setPreviewBust(Date.now());
+      }
+    } catch {
+      onError("Could not remove avatar.");
+    } finally {
+      setBusy(false);
     }
-  }
-
-  // ── URL mode ─────────────────────────────────────────────────────────────────
-
-  async function handleUrlSave() {
-    const trimmed = urlValue.trim();
-    if (!trimmed) return;
-    await saveUrl(trimmed);
-  }
-
-  // ── Upload mode ───────────────────────────────────────────────────────────────
-
-  async function handleFile(file: File) {
-    // Show local preview immediately
-    const objectUrl = URL.createObjectURL(file);
-    setPreview(objectUrl);
-    setSaveState("saving");
-    setErrorMsg(null);
-
-    const result = await uploadAvatar(file, userId);
-    if ("error" in result) {
-      setSaveState("error");
-      setErrorMsg(result.error);
-      setPreview(currentUrl ?? null);
-      URL.revokeObjectURL(objectUrl);
-      return;
-    }
-
-    URL.revokeObjectURL(objectUrl);
-    await saveUrl(result.url);
-  }
-
-  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) void handleFile(file);
-    e.target.value = ""; // allow re-selecting same file
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) void handleFile(file);
-  }
-
-  // ── Styles ────────────────────────────────────────────────────────────────────
-
-  const s = {
-    root: {
-      display: "flex",
-      flexDirection: "column" as const,
-      gap: "0.75rem",
-    },
-    label: {
-      fontFamily: "'Playfair Display', Georgia, serif",
-      fontSize: "0.72rem",
-      letterSpacing: "0.1em",
-      textTransform: "uppercase" as const,
-      color: "#555",
-    },
-    previewRow: {
-      display: "flex",
-      alignItems: "center",
-      gap: "1rem",
-    },
-    avatar: {
-      width: 64,
-      height: 64,
-      borderRadius: "50%",
-      objectFit: "cover" as const,
-      border: "2px solid #1a1a1a",
-      flexShrink: 0,
-      background: "#ede9e1",
-    },
-    initials: {
-      width: 64,
-      height: 64,
-      borderRadius: "50%",
-      border: "2px solid #1a1a1a",
-      background: "#1a472a",
-      color: "#faf8f3",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontFamily: "'Playfair Display', Georgia, serif",
-      fontSize: "1.4rem",
-      fontWeight: 700,
-      flexShrink: 0,
-    },
-    tabs: {
-      display: "flex",
-      gap: 0,
-      border: "1px solid #1a1a1a",
-      width: "fit-content",
-    },
-    tab: (active: boolean) => ({
-      padding: "0.25rem 0.75rem",
-      fontFamily: "'Playfair Display', Georgia, serif",
-      fontSize: "0.68rem",
-      letterSpacing: "0.06em",
-      textTransform: "uppercase" as const,
-      cursor: "pointer",
-      border: "none",
-      background: active ? "#1a1a1a" : "transparent",
-      color: active ? "#faf8f3" : "#555",
-      transition: "background 0.15s ease",
-    }),
-    urlRow: {
-      display: "flex",
-      gap: "0.5rem",
-    },
-    input: {
-      flex: 1,
-      fontFamily: "Georgia, serif",
-      fontSize: "0.8rem",
-      padding: "0.4rem 0.6rem",
-      border: "1px solid #ccc",
-      background: "#faf8f3",
-      color: "#1a1a1a",
-      outline: "none",
-      minWidth: 0,
-    },
-    saveBtn: (state: SaveState) => ({
-      padding: "0.4rem 0.9rem",
-      fontFamily: "'Playfair Display', Georgia, serif",
-      fontSize: "0.7rem",
-      letterSpacing: "0.06em",
-      textTransform: "uppercase" as const,
-      border: "1px solid #1a1a1a",
-      cursor: state === "saving" ? "wait" : "pointer",
-      background: state === "saved" ? "#1a472a" : "#1a1a1a",
-      color: "#faf8f3",
-      flexShrink: 0,
-      transition: "background 0.2s ease",
-    }),
-    dropZone: (over: boolean) => ({
-      border: `1.5px dashed ${over ? "#1a472a" : "#aaa"}`,
-      background: over ? "#f0f7f2" : "#faf8f3",
-      padding: "1.25rem",
-      textAlign: "center" as const,
-      cursor: "pointer",
-      transition: "all 0.15s ease",
-      fontFamily: "'IM Fell English', Georgia, serif",
-      fontStyle: "italic",
-      color: over ? "#1a472a" : "#888",
-      fontSize: "0.82rem",
-    }),
-    hint: {
-      fontFamily: "'IM Fell English', Georgia, serif",
-      fontStyle: "italic",
-      fontSize: "0.7rem",
-      color: "#aaa",
-    },
-    error: {
-      fontFamily: "'IM Fell English', Georgia, serif",
-      fontStyle: "italic",
-      fontSize: "0.75rem",
-      color: "#8b4513",
-    },
-  };
-
-  const btnLabel =
-    saveState === "saving" ? "Saving…" :
-    saveState === "saved"  ? "Saved ✓" :
-    "Save";
+  }, [onError, onProfileUpdate]);
 
   return (
-    <div style={s.root}>
-      <span style={s.label}>Avatar</span>
-
-      {/* Preview + tabs */}
-      <div style={s.previewRow}>
-        {preview ? (
+    <div style={{ marginBottom: "0.55rem" }}>
+      <span
+        style={{
+          fontSize: "0.65rem",
+          color: "#888",
+          display: "block",
+          marginBottom: "0.35rem",
+        }}
+      >
+        Photo
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+        {displaySrc ? (
+          // eslint-disable-next-line @next/next/no-img-element -- user-provided arbitrary URLs
           <img
-            src={preview}
-            alt="Avatar preview"
-            style={s.avatar}
-            onError={() => setPreview(null)}
+            src={displaySrc}
+            alt=""
+            width={56}
+            height={56}
+            style={{
+              borderRadius: "50%",
+              objectFit: "cover",
+              border: "1px solid #ccc",
+            }}
           />
         ) : (
-          <div style={s.initials}>
-            {userId.slice(0, 2).toUpperCase()}
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, #4a6741, #2c3d28)",
+              color: "#faf8f3",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.85rem",
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {initialsFrom(userEmail, displayName)}
           </div>
         )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", flex: 1, minWidth: 0 }}>
-          {/* Mode tabs */}
-          <div style={s.tabs}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+          <input
+            ref={fileRef}
+            id={inputId}
+            type="file"
+            accept={AVATAR_ALLOWED_MIME.join(",")}
+            style={{ display: "none" }}
+            onChange={(ev) => void onFileChange(ev)}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={pickFile}
+            style={{
+              background: "#1a1a1a",
+              color: "#faf8f3",
+              border: "none",
+              padding: "0.3rem 0.65rem",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.62rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              cursor: busy ? "wait" : "pointer",
+              alignSelf: "flex-start",
+            }}
+          >
+            {busy ? "Working…" : "Upload photo"}
+          </button>
+          {currentAvatarUrl ? (
             <button
               type="button"
-              style={s.tab(mode === "url")}
-              onClick={() => setMode("url")}
+              disabled={busy}
+              onClick={() => void clearAvatar()}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#999",
+                fontSize: "0.62rem",
+                textDecoration: "underline",
+                cursor: busy ? "wait" : "pointer",
+                padding: 0,
+                textAlign: "left",
+              }}
             >
-              Paste URL
+              Remove photo
             </button>
-            <button
-              type="button"
-              style={s.tab(mode === "upload")}
-              onClick={() => setMode("upload")}
-            >
-              Upload
-            </button>
-          </div>
-
-          {/* URL mode */}
-          {mode === "url" && (
-            <div style={s.urlRow}>
-              <input
-                type="url"
-                placeholder="https://example.com/photo.jpg"
-                value={urlValue}
-                onChange={(e) => setUrlValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleUrlSave(); }}
-                style={s.input}
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                style={s.saveBtn(saveState)}
-                disabled={saveState === "saving" || !urlValue.trim()}
-                onClick={() => void handleUrlSave()}
-              >
-                {btnLabel}
-              </button>
-            </div>
-          )}
-
-          {/* Upload mode */}
-          {mode === "upload" && (
-            <div
-              style={s.dropZone(dragOver)}
-              onClick={() => fileRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-            >
-              {saveState === "saving"
-                ? "Uploading…"
-                : "Drop an image here, or click to choose"}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                style={{ display: "none" }}
-                onChange={handleFileInput}
-              />
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* Status messages */}
-      {saveState === "error" && errorMsg && (
-        <p style={s.error}>{errorMsg}</p>
-      )}
-      {mode === "upload" && saveState === "idle" && (
-        <p style={s.hint}>JPEG, PNG, WebP or GIF · max 2 MB</p>
-      )}
+      <div style={{ marginTop: "0.65rem" }}>
+        <span
+          style={{
+            fontSize: "0.6rem",
+            color: "#aaa",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            display: "block",
+            marginBottom: "0.35rem",
+          }}
+        >
+          Preset avatars
+        </span>
+        {HOUSE_AVATAR_URLS.length === 0 ? (
+          <p
+            style={{
+              margin: 0,
+              fontSize: "0.68rem",
+              color: "#aaa",
+              fontStyle: "italic",
+              lineHeight: 1.4,
+            }}
+          >
+            More styles coming soon. Add URLs to{" "}
+            <code style={{ fontSize: "0.62rem" }}>HOUSE_AVATAR_URLS</code> in{" "}
+            <code style={{ fontSize: "0.62rem" }}>lib/avatar.ts</code>.
+          </p>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.35rem",
+            }}
+          >
+            {HOUSE_AVATAR_URLS.map((url) => (
+              <button
+                key={url}
+                type="button"
+                disabled={busy}
+                onClick={() => void selectHouseAvatar(url)}
+                style={{
+                  padding: 0,
+                  border: "2px solid transparent",
+                  borderRadius: "50%",
+                  cursor: busy ? "wait" : "pointer",
+                  background: "none",
+                }}
+                title="Use this avatar"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt=""
+                  width={40}
+                  height={40}
+                  style={{ borderRadius: "50%", objectFit: "cover", display: "block" }}
+                />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

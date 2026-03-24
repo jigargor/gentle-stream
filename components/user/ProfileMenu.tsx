@@ -8,6 +8,7 @@ import {
 } from "@/lib/user/feed-settings";
 import { isCreator } from "@/lib/user/creator";
 import type { UserProfile, SavedArticleListItem, UserGameStats } from "@/lib/types";
+import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
   userEmail: string;
@@ -46,7 +47,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
   const [profileForm, setProfileForm] = useState({
     displayName: "",
     username: "",
-    avatarUrl: "",
   });
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -65,7 +65,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
         setProfileForm({
           displayName: data.displayName ?? "",
           username: data.username ?? "",
-          avatarUrl: data.avatarUrl ?? "",
         });
       } else {
         setLoadError("Could not load profile.");
@@ -142,7 +141,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
         body: JSON.stringify({
           displayName: profileForm.displayName.trim() || null,
           username: profileForm.username.trim().toLowerCase() || null,
-          avatarUrl: profileForm.avatarUrl.trim() || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -393,31 +391,15 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
                 fontSize: "0.85rem",
               }}
             />
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
-              }}
-            >
-              Avatar image URL
-            </label>
-            <input
-              value={profileForm.avatarUrl}
-              onChange={(e) =>
-                setProfileForm((f) => ({ ...f, avatarUrl: e.target.value }))
-              }
-              placeholder="https://…"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-              }}
-            />
+            {profile && (
+              <AvatarInput
+                userEmail={userEmail}
+                displayName={profile.displayName}
+                currentAvatarUrl={profile.avatarUrl}
+                onProfileUpdate={(p) => setProfile(p)}
+                onError={(msg) => setSaveError(msg)}
+              />
+            )}
             <button
               type="button"
               disabled={saving}

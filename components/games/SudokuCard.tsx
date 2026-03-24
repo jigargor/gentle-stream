@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { SudokuPuzzle, Difficulty } from "@/lib/games/types";
+import {
+  GAME_HOW_TO_URL,
+  GameHowToPlayLink,
+} from "@/components/games/GameHowToPlayLink";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -193,8 +197,12 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
 
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
+      const elapsedSecs =
+        completed && state.startedAt
+          ? Math.floor((Date.now() - state.startedAt) / 1000)
+          : state.elapsedSecs;
 
-      return { ...state, values, notes, errors, completed };
+      return { ...state, values, notes, errors, completed, elapsedSecs };
     }
 
     case "ERASE": {
@@ -566,6 +574,9 @@ export default function SudokuCard({
           <span style={titleStyle}>Sudoku</span>
           <span style={metaStyle}>{difficultyLabel}</span>
         </div>
+        <div style={{ width: "100%" }}>
+          <GameHowToPlayLink href={GAME_HOW_TO_URL.sudoku} />
+        </div>
 
         <div style={{
           textAlign: "center",
@@ -628,6 +639,9 @@ export default function SudokuCard({
             </span>
           )}
         </span>
+      </div>
+      <div style={{ width: "100%" }}>
+        <GameHowToPlayLink href={GAME_HOW_TO_URL.sudoku} />
       </div>
 
       {/* Grid */}

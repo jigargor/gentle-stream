@@ -12,11 +12,17 @@ export interface LoginFormProps {
   /** From `?next=` — passed by the server page to avoid `useSearchParams` + Suspense chunk issues in dev. */
   initialNext?: string | null;
   initialAuthError?: string | null;
+  /** From `?reason=session_expired` after max session age. */
+  initialSessionExpired?: boolean;
+  /** From `?error=magic_link_browser` — PKCE verifier missing (wrong browser / app). */
+  initialMagicLinkBrowserError?: boolean;
 }
 
 export function LoginForm({
   initialNext = null,
   initialAuthError = null,
+  initialSessionExpired = false,
+  initialMagicLinkBrowserError = false,
 }: LoginFormProps) {
   const nextPath = useMemo(
     () => safeNextPath(initialNext ?? null),
@@ -38,6 +44,7 @@ export function LoginForm({
     setOauthBusy(true);
     try {
       const supabase = createClient();
+      await supabase.auth.signOut({ scope: "local" });
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -55,6 +62,7 @@ export function LoginForm({
     setEmailBusy(true);
     try {
       const supabase = createClient();
+      await supabase.auth.signOut({ scope: "local" });
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
@@ -118,7 +126,40 @@ export function LoginForm({
           Sign in to read your personalised feed.
         </p>
 
-        {authError && (
+        {initialSessionExpired && (
+          <p
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.82rem",
+              color: "#8b4513",
+              margin: "0 0 1rem",
+              textAlign: "center",
+            }}
+          >
+            Your session expired after two hours. Sign in again to continue.
+          </p>
+        )}
+
+        {initialMagicLinkBrowserError && (
+          <p
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.82rem",
+              color: "#8b4513",
+              margin: "0 0 1rem",
+              textAlign: "center",
+              lineHeight: 1.5,
+            }}
+          >
+            This sign-in link must be opened in the{" "}
+            <strong>same browser</strong> where you clicked &quot;Email me a sign-in
+            link&quot; (same profile on this device). In-app mail apps often open links
+            elsewhere, which cannot complete the handoff. We signed you out here so you
+            are not left in another user&apos;s session by mistake.
+          </p>
+        )}
+
+        {authError && !initialMagicLinkBrowserError && (
           <p
             style={{
               fontFamily: "'IM Fell English', Georgia, serif",

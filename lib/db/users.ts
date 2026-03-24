@@ -6,6 +6,7 @@ import {
   DEFAULT_CATEGORY_WEIGHTS,
   DEFAULT_GAME_RATIO,
 } from "../constants";
+import { USERNAME_CHANGE_COOLDOWN_MS } from "../user/username-policy";
 
 interface UserProfileRow {
   user_id: string;
@@ -14,12 +15,29 @@ interface UserProfileRow {
   user_role?: string;
   display_name?: string | null;
   username?: string | null;
+  username_set_at?: string | null;
   avatar_url?: string | null;
   preferred_emotions: string[];
   preferred_locales: string[];
   seen_article_ids: string[];
   created_at: string;
   updated_at: string;
+}
+
+export class UsernameCooldownError extends Error {
+  readonly unlockAtIso: string;
+
+  constructor(unlockAtIso: string) {
+    super("Username cannot be changed until the cooldown ends.");
+    this.name = "UsernameCooldownError";
+    this.unlockAtIso = unlockAtIso;
+  }
+}
+
+function normalizeUsernameValue(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  const t = String(s).trim().toLowerCase();
+  return t.length ? t : null;
 }
 
 function rowToProfile(row: UserProfileRow): UserProfile {
@@ -41,6 +59,7 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     userRole: role,
     displayName: row.display_name ?? null,
     username: row.username ?? null,
+    usernameSetAt: row.username_set_at ?? null,
     avatarUrl: row.avatar_url ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
@@ -153,8 +172,34 @@ export async function updateUserDisplay(
 ): Promise<UserProfile> {
   const updates: Partial<UserProfileRow> = {};
   if (fields.displayName !== undefined) updates.display_name = fields.displayName;
-  if (fields.username !== undefined) updates.username = fields.username;
   if (fields.avatarUrl !== undefined) updates.avatar_url = fields.avatarUrl;
+
+  if (fields.username !== undefined) {
+    const { data: row, error: selErr } = await db
+      .from("user_profiles")
+      .select("username, username_set_at")
+      .eq("user_id", userId)
+      .single();
+
+    if (selErr) throw new Error(`updateUserDisplay: ${selErr.message}`);
+
+    const current = normalizeUsernameValue(row?.username as string | null);
+    const next = normalizeUsernameValue(fields.username);
+
+    if (current !== next) {
+      const setAt = (row?.username_set_at as string | null) ?? null;
+      if (setAt != null && current != null) {
+        const unlockMs = new Date(setAt).getTime() + USERNAME_CHANGE_COOLDOWN_MS;
+        if (Date.now() < unlockMs) {
+          throw new UsernameCooldownError(new Date(unlockMs).toISOString());
+        }
+      }
+
+      updates.username = next;
+      updates.username_set_at =
+        next === null ? null : new Date().toISOString();
+    }
+  }
 
   if (Object.keys(updates).length === 0) {
     const { data, error } = await db

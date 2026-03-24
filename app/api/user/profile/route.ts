@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateUserProfile, updateUserDisplay } from "@/lib/db/users";
+import {
+  getOrCreateUserProfile,
+  updateUserDisplay,
+  UsernameCooldownError,
+} from "@/lib/db/users";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 
 const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
@@ -95,6 +99,15 @@ export async function PATCH(request: NextRequest) {
     });
     return NextResponse.json(profile);
   } catch (e: unknown) {
+    if (e instanceof UsernameCooldownError) {
+      return NextResponse.json(
+        {
+          error: e.message,
+          unlockAt: e.unlockAtIso,
+        },
+        { status: 429 }
+      );
+    }
     const message = e instanceof Error ? e.message : "Unknown error";
     if (message.includes("unique") || message.includes("duplicate")) {
       return NextResponse.json({ error: "That username is taken" }, { status: 409 });

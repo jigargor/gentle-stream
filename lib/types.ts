@@ -50,6 +50,8 @@ export interface UserProfile {
   userRole: UserRole;
   displayName: string | null;
   username: string | null;
+  /** When `username` was last set or changed; used for 24h rename cooldown. */
+  usernameSetAt: string | null;
   avatarUrl: string | null;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions

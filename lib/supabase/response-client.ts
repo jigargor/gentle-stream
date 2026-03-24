@@ -1,11 +1,19 @@
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import type { NextRequest, NextResponse } from "next/server";
 import {
   rejectIfSupabaseKeyIsPlatformSecret,
   rejectIfSupabaseKeyIsServiceRole,
 } from "./validate-anon-key";
 
-export function createClient() {
+/**
+ * Supabase client for Route Handlers / middleware branches where session cookies must be
+ * applied to a specific NextResponse (redirects). Using cookies() from next/headers in a
+ * Route Handler often does not persist Set-Cookie on the returned redirect.
+ */
+export function createSupabaseResponseClient(
+  request: NextRequest,
+  response: NextResponse
+) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
@@ -16,21 +24,15 @@ export function createClient() {
   rejectIfSupabaseKeyIsPlatformSecret(key);
   rejectIfSupabaseKeyIsServiceRole(key);
 
-  const cookieStore = cookies();
-
   return createServerClient(url, key, {
     cookies: {
       getAll() {
-        return cookieStore.getAll();
+        return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          );
-        } catch {
-          // Called from a Server Component without mutable cookies; middleware refreshes session.
-        }
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
       },
     },
   });

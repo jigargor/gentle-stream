@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   display_name       TEXT,
   username           TEXT,
   avatar_url         TEXT,
+  username_set_at    TIMESTAMPTZ,
 
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()

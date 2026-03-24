@@ -16,10 +16,16 @@ export default function LoginPage({
 }: {
   searchParams: Record<string, string | string[] | undefined>;
 }) {
+  const errorParam = firstParam(searchParams.error) ?? null;
+
   return (
     <LoginForm
       initialNext={firstParam(searchParams.next) ?? null}
-      initialAuthError={firstParam(searchParams.error) ?? null}
+      initialAuthError={errorParam}
+      initialSessionExpired={
+        firstParam(searchParams.reason) === "session_expired"
+      }
+      initialMagicLinkBrowserError={errorParam === "magic_link_browser"}
     />
   );
 }

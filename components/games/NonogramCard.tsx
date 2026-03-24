@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { NonogramPuzzle, Difficulty } from "@/lib/games/types";
+import {
+  GAME_HOW_TO_URL,
+  GameHowToPlayLink,
+} from "@/components/games/GameHowToPlayLink";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -242,6 +246,9 @@ export default function NonogramCard({
           <span style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.3rem", fontWeight: 700 }}>Nonogram</span>
           <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontStyle: "italic", fontSize: "0.78rem", color: "#888" }}>{puzzle.difficulty}</span>
         </div>
+        <div style={{ width: "100%" }}>
+          <GameHowToPlayLink href={GAME_HOW_TO_URL.nonogram} />
+        </div>
         <div style={{ textAlign: "center", padding: "2rem 1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>
           <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
           <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>Picture revealed</div>
@@ -267,6 +274,9 @@ export default function NonogramCard({
           <span>{puzzle.difficulty}</span>
           {state.startedAt && <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatTime(state.elapsedSecs)}</span>}
         </span>
+      </div>
+      <div style={{ width: "100%" }}>
+        <GameHowToPlayLink href={GAME_HOW_TO_URL.nonogram} />
       </div>
 
       {/* Puzzle grid with clues */}

@@ -8,11 +8,13 @@ import {
   nearestPresetValue,
 } from "@/lib/user/feed-settings";
 import { isCreator } from "@/lib/user/creator";
-import type { UserProfile, SavedArticleListItem, UserGameStats } from "@/lib/types";
+import {
+  isUsernameChangeLocked,
+  usernameChangeUnlocksAtIso,
+  USERNAME_CHANGE_COOLDOWN_HOURS,
+} from "@/lib/user/username-policy";
+import type { UserProfile, UserGameStats } from "@/lib/types";
 import { AvatarInput } from "./AvatarInput";
-
-/** Max rows in the profile dropdown; full list lives at /me/saved */
-const DROPDOWN_SAVED_LIMIT = 8;
 
 interface ProfileMenuProps {
   userEmail: string;
@@ -43,7 +45,6 @@ function formatDuration(totalSec: number): string {
 export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [saves, setSaves] = useState<SavedArticleListItem[]>([]);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -89,9 +90,8 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [pr, sv, st] = await Promise.all([
+      const [pr, st] = await Promise.all([
         fetch("/api/user/profile", { credentials: "include" }),
-        fetch("/api/user/article-saves", { credentials: "include" }),
         fetch("/api/user/game-stats", { credentials: "include" }),
       ]);
 
@@ -104,11 +104,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
         });
       } else {
         setLoadError("Could not load profile.");
-      }
-
-      if (sv.ok) {
-        const j = (await sv.json()) as { items: SavedArticleListItem[] };
-        setSaves(j.items ?? []);
       }
 
       if (st.ok) {
@@ -170,20 +165,41 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     setSaveError(null);
     setSaving(true);
     try {
+      const usernameLocked =
+        profile != null &&
+        isUsernameChangeLocked(profile.username, profile.usernameSetAt);
+
       const res = await fetch("/api/user/profile", {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName: profileForm.displayName.trim() || null,
-          username: profileForm.username.trim().toLowerCase() || null,
+          ...(usernameLocked
+            ? {}
+            : { username: profileForm.username.trim().toLowerCase() || null }),
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        unlockAt?: string;
+      };
       if (!res.ok) {
-        setSaveError(
-          typeof data.error === "string" ? data.error : "Could not save profile."
-        );
+        if (
+          res.status === 429 &&
+          typeof data.unlockAt === "string" &&
+          typeof data.error === "string"
+        ) {
+          const when = new Date(data.unlockAt).toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          });
+          setSaveError(`${data.error} (${when})`);
+        } else {
+          setSaveError(
+            typeof data.error === "string" ? data.error : "Could not save profile."
+          );
+        }
         return;
       }
       setProfile(data as UserProfile);
@@ -192,14 +208,6 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     } finally {
       setSaving(false);
     }
-  }
-
-  async function removeSave(id: string) {
-    await fetch(`/api/user/article-saves?id=${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    setSaves((prev) => prev.filter((s) => s.id !== id));
   }
 
   const currentRatio = profile?.gameRatio ?? 0.2;
@@ -215,6 +223,10 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
     profile?.username && profile?.displayName
       ? `@${profile.username}`
       : userEmail;
+
+  const usernameLocked =
+    profile != null &&
+    isUsernameChangeLocked(profile.username, profile.usernameSetAt);
 
   return (
     <div
@@ -452,6 +464,37 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
             >
               Username
             </label>
+            {usernameLocked && profile?.usernameSetAt ? (
+              <p
+                style={{
+                  fontSize: "0.65rem",
+                  color: "#777",
+                  margin: "0 0 0.35rem",
+                  lineHeight: 1.35,
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                You can change this again after{" "}
+                {new Date(
+                  usernameChangeUnlocksAtIso(profile.usernameSetAt)
+                ).toLocaleString(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}{" "}
+                ({USERNAME_CHANGE_COOLDOWN_HOURS}-hour lock after each change).
+              </p>
+            ) : (
+              <p
+                style={{
+                  fontSize: "0.62rem",
+                  color: "#aaa",
+                  margin: "0 0 0.35rem",
+                  lineHeight: 1.35,
+                }}
+              >
+                Unique on the site; lowercase letters, numbers, underscore (3–30).
+              </p>
+            )}
             <input
               value={profileForm.username}
               onChange={(e) =>
@@ -461,6 +504,13 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
                 }))
               }
               placeholder="letters_numbers_underscore"
+              disabled={usernameLocked}
+              aria-readonly={usernameLocked}
+              title={
+                usernameLocked
+                  ? "Username is locked for 24 hours after the last change"
+                  : undefined
+              }
               style={{
                 width: "100%",
                 boxSizing: "border-box",
@@ -468,6 +518,8 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
                 padding: "0.35rem 0.45rem",
                 border: "1px solid #ccc",
                 fontSize: "0.85rem",
+                background: usernameLocked ? "#f0ede6" : undefined,
+                cursor: usernameLocked ? "not-allowed" : undefined,
               }}
             />
             {profile && (
@@ -555,103 +607,44 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
-            <Link
-              href="/me/saved"
-              onClick={() => setOpen(false)}
+            <h3
               style={{
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.78rem",
                 margin: "0 0 0.45rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                color: "#1a472a",
-                textDecoration: "underline",
-                textUnderlineOffset: "3px",
-                display: "inline-block",
+                color: "#555",
               }}
             >
               Saved articles
+            </h3>
+            <Link
+              href="/me/saved"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+              }}
+            >
+              Open saved library
             </Link>
-            {saves.length === 0 ? (
-              <p
-                style={{
-                  fontStyle: "italic",
-                  color: "#aaa",
-                  fontSize: "0.78rem",
-                  margin: "0.35rem 0 0",
-                }}
-              >
-                Use <strong>Save</strong> on an article card.
-              </p>
-            ) : (
-              <>
-                <ul style={{ listStyle: "none", margin: "0.35rem 0 0", padding: 0 }}>
-                  {saves.slice(0, DROPDOWN_SAVED_LIMIT).map((s) => (
-                    <li
-                      key={s.id}
-                      style={{
-                        borderBottom: "1px solid #e8e4dc",
-                        padding: "0.4rem 0",
-                        fontSize: "0.75rem",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: "0.35rem",
-                          alignItems: "flex-start",
-                        }}
-                      >
-                        <Link
-                          href={`/me/read/${encodeURIComponent(s.articleId)}`}
-                          onClick={() => setOpen(false)}
-                          style={{
-                            color: "#1a472a",
-                            fontWeight: 600,
-                            textDecoration: "none",
-                            lineHeight: 1.35,
-                          }}
-                        >
-                          {s.articleTitle}
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => void removeSave(s.id)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#999",
-                            cursor: "pointer",
-                            fontSize: "0.65rem",
-                            textTransform: "uppercase",
-                            flexShrink: 0,
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {saves.length > DROPDOWN_SAVED_LIMIT ? (
-                  <Link
-                    href="/me/saved"
-                    onClick={() => setOpen(false)}
-                    style={{
-                      display: "inline-block",
-                      marginTop: "0.45rem",
-                      fontFamily: "'IM Fell English', Georgia, serif",
-                      fontSize: "0.72rem",
-                      color: "#666",
-                      textDecoration: "underline",
-                    }}
-                  >
-                    View all {saves.length} saved →
-                  </Link>
-                ) : null}
-              </>
-            )}
+            <p
+              style={{
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#888",
+                margin: "0.35rem 0 0",
+                lineHeight: 1.4,
+              }}
+            >
+              Use <strong>Save</strong> on an article card; manage the full list here.
+            </p>
           </section>
 
           <section style={{ marginBottom: "0.75rem" }}>

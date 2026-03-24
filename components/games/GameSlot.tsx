@@ -10,6 +10,8 @@ interface GameSlotProps {
   difficulty?: Difficulty;
   /** Article category of the surrounding feed section — used for word bank theming */
   category?: string;
+  /** Softer frame when embedded in an article card */
+  embedded?: boolean;
 }
 
 type AnyPuzzle = SudokuPuzzle | WordSearchPuzzle;
@@ -26,6 +28,7 @@ export default function GameSlot({
   gameType,
   difficulty = "medium",
   category,
+  embedded = false,
 }: GameSlotProps) {
   const [puzzle, setPuzzle] = useState<AnyPuzzle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,7 +121,13 @@ export default function GameSlot({
   }
 
   if (gameType === "sudoku") {
-    return <SudokuCard puzzle={puzzle as SudokuPuzzle} onNewPuzzle={handleNewPuzzle} />;
+    return (
+      <SudokuCard
+        puzzle={puzzle as SudokuPuzzle}
+        onNewPuzzle={handleNewPuzzle}
+        embedded={embedded}
+      />
+    );
   }
 
   if (gameType === "word_search") {

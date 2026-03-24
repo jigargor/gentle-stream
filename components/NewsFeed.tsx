@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead from "./Masthead";
+import { SignOutButton } from "./auth/SignOutButton";
 import CategoryBar from "./CategoryBar";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
@@ -10,17 +11,6 @@ import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
 import type { Article, FeedSection, ArticleFeedSection, GameFeedSection } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
-
-function getOrCreateUserId(): string {
-  if (typeof window === "undefined") return "anonymous";
-  const key = "gentle_stream_user_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = `anon_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    localStorage.setItem(key, id);
-  }
-  return id;
-}
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -61,7 +51,13 @@ function pickGameType(sectionIndex: number): "sudoku" | "word_search" {
 
 const FEED_FETCH_TIMEOUT_MS = 90_000;
 
-export default function NewsFeed() {
+export interface NewsFeedProps {
+  /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
+  userId: string;
+  userEmail?: string | null;
+}
+
+export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const [sections, setSections] = useState<FeedSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +79,7 @@ export default function NewsFeed() {
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
-    userIdRef.current = getOrCreateUserId();
+    userIdRef.current = userId;
 
     // Load user's game ratio preference if stored locally
     const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
@@ -91,7 +87,7 @@ export default function NewsFeed() {
       const ratio = parseFloat(storedRatio);
       if (!isNaN(ratio)) gameRatioRef.current = ratio;
     }
-  }, []);
+  }, [userId]);
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
     if (loadingRef.current) return;
@@ -254,7 +250,26 @@ export default function NewsFeed() {
 
   return (
     <div style={{ background: "#ede9e1", minHeight: "100vh" }}>
-      <Masthead />
+      <Masthead
+        accountSlot={
+          userEmail ? (
+            <>
+              <span
+                title={userEmail}
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontStyle: "normal",
+                }}
+              >
+                {userEmail}
+              </span>
+              <SignOutButton />
+            </>
+          ) : undefined
+        }
+      />
       <CategoryBar selected={activeCategory} onSelect={handleCategorySelect} />
 
       {liveGenerating && (

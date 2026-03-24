@@ -1,5 +1,12 @@
 "use client";
 
+import type { ReactNode } from "react";
+
+interface MastheadProps {
+  /** Replaces the right meta line (volume / date line) when signed in. */
+  accountSlot?: ReactNode;
+}
+
 function getTodayDate() {
   return new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -9,7 +16,7 @@ function getTodayDate() {
   });
 }
 
-export default function Masthead() {
+export default function Masthead({ accountSlot }: MastheadProps) {
   return (
     <header
       className="hide-scrollbar"
@@ -42,7 +49,17 @@ export default function Masthead() {
         <span style={{ fontStyle: "italic" }}>
           &ldquo;All the news that lifts the spirit&rdquo;
         </span>
-        <span>Vol. I &nbsp;&middot;&nbsp; Est. 2025</span>
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: "0.35rem",
+            maxWidth: "min(42vw, 220px)",
+          }}
+        >
+          {accountSlot ?? <>Vol. I &nbsp;&middot;&nbsp; Est. 2025</>}
+        </span>
       </div>
 
       {/* Masthead title */}

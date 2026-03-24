@@ -140,8 +140,9 @@ export function generateWordSearch(
 ): WordSearchPuzzle {
   const config = CONFIG[difficulty];
 
-  // Pick word bank
-  const bank = (category && WORD_BANKS[category]) ?? DEFAULT_WORDS;
+  // Pick word bank (avoid `"" && …` which narrows to empty string for TypeScript)
+  const bank: string[] =
+    category && WORD_BANKS[category] ? WORD_BANKS[category] : DEFAULT_WORDS;
 
   // Filter words that fit the grid and shuffle
   const maxLen = Math.min(config.rows, config.cols) - 1;

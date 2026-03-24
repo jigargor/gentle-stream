@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import SudokuCard, { type SudokuCloudSlice } from "./SudokuCard";
+import KillerSudokuCard from "./KillerSudokuCard";
 import WordSearchCard, { type WordSearchCloudSlice } from "./WordSearchCard";
+import NonogramCard from "./NonogramCard";
 import type {
   SudokuPuzzle,
+  KillerSudokuPuzzle,
   WordSearchPuzzle,
+  NonogramPuzzle,
   Difficulty,
   GameType,
 } from "@/lib/games/types";
@@ -21,7 +25,7 @@ interface GameSlotProps {
   persistCloud?: boolean;
 }
 
-type AnyPuzzle = SudokuPuzzle | WordSearchPuzzle;
+type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle;
 
 function puzzleEndpoint(
   gameType: GameType,
@@ -30,10 +34,19 @@ function puzzleEndpoint(
 ): string {
   const params = new URLSearchParams({ difficulty: diff });
   if (category) params.set("category", category);
-  if (gameType === "sudoku") return `/api/game/sudoku?${params}`;
-  if (gameType === "word_search") return `/api/game/word-search?${params}`;
+  if (gameType === "sudoku")        return `/api/game/sudoku?${params}`;
+  if (gameType === "killer_sudoku")  return `/api/game/killer-sudoku?${params}`;
+  if (gameType === "word_search")    return `/api/game/word-search?${params}`;
+  if (gameType === "nonogram")       return `/api/game/nonogram?${params}`;
   return `/api/game/sudoku?${params}`;
 }
+
+const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
+  sudoku:        "Setting the grid…",
+  killer_sudoku: "Counting the cages…",
+  word_search:   "Hiding the words…",
+  nonogram:      "Composing the picture…",
+};
 
 export default function GameSlot({
   gameType,
@@ -165,7 +178,7 @@ export default function GameSlot({
           fontSize: "0.88rem",
         }}
       >
-        Setting the puzzle&hellip;
+        {LOADING_MESSAGES[gameType] ?? "Setting the puzzle…"}
       </div>
     );
   }
@@ -232,6 +245,24 @@ export default function GameSlot({
         onNewPuzzle={handleNewPuzzle}
         initialCloudSlice={wordCloud}
         cloudSaveEnabled={cloudOn}
+      />
+    );
+  }
+
+  if (gameType === "killer_sudoku") {
+    return (
+      <KillerSudokuCard
+        puzzle={puzzle as KillerSudokuPuzzle}
+        onNewPuzzle={handleNewPuzzle}
+      />
+    );
+  }
+
+  if (gameType === "nonogram") {
+    return (
+      <NonogramCard
+        puzzle={puzzle as NonogramPuzzle}
+        onNewPuzzle={handleNewPuzzle}
       />
     );
   }

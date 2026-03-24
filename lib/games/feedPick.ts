@@ -31,6 +31,24 @@ const GAME_POOL: GameType[] = [
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 
+function hashStringToUint32(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(h, 33) ^ s.charCodeAt(i);
+  }
+  return h >>> 0;
+}
+
+/** Deterministic pick so the same article always shows the same embedded game. */
+export function embeddedGamePickFromSeed(seed: string): FeedGamePick {
+  const h1 = hashStringToUint32(seed);
+  const h2 = hashStringToUint32(`${seed}|diff`);
+  return {
+    gameType: GAME_POOL[h1 % GAME_POOL.length],
+    difficulty: DIFFICULTIES[h2 % DIFFICULTIES.length],
+  };
+}
+
 export function randomFeedGamePick(): FeedGamePick {
   const gameType = GAME_POOL[Math.floor(Math.random() * GAME_POOL.length)];
   const difficulty = DIFFICULTIES[Math.floor(Math.random() * DIFFICULTIES.length)];

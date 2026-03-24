@@ -30,7 +30,7 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="hero" index={0} />
+        <ArticleCard article={articles[0]} layout="hero" index={0} sectionIndex={sectionIndex} />
       </div>
     );
   }
@@ -45,8 +45,8 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="standard" index={0} />
-        <ArticleCard article={articles[1]} layout="standard" index={1} />
+        <ArticleCard article={articles[0]} layout="standard" index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout="standard" index={1} sectionIndex={sectionIndex} />
       </div>
     );
   }
@@ -64,9 +64,9 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="hero" index={0} />
-        <ArticleCard article={articles[1]} layout="standard" index={1} />
-        <ArticleCard article={articles[2]} layout="standard" index={2} />
+        <ArticleCard article={articles[0]} layout="hero" index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout="standard" index={1} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[2]} layout="standard" index={2} sectionIndex={sectionIndex} />
       </div>
     );
   }
@@ -82,9 +82,9 @@ export default function NewsSection({
           ...borderStyles,
         }}
       >
-        <ArticleCard article={articles[0]} layout="standard" index={0} />
-        <ArticleCard article={articles[1]} layout="wide" index={1} />
-        <ArticleCard article={articles[2]} layout="standard" index={2} />
+        <ArticleCard article={articles[0]} layout="standard" index={0} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[1]} layout="wide" index={1} sectionIndex={sectionIndex} />
+        <ArticleCard article={articles[2]} layout="standard" index={2} sectionIndex={sectionIndex} />
       </div>
     );
   }
@@ -99,11 +99,11 @@ export default function NewsSection({
         ...borderStyles,
       }}
     >
-      <ArticleCard article={articles[0]} layout="hero" index={0} />
+      <ArticleCard article={articles[0]} layout="hero" index={0} sectionIndex={sectionIndex} />
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <ArticleCard article={articles[1]} layout="standard" index={1} />
+        <ArticleCard article={articles[1]} layout="standard" index={1} sectionIndex={sectionIndex} />
         <div style={{ borderTop: "1px solid #d4cfc4" }} />
-        <ArticleCard article={articles[2]} layout="standard" index={2} />
+        <ArticleCard article={articles[2]} layout="standard" index={2} sectionIndex={sectionIndex} />
       </div>
     </div>
   );

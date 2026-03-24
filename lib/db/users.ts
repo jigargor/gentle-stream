@@ -12,6 +12,9 @@ interface UserProfileRow {
   category_weights: Record<string, number>;
   game_ratio: number;
   user_role?: string;
+  display_name?: string | null;
+  username?: string | null;
+  avatar_url?: string | null;
   preferred_emotions: string[];
   preferred_locales: string[];
   seen_article_ids: string[];
@@ -36,6 +39,9 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     categoryWeights: weights,
     gameRatio: row.game_ratio ?? DEFAULT_GAME_RATIO,
     userRole: role,
+    displayName: row.display_name ?? null,
+    username: row.username ?? null,
+    avatarUrl: row.avatar_url ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
     seenArticleIds: row.seen_article_ids ?? [],
@@ -131,5 +137,42 @@ export async function updateUserPreferences(
     .single();
 
   if (error) throw new Error(`updateUserPreferences: ${error.message}`);
+  return rowToProfile(data as UserProfileRow);
+}
+
+/**
+ * Update public profile fields (display name, @username, avatar URL).
+ */
+export async function updateUserDisplay(
+  userId: string,
+  fields: {
+    displayName?: string | null;
+    username?: string | null;
+    avatarUrl?: string | null;
+  }
+): Promise<UserProfile> {
+  const updates: Partial<UserProfileRow> = {};
+  if (fields.displayName !== undefined) updates.display_name = fields.displayName;
+  if (fields.username !== undefined) updates.username = fields.username;
+  if (fields.avatarUrl !== undefined) updates.avatar_url = fields.avatarUrl;
+
+  if (Object.keys(updates).length === 0) {
+    const { data, error } = await db
+      .from("user_profiles")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+    if (error) throw new Error(`updateUserDisplay: ${error.message}`);
+    return rowToProfile(data as UserProfileRow);
+  }
+
+  const { data, error } = await db
+    .from("user_profiles")
+    .update(updates)
+    .eq("user_id", userId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`updateUserDisplay: ${error.message}`);
   return rowToProfile(data as UserProfileRow);
 }

@@ -63,8 +63,61 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   -- Seen article IDs (prevent repeats in the feed)
   seen_article_ids   UUID[] NOT NULL DEFAULT '{}',
 
+  display_name       TEXT,
+  username           TEXT,
+  avatar_url         TEXT,
+
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_username_lower
+  ON user_profiles (LOWER(username))
+  WHERE username IS NOT NULL AND TRIM(username) <> '';
+
+-- ─── Game completions & saves (user metrics + resume) ─────────────────────────
+CREATE TABLE IF NOT EXISTS game_completions (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           TEXT NOT NULL,
+  game_type         TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram')),
+  difficulty        TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
+  duration_seconds  INT NOT NULL CHECK (duration_seconds >= 0),
+  score             DOUBLE PRECISION,
+  metadata          JSONB NOT NULL DEFAULT '{}',
+  completed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS game_saves (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          TEXT NOT NULL,
+  game_type        TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram')),
+  difficulty       TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
+  elapsed_seconds  INT NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
+  game_state       JSONB NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, game_type)
+);
+
+CREATE TABLE IF NOT EXISTS article_likes (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        TEXT NOT NULL,
+  article_id     UUID NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+  article_title  TEXT NOT NULL,
+  liked_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, article_id)
+);
+
+CREATE TABLE IF NOT EXISTS article_saves (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        TEXT NOT NULL,
+  article_id     UUID NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+  article_title  TEXT NOT NULL,
+  article_url    TEXT,
+  summary        TEXT,
+  saved_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  is_read        BOOLEAN NOT NULL DEFAULT FALSE,
+  UNIQUE (user_id, article_id)
 );
 
 -- ─── Auto-update updated_at ───────────────────────────────────────────────────

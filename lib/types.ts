@@ -48,11 +48,41 @@ export interface UserProfile {
   categoryWeights: Record<Category, number>; // must sum to ~1.0
   gameRatio: number;                          // 0.0–1.0, portion of feed that is games
   userRole: UserRole;
+  displayName: string | null;
+  username: string | null;
+  avatarUrl: string | null;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.
   createdAt: string;
   updatedAt: string;
+}
+
+/** Row from `article_saves` for library UI */
+export interface SavedArticleListItem {
+  id: string;
+  articleId: string;
+  articleTitle: string;
+  articleUrl: string | null;
+  summary: string | null;
+  savedAt: string;
+  isRead: boolean;
+}
+
+/** Aggregated gaming metrics for profile */
+export interface UserGameStats {
+  totalCompletions: number;
+  totalSecondsPlayed: number;
+  byType: Record<
+    string,
+    { completions: number; totalSeconds: number; avgSeconds: number }
+  >;
+  recent: Array<{
+    gameType: string;
+    difficulty: string;
+    durationSeconds: number;
+    completedAt: string;
+  }>;
 }
 
 // ─── Feed API request / response ─────────────────────────────────────────────

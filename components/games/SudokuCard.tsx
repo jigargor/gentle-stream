@@ -23,13 +23,33 @@ type Action =
   | { type: "INPUT"; num: number; asNote?: boolean }
   | { type: "ERASE" }
   | { type: "TICK" }
-  | { type: "RESET"; puzzle: SudokuPuzzle };
+  | { type: "RESET"; puzzle: SudokuPuzzle }
+  | {
+      type: "HYDRATE";
+      values: number[][];
+      notes: NoteMask[][];
+      elapsedSecs: number;
+      startedAt: number | null;
+    };
+
+export interface SudokuCloudSlice {
+  values: number[][];
+  notes: NoteMask[][];
+  elapsedSecs: number;
+  startedAt: number | null;
+}
 
 interface SudokuCardProps {
   puzzle: SudokuPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
   /** Hero-column embed: softer frame */
   embedded?: boolean;
+  /** Restore grid from cloud save (same puzzle as `puzzle` prop). */
+  initialCloudSlice?: SudokuCloudSlice | null;
+  /** Persist progress to `/api/user/game-save` on an interval */
+  cloudSaveEnabled?: boolean;
+  /** Log finished puzzles to `/api/user/game-completion` (feed metrics). */
+  metricsEnabled?: boolean;
 }
 
 function CellNotes({ mask }: { mask: NoteMask }) {
@@ -208,6 +228,23 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
     case "RESET":
       return makeInitialState(action.puzzle);
 
+    case "HYDRATE": {
+      const values = action.values.map((row) => [...row]);
+      const notes = action.notes.map((row) => [...row]);
+      const errors = computeErrors(values, puzzle.given);
+      const completed = isComplete(values, puzzle.solution);
+      return {
+        ...state,
+        values,
+        notes,
+        elapsedSecs: action.elapsedSecs,
+        startedAt: action.startedAt,
+        errors,
+        completed,
+        selected: null,
+      };
+    }
+
     default:
       return state;
   }
@@ -219,6 +256,9 @@ export default function SudokuCard({
   puzzle,
   onNewPuzzle,
   embedded = false,
+  initialCloudSlice = null,
+  cloudSaveEnabled = false,
+  metricsEnabled = true,
 }: SudokuCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -231,6 +271,9 @@ export default function SudokuCard({
 
   const dispatch = dispatchRaw;
   const [notesMode, setNotesMode] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const completionLogged = useRef(false);
 
   // Timer
   useEffect(() => {
@@ -239,10 +282,79 @@ export default function SudokuCard({
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 
-  // Reset board when a new puzzle arrives (e.g. difficulty change without remounting GameSlot)
+  // Reset + optional hydrate when puzzle / saved slice changes
   useEffect(() => {
     dispatch({ type: "RESET", puzzle });
-  }, [puzzle, dispatch]);
+    if (initialCloudSlice) {
+      dispatch({
+        type: "HYDRATE",
+        values: initialCloudSlice.values,
+        notes: initialCloudSlice.notes,
+        elapsedSecs: initialCloudSlice.elapsedSecs,
+        startedAt: initialCloudSlice.startedAt,
+      });
+    }
+    completionLogged.current = false;
+  }, [puzzle, initialCloudSlice, dispatch]);
+
+  // Cloud auto-save (30s)
+  useEffect(() => {
+    if (!cloudSaveEnabled || embedded) return;
+    const id = window.setInterval(() => {
+      const s = stateRef.current;
+      if (s.completed) return;
+      const p = puzzleRef.current;
+      void fetch("/api/user/game-save", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameType: "sudoku",
+          difficulty: p.difficulty,
+          elapsedSeconds: s.elapsedSecs,
+          gameState: {
+            puzzle: p,
+            sudoku: {
+              values: s.values,
+              notes: s.notes,
+              elapsedSecs: s.elapsedSecs,
+              startedAt: s.startedAt,
+            },
+          },
+        }),
+      });
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [cloudSaveEnabled, embedded]);
+
+  // Log completion + clear cloud save slot (metrics independent of cloud resume)
+  useEffect(() => {
+    if (!state.completed || completionLogged.current) return;
+    const shouldPost = metricsEnabled;
+    const shouldClearCloud = cloudSaveEnabled && !embedded;
+    if (!shouldPost && !shouldClearCloud) return;
+    completionLogged.current = true;
+    const p = puzzleRef.current;
+    if (shouldPost) {
+      void fetch("/api/user/game-completion", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameType: "sudoku",
+          difficulty: p.difficulty,
+          durationSeconds: state.elapsedSecs,
+          metadata: { difficulty: p.difficulty },
+        }),
+      });
+    }
+    if (shouldClearCloud) {
+      void fetch("/api/user/game-save?gameType=sudoku", {
+        method: "DELETE",
+        credentials: "include",
+      });
+    }
+  }, [metricsEnabled, cloudSaveEnabled, embedded, state.completed, state.elapsedSecs]);
 
   // Keyboard input (Shift+digit = toggle note without turning Notes mode on)
   useEffect(() => {

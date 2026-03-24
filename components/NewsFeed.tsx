@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead from "./Masthead";
-import { UserAccountMenu } from "./user/UserAccountMenu";
+import { ProfileMenu } from "./user/ProfileMenu";
 import CategoryBar from "./CategoryBar";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
@@ -287,7 +287,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       <Masthead
         accountSlot={
           userEmail ? (
-            <UserAccountMenu
+            <ProfileMenu
               userEmail={userEmail}
               onGameRatioSaved={handleGameRatioSaved}
             />

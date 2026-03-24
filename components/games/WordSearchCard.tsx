@@ -38,11 +38,26 @@ type Action =
   | { type: "EXTEND_SELECT"; row: number; col: number }
   | { type: "END_SELECT" }
   | { type: "TICK" }
-  | { type: "RESET"; puzzle: WordSearchPuzzle };
+  | { type: "RESET"; puzzle: WordSearchPuzzle }
+  | {
+      type: "HYDRATE";
+      words: PlacedWord[];
+      elapsedSecs: number;
+      startedAt: number | null;
+    };
+
+export interface WordSearchCloudSlice {
+  words: PlacedWord[];
+  elapsedSecs: number;
+  startedAt: number | null;
+}
 
 interface WordSearchCardProps {
   puzzle: WordSearchPuzzle;
   onNewPuzzle?: (difficulty: Difficulty) => void;
+  initialCloudSlice?: WordSearchCloudSlice | null;
+  cloudSaveEnabled?: boolean;
+  metricsEnabled?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -257,6 +272,19 @@ function reducer(
     case "RESET":
       return makeInitialState(action.puzzle);
 
+    case "HYDRATE": {
+      const words = action.words.map((w) => ({ ...w }));
+      const completed = words.every((w) => w.found);
+      return {
+        ...state,
+        words,
+        elapsedSecs: action.elapsedSecs,
+        startedAt: action.startedAt,
+        completed,
+        selection: null,
+      };
+    }
+
     default:
       return state;
   }
@@ -267,6 +295,9 @@ function reducer(
 export default function WordSearchCard({
   puzzle,
   onNewPuzzle,
+  initialCloudSlice = null,
+  cloudSaveEnabled = false,
+  metricsEnabled = true,
 }: WordSearchCardProps) {
   const puzzleRef = useRef(puzzle);
   puzzleRef.current = puzzle;
@@ -277,6 +308,9 @@ export default function WordSearchCard({
     makeInitialState
   );
   const dispatch = dispatchRaw;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const completionLogged = useRef(false);
 
   // Timer
   useEffect(() => {
@@ -285,10 +319,75 @@ export default function WordSearchCard({
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 
-  // Reset when puzzle changes (new game)
+  // Reset + optional cloud hydrate
   useEffect(() => {
     dispatch({ type: "RESET", puzzle });
-  }, [puzzle, dispatch]);
+    if (initialCloudSlice) {
+      dispatch({
+        type: "HYDRATE",
+        words: initialCloudSlice.words,
+        elapsedSecs: initialCloudSlice.elapsedSecs,
+        startedAt: initialCloudSlice.startedAt,
+      });
+    }
+    completionLogged.current = false;
+  }, [puzzle, initialCloudSlice, dispatch]);
+
+  useEffect(() => {
+    if (!cloudSaveEnabled) return;
+    const id = window.setInterval(() => {
+      const s = stateRef.current;
+      if (s.completed) return;
+      const p = puzzleRef.current;
+      void fetch("/api/user/game-save", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameType: "word_search",
+          difficulty: p.difficulty,
+          elapsedSeconds: s.elapsedSecs,
+          gameState: {
+            puzzle: p,
+            wordSearch: {
+              words: s.words,
+              elapsedSecs: s.elapsedSecs,
+              startedAt: s.startedAt,
+            },
+          },
+        }),
+      });
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [cloudSaveEnabled]);
+
+  useEffect(() => {
+    if (!state.completed || completionLogged.current) return;
+    const shouldPost = metricsEnabled;
+    const shouldClearCloud = cloudSaveEnabled;
+    if (!shouldPost && !shouldClearCloud) return;
+    completionLogged.current = true;
+    const p = puzzleRef.current;
+    if (shouldPost) {
+      void fetch("/api/user/game-completion", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameType: "word_search",
+          difficulty: p.difficulty,
+          durationSeconds: state.elapsedSecs,
+          metadata: { theme: p.theme },
+        }),
+      });
+    }
+    if (shouldClearCloud) {
+      void fetch("/api/user/game-save?gameType=word_search", {
+        method: "DELETE",
+        credentials: "include",
+      });
+    }
+  }, [metricsEnabled, cloudSaveEnabled, state.completed, state.elapsedSecs]);
 
   // ── Cell highlighting ────────────────────────────────────────────────────────
 

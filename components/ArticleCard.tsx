@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_COLORS } from "@/lib/constants";
 import GameSlot from "./games/GameSlot";
 import { embeddedGamePickFromSeed } from "@/lib/games/feedPick";
@@ -46,6 +46,8 @@ export default function ArticleCard({
   const articleRef = useRef<HTMLElement>(null);
   const contentWrapRef = useRef<HTMLDivElement>(null);
   const [showHeroGapGame, setShowHeroGapGame] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   /** Try AI image from prompt first, then deterministic stock photo, then text fallback */
   const [imageStage, setImageStage] = useState<
@@ -124,6 +126,43 @@ export default function ArticleCard({
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
   const primarySourceHref =
     sourceUrls[0] ? toClickableSourceUrl(sourceUrls[0]) : "";
+
+  const canSave = "id" in article && Boolean(article.id);
+
+  const saveArticle = useCallback(async () => {
+    if (!canSave || !("id" in article) || !article.id) return;
+    setSaveBusy(true);
+    setSaveMsg(null);
+    try {
+      const primaryUrl = sourceUrls[0]
+        ? toClickableSourceUrl(sourceUrls[0])
+        : "";
+      const res = await fetch("/api/user/article-saves", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          articleId: article.id,
+          articleTitle: article.headline,
+          articleUrl: primaryUrl || undefined,
+          summary:
+            article.subheadline?.trim() ||
+            article.pullQuote?.trim() ||
+            undefined,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setSaveMsg(typeof j.error === "string" ? j.error : "Could not save.");
+        return;
+      }
+      setSaveMsg("Saved to your library.");
+    } catch {
+      setSaveMsg("Could not save.");
+    } finally {
+      setSaveBusy(false);
+    }
+  }, [article, canSave, sourceUrls]);
 
   const headlineStyle = {
     fontFamily: "'Playfair Display', Georgia, serif",
@@ -235,6 +274,48 @@ export default function ArticleCard({
         <span style={{ fontWeight: 600, color: "#555" }}>{article.byline}</span>
         {article.location && <span>&middot; {article.location}</span>}
       </div>
+
+      {canSave && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            type="button"
+            disabled={saveBusy}
+            onClick={() => void saveArticle()}
+            style={{
+              background: "transparent",
+              border: "1px solid #bbb",
+              color: "#555",
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.62rem",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              padding: "0.25rem 0.55rem",
+              cursor: saveBusy ? "wait" : "pointer",
+            }}
+          >
+            {saveBusy ? "Saving…" : "Save story"}
+          </button>
+          {saveMsg && (
+            <span
+              style={{
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontStyle: "italic",
+                fontSize: "0.68rem",
+                color: saveMsg.startsWith("Saved") ? "#1a472a" : "#8b4513",
+              }}
+            >
+              {saveMsg}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Hero image from imagePrompt (AI URL → stock photo fallback → caption only) */}
       {isHero && article.imagePrompt?.trim() && (
@@ -443,6 +524,7 @@ export default function ArticleCard({
             difficulty={embeddedGame.difficulty}
             category={article.category}
             embedded
+            persistCloud={false}
           />
         </div>
       )}

@@ -8,11 +8,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { deleteExpiredArticles } from "@/lib/db/articles";
 
 export async function GET(request: NextRequest) {
-  const secret = request.headers.get("x-cron-secret");
-  if (secret !== process.env.CRON_SECRET) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

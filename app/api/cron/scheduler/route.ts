@@ -9,15 +9,14 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { countAvailableByCategory } from "@/lib/db/articles";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
 import { CATEGORIES, STOCK_THRESHOLD } from "@/lib/constants";
 import type { Category } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
-  // Validate the cron secret
-  const secret = request.headers.get("x-cron-secret");
-  if (secret !== process.env.CRON_SECRET) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

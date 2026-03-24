@@ -9,7 +9,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { MIN_WORD_POOL_TOTAL, getWordPoolTotalCount } from "@/lib/db/gameWordPool";
 import { runCrosswordIngest, MIN_CROSSWORD_POOL, getCrosswordPoolSize } from "@/lib/games/crosswordIngestAgent";
+import {
+  runWordSearchPoolIngest,
+  shouldRunWordPoolIngest,
+} from "@/lib/games/wordSearchPoolIngestAgent";
 
 export async function GET(request: NextRequest) {
   const secret = request.headers.get("x-cron-secret");
@@ -18,23 +23,38 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const poolSize = await getCrosswordPoolSize();
-    console.log(`[/api/cron/games] Current crossword pool: ${poolSize}`);
+    const crosswordPool = await getCrosswordPoolSize();
+    const wordPool = await getWordPoolTotalCount();
+    console.log(
+      `[/api/cron/games] crossword pool: ${crosswordPool}, word pool rows: ${wordPool}`
+    );
 
-    if (poolSize >= MIN_CROSSWORD_POOL) {
-      return NextResponse.json({
-        message: `Pool sufficient (${poolSize} puzzles). No generation needed.`,
-        poolSize,
-      });
+    let crosswordsInserted = 0;
+    let wordRowsInserted = 0;
+
+    if (crosswordPool < MIN_CROSSWORD_POOL) {
+      console.log("[/api/cron/games] Crossword pool below threshold — generating");
+      crosswordsInserted = await runCrosswordIngest();
     }
 
-    console.log(`[/api/cron/games] Pool below threshold — generating crosswords`);
-    const inserted = await runCrosswordIngest();
+    if (await shouldRunWordPoolIngest()) {
+      console.log(
+        `[/api/cron/games] Word pool below ${MIN_WORD_POOL_TOTAL} — ingesting via agent`
+      );
+      wordRowsInserted = await runWordSearchPoolIngest();
+    }
+
+    const crosswordPoolAfter = await getCrosswordPoolSize();
+    const wordPoolAfter = await getWordPoolTotalCount();
 
     return NextResponse.json({
-      message: `Generated ${inserted} new crossword(s).`,
-      poolSize: poolSize + inserted,
-      inserted,
+      message: "Games cron completed.",
+      crosswordPoolBefore: crosswordPool,
+      crosswordPoolAfter,
+      wordPoolBefore: wordPool,
+      wordPoolAfter,
+      crosswordsInserted,
+      wordRowsInserted,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";

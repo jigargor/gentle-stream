@@ -20,10 +20,11 @@
  */
 
 import type { WordSearchPuzzle, PlacedWord, Direction, Difficulty } from "./types";
+import { DEFAULT_WORDS, WORD_BANKS } from "./wordSearchStaticBanks";
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-interface GridConfig {
+export interface GridConfig {
   rows: number;
   cols: number;
   wordCount: number;
@@ -71,84 +72,46 @@ const DELTAS: Record<Direction, [number, number]> = {
 const FILLER_POOL =
   "AAABBBCCCDDDEEEEEFFFGGGHHHIIIJJKKLLLMMMNNNNOOOOPPPQRRRRSSSSTTTTTUUUVVWWXYZ";
 
-// ─── Word banks by category ───────────────────────────────────────────────────
-// These map article categories to thematically fitting word lists.
-// Words are uppercase, 3–12 letters, no spaces or hyphens.
-
-const WORD_BANKS: Record<string, string[]> = {
-  "Science & Discovery": [
-    "QUANTUM", "NEURON", "GENOME", "PHOTON", "ENZYME",
-    "PLASMA", "FOSSIL", "PRISM", "ORBIT", "COMET",
-    "LASER", "ATOM", "HELIX", "VORTEX", "NEBULA",
-    "CATALYST", "MUTATION", "SPECTRUM", "VELOCITY", "PROTON",
-  ],
-  "Environment & Nature": [
-    "CORAL", "FOREST", "GLACIER", "WETLAND", "SAVANNA",
-    "POLLEN", "CANOPY", "ESTUARY", "TUNDRA", "MANGROVE",
-    "FALCON", "OTTER", "BISON", "LICHEN", "FERN",
-    "HABITAT", "MIGRATION", "WATERSHED", "BIODIVERSITY", "ECOSYSTEM",
-  ],
-  "Arts & Culture": [
-    "MOSAIC", "SONNET", "FRESCO", "BALLAD", "MURAL",
-    "CANVAS", "RHYTHM", "PALETTE", "LIBRETTO", "ETCHING",
-    "FUGUE", "BRONZE", "STANZA", "OVERTURE", "MOTIF",
-    "IMPROV", "TABLEAU", "NOCTURNE", "GALLERY", "SCULPT",
-  ],
-  "Innovation & Tech": [
-    "NEURAL", "CIPHER", "SILICON", "PIXEL", "ROUTER",
-    "KERNEL", "VECTOR", "CLUSTER", "PROTOCOL", "BINARY",
-    "LATENCY", "CACHE", "TENSOR", "QUANTUM", "DRONE",
-    "BLOCKCHAIN", "ALGORITHM", "SATELLITE", "BANDWIDTH", "COMPILER",
-  ],
-  "Health & Wellness": [
-    "CORTEX", "INSULIN", "SYNAPSE", "VITAMIN", "CARDIO",
-    "COLLAGEN", "SEROTONIN", "PROTEIN", "MINDFUL", "AEROBIC",
-    "IMMUNE", "NEURAL", "LYMPH", "THYROID", "MARROW",
-    "STAMINA", "REFLEX", "HORMONE", "PLACEBO", "METABOLISM",
-  ],
-  "Human Kindness": [
-    "EMPATHY", "SOLACE", "GENEROUS", "COMFORT", "MENTOR",
-    "COURAGE", "GRATITUDE", "HUMBLE", "CARING", "WARMTH",
-    "VOLUNTEER", "HARMONY", "SUPPORT", "BENEVOLENT", "SHELTER",
-    "FOSTER", "KINDRED", "RESILIENT", "INSPIRE", "NURTURE",
-  ],
-  "Community Heroes": [
-    "RESCUE", "VALOR", "PATROL", "BEACON", "SERVICE",
-    "BRIGADE", "MEDIC", "SHELTER", "COURAGE", "OUTREACH",
-    "RESPOND", "PROTECT", "REBUILD", "SUSTAIN", "MENTOR",
-    "VOLUNTEER", "STEWARD", "TRUSTEE", "ADVOCATE", "CHAMPION",
-  ],
-  "Education": [
-    "SCHOLAR", "THESIS", "MENTOR", "CAMPUS", "LECTURE",
-    "ALGEBRA", "GRAMMAR", "DEBATE", "LIBRARY", "SEMINAR",
-    "INQUIRY", "RESEARCH", "DIPLOMA", "TUTOR", "SYLLABUS",
-    "LITERACY", "LOGIC", "THEOREM", "ESSAY", "CURRICULUM",
-  ],
-};
-
-const DEFAULT_WORDS: string[] = [
-  "PUZZLE", "SEARCH", "HIDDEN", "LETTERS", "GRID",
-  "WORDS", "FIND", "ACROSS", "DIAGONAL", "COLUMN",
-  "BRIGHT", "CLEVER", "NIMBLE", "SWIFT", "CURIOUS",
-];
-
 // ─── Public API ───────────────────────────────────────────────────────────────
+
+export interface WordSearchGeneratorOptions {
+  category?: string;
+  /** When provided, these words are used (length-filtered); overrides category bank */
+  words?: string[];
+}
+
+export function getWordSearchGridConfig(difficulty: Difficulty): GridConfig {
+  return CONFIG[difficulty];
+}
 
 export function generateWordSearch(
   difficulty: Difficulty = "medium",
-  category?: string
+  categoryOrOptions?: string | WordSearchGeneratorOptions
 ): WordSearchPuzzle {
+  const opts: WordSearchGeneratorOptions =
+    typeof categoryOrOptions === "string"
+      ? { category: categoryOrOptions }
+      : categoryOrOptions ?? {};
+
   const config = CONFIG[difficulty];
-
-  // Pick word bank (avoid `"" && …` which narrows to empty string for TypeScript)
-  const bank: string[] =
-    category && WORD_BANKS[category] ? WORD_BANKS[category] : DEFAULT_WORDS;
-
-  // Filter words that fit the grid and shuffle
+  const category = opts.category;
   const maxLen = Math.min(config.rows, config.cols) - 1;
-  const eligible = shuffle(bank.filter((w) => w.length >= 3 && w.length <= maxLen));
 
-  // Take up to wordCount words
+  let bank: string[];
+  if (opts.words?.length) {
+    bank = Array.from(
+      new Set(opts.words.map((w) => w.toUpperCase().trim()))
+    ).filter(
+      (w) => w.length >= 3 && w.length <= maxLen && /^[A-Z]+$/.test(w)
+    );
+  } else {
+    bank =
+      category && WORD_BANKS[category] ? WORD_BANKS[category] : DEFAULT_WORDS;
+  }
+
+  const filtered = bank.filter((w) => w.length >= 3 && w.length <= maxLen);
+  const eligible = opts.words?.length ? filtered : shuffle(filtered);
+
   const target = eligible.slice(0, config.wordCount);
 
   // Build grid

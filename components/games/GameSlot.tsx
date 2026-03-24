@@ -226,7 +226,9 @@ export default function GameSlot({
     );
   }
 
-  const metricsOn = !embedded;
+  /** Always record completions for signed-in users; API returns 401 if anonymous.
+   *  (Previously `!embedded` skipped hero puzzles — those never reached game stats.) */
+  const metricsOn = true;
 
   if (gameType === "sudoku") {
     return (

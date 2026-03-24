@@ -197,8 +197,12 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
 
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
+      const elapsedSecs =
+        completed && state.startedAt
+          ? Math.floor((Date.now() - state.startedAt) / 1000)
+          : state.elapsedSecs;
 
-      return { ...state, values, notes, errors, completed };
+      return { ...state, values, notes, errors, completed, elapsedSecs };
     }
 
     case "ERASE": {

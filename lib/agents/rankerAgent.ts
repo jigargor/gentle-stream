@@ -46,6 +46,7 @@ interface RankOptions {
   sectionIndex: number;
   pageSize?: number;             // articles per section (default 3)
   markSeen?: boolean;            // default true
+  excludeArticleIds?: string[];  // force uniqueness against already-rendered feed items
 }
 
 /**
@@ -70,9 +71,9 @@ function orderedCategoriesForMixedFeed(
 async function collectCandidatesAcrossCategories(
   profile: UserProfile,
   sectionIndex: number,
-  poolSize: number
+  poolSize: number,
+  excludeIds: string[]
 ): Promise<StoredArticle[]> {
-  const excludeIds = profile.seenArticleIds;
   const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
   const collected: StoredArticle[] = [];
   const collectedIds = new Set<string>();
@@ -99,9 +100,9 @@ async function collectCandidatesAcrossCategories(
 async function collectUntaggedAcrossCategories(
   profile: UserProfile,
   sectionIndex: number,
-  poolSize: number
+  poolSize: number,
+  excludeIds: string[]
 ): Promise<StoredArticle[]> {
-  const excludeIds = profile.seenArticleIds;
   const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
   const collected: StoredArticle[] = [];
   const collectedIds = new Set<string>();
@@ -160,9 +161,19 @@ function pickRotatedPage(
 export async function getRankedFeed(
   options: RankOptions
 ): Promise<RankedFeedResult> {
-  const { userId, category, sectionIndex, pageSize = 3, markSeen = true } = options;
+  const {
+    userId,
+    category,
+    sectionIndex,
+    pageSize = 3,
+    markSeen = true,
+    excludeArticleIds = [],
+  } = options;
 
   const profile = await getOrCreateUserProfile(userId);
+  const effectiveExcludeIds = Array.from(
+    new Set([...profile.seenArticleIds, ...excludeArticleIds])
+  );
   let affinityIndex = new Map<string, number>();
   try {
     const affinityRows = await getUserAffinityRows(userId);
@@ -178,11 +189,12 @@ export async function getRankedFeed(
   // Fetch a candidate pool (fetch more than needed so we can rank and trim)
   const poolSize = pageSize * 5;
   let candidates = category
-    ? await getArticlesForFeed(category, poolSize, profile.seenArticleIds)
+    ? await getArticlesForFeed(category, poolSize, effectiveExcludeIds)
     : await collectCandidatesAcrossCategories(
         profile,
         sectionIndex,
-        poolSize
+        poolSize,
+        effectiveExcludeIds
       );
 
   // If nothing is tagged yet (tagger backlog / 429), still show fresh ingested rows
@@ -191,12 +203,13 @@ export async function getRankedFeed(
       ? await getUntaggedArticlesForFeed(
           category,
           poolSize,
-          profile.seenArticleIds
+          effectiveExcludeIds
         )
       : await collectUntaggedAcrossCategories(
           profile,
           sectionIndex,
-          poolSize
+          poolSize,
+          effectiveExcludeIds
         );
   }
 
@@ -209,7 +222,7 @@ export async function getRankedFeed(
   if (candidates.length === 0) {
     candidates = await getRandomAvailableArticles(
       poolSize,
-      profile.seenArticleIds
+      effectiveExcludeIds
     );
     if (candidates.length > 0) {
       selectionMode = "random_pool";
@@ -238,7 +251,15 @@ export async function getRankedFeed(
               score: scoreArticleWithEngagement(a, profile, affinityIndex),
             }));
             scored.sort((a, b) => b.score - a.score);
-            return scored.slice(0, pageSize).map((s) => s.article);
+            const out: StoredArticle[] = [];
+            const chosenIds = new Set<string>();
+            for (const entry of scored) {
+              if (chosenIds.has(entry.article.id)) continue;
+              chosenIds.add(entry.article.id);
+              out.push(entry.article);
+              if (out.length >= pageSize) break;
+            }
+            return out;
           })()
         : pickRotatedPage(candidates, sectionIndex, pageSize);
 

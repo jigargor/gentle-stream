@@ -34,6 +34,11 @@ export async function GET(request: NextRequest) {
   const categoryParam = searchParams.get("category");
   const sectionIndex = parseInt(searchParams.get("sectionIndex") || "0", 10);
   const pageSize = parseInt(searchParams.get("pageSize") || "3", 10);
+  const excludeIdsParam = searchParams.get("excludeIds") || "";
+  const excludeArticleIds = excludeIdsParam
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
 
   const category =
     categoryParam && CATEGORIES.includes(categoryParam as Category)
@@ -48,6 +53,7 @@ export async function GET(request: NextRequest) {
       sectionIndex,
       pageSize,
       markSeen: userId !== ANONYMOUS_USER_ID,
+      excludeArticleIds,
     });
 
     if (result.articles.length >= pageSize) {
@@ -88,6 +94,7 @@ export async function GET(request: NextRequest) {
       sectionIndex,
       pageSize,
       markSeen: userId !== ANONYMOUS_USER_ID,
+      excludeArticleIds,
     });
 
     return NextResponse.json({

@@ -32,6 +32,14 @@ function cleanArticle(article: Article): Article {
   };
 }
 
+function articleUniqKey(article: Article): string {
+  if ("id" in article && typeof article.id === "string" && article.id.length > 0) {
+    return `id:${article.id}`;
+  }
+  // Fallback for raw shapes: deterministic enough to avoid visible duplicates.
+  return `raw:${article.category}|${article.headline}|${article.byline}|${article.location}`;
+}
+
 /**
  * Decide whether a given section index should be a game slot.
  * Deterministic: same sectionIndex always produces the same result for a given ratio.
@@ -73,6 +81,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   const feedReadyRef = useRef(false);
   // Track the last article category so game slots can use a matching word bank
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
+  // Hard de-dup across all rendered sections in this session/category view.
+  const renderedArticleIdsRef = useRef<Set<string>>(new Set());
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -119,6 +129,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       params.set("userId", userIdRef.current);
       params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
+      const excludeIds = Array.from(renderedArticleIdsRef.current).slice(-400);
+      if (excludeIds.length > 0) params.set("excludeIds", excludeIds.join(","));
 
       const controller = new AbortController();
       const timeoutId = window.setTimeout(
@@ -147,8 +159,13 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       setLiveGenerating(!data.fromCache);
 
       const cleaned = data.articles.map(cleanArticle);
+      const uniqueForView = cleaned.filter((article) => {
+        const key = articleUniqKey(article);
+        if (renderedArticleIdsRef.current.has(key)) return false;
+        return true;
+      });
 
-      if (cleaned.length === 0) {
+      if (uniqueForView.length === 0) {
         setError(
           currentIndex > 0
             ? "No more stories right now."
@@ -162,17 +179,20 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
       const section: ArticleFeedSection = {
         sectionType: "articles",
-        articles: cleaned,
+        articles: uniqueForView,
         index: currentIndex,
       };
 
       setSections((prev) => [...prev, section]);
+      for (const article of uniqueForView) {
+        renderedArticleIdsRef.current.add(articleUniqKey(article));
+      }
       sectionCountRef.current += 1;
 
       // IntersectionObserver only fires on visibility *changes*. If the sentinel
       // stayed in the viewport while we loaded, it won't fire again — queue another
       // fetch when there's still room below (infinite scroll).
-      if (cleaned.length > 0) {
+      if (uniqueForView.length > 0) {
         requestAnimationFrame(() => {
           const el = sentinelRef.current;
           if (!el || loadingRef.current) return;
@@ -213,6 +233,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     sectionCountRef.current = 0;
     gameSlotOrdinalRef.current = 0;
     lastArticleCategoryRef.current = undefined;
+    renderedArticleIdsRef.current = new Set();
     gameRatioRef.current = DEFAULT_GAME_RATIO;
 
     const gen = ++feedBootstrapGenRef.current;
@@ -300,6 +321,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     loadingRef.current = false;
     setLoading(false);
     lastArticleCategoryRef.current = undefined;
+    renderedArticleIdsRef.current = new Set();
     loadMore(next);
   };
 
@@ -312,6 +334,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setError(null);
+      renderedArticleIdsRef.current = new Set();
       void loadMore();
     },
     [loadMore]

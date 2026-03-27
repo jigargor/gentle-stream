@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS articles (
 
   -- Timestamps
   fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at      TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+  expires_at      TIMESTAMPTZ NOT NULL DEFAULT '2100-01-01T00:00:00.000Z',
 
   -- Enrichment (from tagger agent)
   tags            TEXT[]  NOT NULL DEFAULT '{}',
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS articles (
   tagged          BOOLEAN NOT NULL DEFAULT FALSE
 );
 
--- Index for fast per-category feed queries (only untagged + unexpired)
+-- Index for fast per-category feed queries
 CREATE INDEX IF NOT EXISTS idx_articles_category_tagged_expires
   ON articles (category, tagged, expires_at);
 
@@ -135,6 +135,6 @@ CREATE TRIGGER set_updated_at
   BEFORE UPDATE ON user_profiles
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ─── Cleanup: remove expired articles nightly ─────────────────────────────────
--- Call this from your cron job, or set up a Supabase scheduled function:
--- DELETE FROM articles WHERE expires_at < NOW();
+-- ─── Cleanup (TTL disabled) ────────────────────────────────────────────────────
+-- Article TTL expiry is disabled; keep this note so old runbooks do not attempt
+-- to delete rows by expires_at.

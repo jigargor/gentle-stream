@@ -24,7 +24,7 @@ Gentle Stream curates real news from the web, filters for positive stories, and 
 | **Games** | **Sudoku**, **word search**, **killer sudoku**, and **nonogram** in the feed (and a hero puzzle beside the lead story). Difficulty presets, in-progress **cloud resume** for sudoku & word search where enabled, **completion logging** for stats. “How to play” links (Wikipedia) on sudoku, killer sudoku, and nonogram. |
 | **Game statistics** | Completions recorded per user; **game stats** page and summary in the profile menu. |
 | **Personalisation** | Category weights, preferred emotions/locales, **games vs news ratio** (presets refresh the feed from the top). |
-| **Editorial ops** | Crons: scheduler (stock check → ingest), tagger (enrichment), cleanup (expired articles). |
+| **Editorial ops** | Crons: scheduler (stock check → ingest), tagger (enrichment), cleanup (currently no-op), plus persisted ingest run logs for ops/debugging. |
 
 ---
 
@@ -45,7 +45,7 @@ Gentle Stream curates real news from the web, filters for positive stories, and 
 │                                                      │
 │   /api/cron/scheduler   checks stock per category    │
 │   /api/cron/tagger      enriches untagged articles   │
-│   /api/cron/cleanup     removes expired articles     │
+│   /api/cron/cleanup     currently no-op              │
 └──────────────────────────────┬──────────────────────┘
                                │ (when stock < threshold)
 ┌──────────────────────────────▼──────────────────────┐
@@ -253,9 +253,19 @@ Header: `x-cron-secret: <CRON_SECRET>` (or configured equivalent).
 
 | Route | Schedule (vercel.json) | Role |
 |-------|-------------------------|------|
-| `GET /api/cron/scheduler` | Every 30 min | Stock check → ingest when low |
-| `GET /api/cron/tagger` | Every 5 min | Tag untagged articles |
-| `GET /api/cron/cleanup` | Daily 03:00 UTC | Remove expired articles |
+| `GET /api/cron/scheduler` | Every 15 min | Stock check → ingest when low or stale |
+| `GET /api/cron/tagger` | Every 3 min | Tag untagged articles |
+| `GET /api/cron/cleanup` | Daily 03:00 UTC | No-op (TTL cleanup disabled) |
+
+### Ingest log inspection
+
+Use this authenticated endpoint to inspect recent scheduler runs with per-category detail:
+
+- `GET /api/admin/cron/ingest-logs?limit=20`
+- Auth header: `Authorization: Bearer <CRON_SECRET>` (or `x-cron-secret`)
+- Returns run-level metadata (`ok`, `totalInserted`, duration notes) and category rows (`beforeCount`, `requestedCount`, `insertedCount`, `reason`, `errorMessage`)
+
+This is the fastest way to confirm whether low stock is caused by ingest failures, dedup skips, or tagger lag.
 
 ---
 

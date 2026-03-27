@@ -13,6 +13,12 @@ import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { getAvailableStockSnapshotByCategory } from "@/lib/db/articles";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
 import {
+  appendCronIngestCategoryLogs,
+  createCronIngestRun,
+  finishCronIngestRun,
+  type CronIngestCategoryLogInput,
+} from "@/lib/db/cronIngestLogs";
+import {
   CATEGORIES,
   FRESHNESS_INGEST_HOURS,
   INGEST_BATCH_SIZE,
@@ -28,16 +34,24 @@ export async function GET(request: NextRequest) {
   }
 
   const snapshot = await getAvailableStockSnapshotByCategory();
+  const runStartedAt = Date.now();
+  const triggerSource = request.headers.get("x-vercel-cron") ? "vercel-cron" : "manual";
+  const runId = await createCronIngestRun(triggerSource);
+
   const report: Record<
     string,
     {
       before: number;
+      requested: number;
       ingested: number;
       newestFetchedAt: string | null;
       reason: "threshold" | "freshness" | "none";
+      error?: string;
     }
   > = {};
+  const categoryLogs: CronIngestCategoryLogInput[] = [];
   const nowMs = Date.now();
+  let hadErrors = false;
 
   for (const cat of CATEGORIES) {
     const row = snapshot[cat];
@@ -45,6 +59,7 @@ export async function GET(request: NextRequest) {
     const newestFetchedAt = row?.newestFetchedAt ?? null;
     report[cat] = {
       before: available,
+      requested: 0,
       ingested: 0,
       newestFetchedAt,
       reason: "none",
@@ -58,6 +73,7 @@ export async function GET(request: NextRequest) {
     if (available < STOCK_THRESHOLD) {
       const deficitToTarget = Math.max(INGEST_BATCH_SIZE, STOCK_TARGET - available);
       const ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, deficitToTarget);
+      report[cat].requested = ingestCount;
       console.log(
         `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${ingestCount}`
       );
@@ -67,23 +83,64 @@ export async function GET(request: NextRequest) {
         report[cat].reason = "threshold";
       } catch (e) {
         console.error(`[Scheduler] Ingest failed for "${cat}":`, e);
+        hadErrors = true;
+        report[cat].error = e instanceof Error ? e.message : "Unknown ingest error";
       }
+      categoryLogs.push({
+        category: cat,
+        beforeCount: available,
+        requestedCount: ingestCount,
+        insertedCount: report[cat].ingested,
+        reason: report[cat].reason,
+        newestFetchedAt,
+        errorMessage: report[cat].error,
+      });
       continue;
     }
 
     if (freshnessStale) {
+      const ingestCount = 2;
+      report[cat].requested = ingestCount;
       console.log(
-        `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill`
+        `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${ingestCount})`
       );
       try {
-        const result = await runIngestAgent(cat as Category, 1);
+        const result = await runIngestAgent(cat as Category, ingestCount);
         report[cat].ingested = result.inserted.length;
         report[cat].reason = "freshness";
       } catch (e) {
         console.error(`[Scheduler] Freshness ingest failed for "${cat}":`, e);
+        hadErrors = true;
+        report[cat].error = e instanceof Error ? e.message : "Unknown freshness ingest error";
       }
     }
+
+    categoryLogs.push({
+      category: cat,
+      beforeCount: available,
+      requestedCount: report[cat].requested,
+      insertedCount: report[cat].ingested,
+      reason: report[cat].reason,
+      newestFetchedAt,
+      errorMessage: report[cat].error,
+    });
   }
 
-  return NextResponse.json({ ok: true, report, checkedAt: new Date().toISOString() });
+  const totalInserted = Object.values(report).reduce((sum, row) => sum + row.ingested, 0);
+  const notes = `durationMs=${Date.now() - runStartedAt}; categories=${CATEGORIES.length}`;
+  await appendCronIngestCategoryLogs(runId, categoryLogs);
+  await finishCronIngestRun(runId, {
+    ok: !hadErrors,
+    totalInserted,
+    categoriesChecked: CATEGORIES.length,
+    notes,
+  });
+
+  return NextResponse.json({
+    ok: !hadErrors,
+    runId,
+    totalInserted,
+    report,
+    checkedAt: new Date().toISOString(),
+  });
 }

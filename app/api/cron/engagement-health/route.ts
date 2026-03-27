@@ -29,8 +29,7 @@ async function getEventMetrics(sinceIso: string): Promise<Record<string, number>
 
   const { data: articles, error: articlesErr } = await db
     .from("articles")
-    .select("category,fetched_at,used_count")
-    .gt("expires_at", new Date().toISOString());
+    .select("category,fetched_at,used_count");
   if (articlesErr) throw new Error(articlesErr.message);
 
   const categoryCounts: Record<string, number> = {};

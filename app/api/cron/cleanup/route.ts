@@ -1,15 +1,14 @@
 /**
  * GET /api/cron/cleanup
  *
- * Deletes expired articles from the DB.
- * Run nightly (e.g. 3am UTC).
+ * TTL cleanup is currently disabled.
+ * This route remains for operational compatibility and observability.
  *
  * Protect with CRON_SECRET.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
-import { deleteExpiredArticles } from "@/lib/db/articles";
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
@@ -17,9 +16,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const deleted = await deleteExpiredArticles();
-    console.log(`[Cleanup] Deleted ${deleted} expired articles`);
-    return NextResponse.json({ ok: true, deleted, ranAt: new Date().toISOString() });
+    console.log("[Cleanup] Skipped: article TTL cleanup is disabled");
+    return NextResponse.json({
+      ok: true,
+      deleted: 0,
+      skipped: true,
+      reason: "article TTL cleanup disabled",
+      ranAt: new Date().toISOString(),
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

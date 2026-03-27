@@ -27,22 +27,19 @@ export const LAYOUT_COUNT = 3;
 // ─── Caching / stock thresholds ───────────────────────────────────────────────
 
 /** Minimum unread articles per category before the scheduler triggers ingest */
-export const STOCK_THRESHOLD = 20;
+export const STOCK_THRESHOLD = 30;
 
 /** How many articles the ingest agent produces per run */
 export const INGEST_BATCH_SIZE = 6; // fetched 1 at a time, token-aware
 
 /** Soft target stock per category for cron top-ups (not a hard cap). */
-export const STOCK_TARGET = 30;
+export const STOCK_TARGET = 60;
 
 /** Max articles to ingest per category in a single scheduler run. */
-export const STOCK_TOP_UP_MAX_PER_RUN = 8;
+export const STOCK_TOP_UP_MAX_PER_RUN = 18;
 
-/** If latest tagged/unexpired article is older than this, ingest a freshness refill. */
-export const FRESHNESS_INGEST_HOURS = 6;
-
-/** Articles expire after this many days */
-export const ARTICLE_TTL_DAYS = 7;
+/** If latest tagged article is older than this, ingest a freshness refill. */
+export const FRESHNESS_INGEST_HOURS = 3;
 
 // ─── Default user profile ─────────────────────────────────────────────────────
 

@@ -1,8 +1,9 @@
 import { db } from "./client";
 import type { StoredArticle } from "../types";
 import type { Category } from "../constants";
-import { ARTICLE_TTL_DAYS } from "../constants";
 import { v4 as uuidv4 } from "uuid";
+
+const NON_EXPIRING_EXPIRES_AT = "2100-01-01T00:00:00.000Z";
 
 // ─── Row shape as it comes back from Supabase ─────────────────────────────────
 interface ArticleRow {
@@ -175,8 +176,6 @@ export async function insertArticles(
   if (articles.length === 0) return [];
 
   const now = new Date();
-  const expiresAt = new Date(now);
-  expiresAt.setDate(expiresAt.getDate() + ARTICLE_TTL_DAYS);
 
   // ── Layer 1: fingerprint pre-flight ───────────────────────────────────────
   const candidates = articles.map((a) => ({
@@ -233,7 +232,9 @@ export async function insertArticles(
     pull_quote: a.pullQuote,
     image_prompt: a.imagePrompt,
     fetched_at: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
+    // Keep a far-future expiry so legacy schema constraints remain valid while
+    // article TTL cleanup is disabled.
+    expires_at: NON_EXPIRING_EXPIRES_AT,
     tags: a.tags ?? [],
     sentiment: a.sentiment ?? "uplifting",
     emotions: a.emotions ?? [],
@@ -298,7 +299,7 @@ export async function getRecentSourceUrls(
 /**
  * Fetch N articles for a category that:
  *  - are fully tagged
- *  - are not expired
+ *  - are available in the pool (no TTL expiry filtering)
  *  - are not in the excludeIds list (already seen by this user)
  * Ordered by quality_score desc.
  */
@@ -312,7 +313,6 @@ export async function getArticlesForFeed(
     .select("*")
     .eq("category", category)
     .eq("tagged", true)
-    .gt("expires_at", new Date().toISOString())
     .order("quality_score", { ascending: false })
     .limit(limit);
 
@@ -339,7 +339,6 @@ export async function getUntaggedArticlesForFeed(
     .select("*")
     .eq("category", category)
     .eq("tagged", false)
-    .gt("expires_at", new Date().toISOString())
     .order("fetched_at", { ascending: false })
     .limit(limit);
 
@@ -373,7 +372,6 @@ export async function getRandomAvailableArticles(
   let query = db
     .from("articles")
     .select("*")
-    .gt("expires_at", new Date().toISOString())
     .limit(cap);
 
   if (excludeIds.length > 0) {
@@ -395,7 +393,6 @@ export async function getRandomArticlesResurfacing(limit: number): Promise<Store
   const { data, error } = await db
     .from("articles")
     .select("*")
-    .gt("expires_at", new Date().toISOString())
     .limit(cap);
 
   if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
@@ -405,7 +402,7 @@ export async function getRandomArticlesResurfacing(limit: number): Promise<Store
 }
 
 /**
- * Count available (tagged, unexpired) articles per category.
+ * Count available (tagged) articles per category.
  * Used by the scheduler to decide whether to trigger ingest.
  */
 export async function countAvailableByCategory(): Promise<
@@ -414,8 +411,7 @@ export async function countAvailableByCategory(): Promise<
   const { data, error } = await db
     .from("articles")
     .select("category")
-    .eq("tagged", true)
-    .gt("expires_at", new Date().toISOString());
+    .eq("tagged", true);
 
   if (error) throw new Error(`countAvailableByCategory: ${error.message}`);
 
@@ -428,8 +424,8 @@ export async function countAvailableByCategory(): Promise<
 
 /**
  * For each category, return:
- * - available tagged+unexpired count
- * - newest fetched_at timestamp among tagged+unexpired rows
+ * - available tagged count
+ * - newest fetched_at timestamp among tagged rows
  */
 export async function getAvailableStockSnapshotByCategory(): Promise<
   Record<string, { count: number; newestFetchedAt: string | null }>
@@ -437,8 +433,7 @@ export async function getAvailableStockSnapshotByCategory(): Promise<
   const { data, error } = await db
     .from("articles")
     .select("category,fetched_at")
-    .eq("tagged", true)
-    .gt("expires_at", new Date().toISOString());
+    .eq("tagged", true);
 
   if (error) {
     throw new Error(`getAvailableStockSnapshotByCategory: ${error.message}`);
@@ -539,7 +534,6 @@ export async function getUntaggedArticles(
     .from("articles")
     .select("*")
     .eq("tagged", false)
-    .gt("expires_at", new Date().toISOString())
     .limit(limit);
 
   if (error) throw new Error(`getUntaggedArticles: ${error.message}`);
@@ -547,15 +541,8 @@ export async function getUntaggedArticles(
 }
 
 /**
- * Delete expired articles (called from the cleanup cron).
+ * Cleanup is disabled now that article TTL expiry is retired.
  */
 export async function deleteExpiredArticles(): Promise<number> {
-  const { data, error } = await db
-    .from("articles")
-    .delete()
-    .lt("expires_at", new Date().toISOString())
-    .select("id");
-
-  if (error) throw new Error(`deleteExpiredArticles: ${error.message}`);
-  return data?.length ?? 0;
+  return 0;
 }

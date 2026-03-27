@@ -82,7 +82,9 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
   // Track the last article category so game slots can use a matching word bank
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
   // Hard de-dup across all rendered sections in this session/category view.
-  const renderedArticleIdsRef = useRef<Set<string>>(new Set());
+  const renderedArticleKeysRef = useRef<Set<string>>(new Set());
+  // Plain UUID IDs only — sent to /api/feed excludeIds for DB-level exclusion.
+  const renderedDbArticleIdsRef = useRef<Set<string>>(new Set());
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -129,7 +131,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       params.set("userId", userIdRef.current);
       params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
-      const excludeIds = Array.from(renderedArticleIdsRef.current).slice(-400);
+      const excludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
       if (excludeIds.length > 0) params.set("excludeIds", excludeIds.join(","));
 
       const controller = new AbortController();
@@ -161,7 +163,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       const cleaned = data.articles.map(cleanArticle);
       const uniqueForView = cleaned.filter((article) => {
         const key = articleUniqKey(article);
-        if (renderedArticleIdsRef.current.has(key)) return false;
+        if (renderedArticleKeysRef.current.has(key)) return false;
         return true;
       });
 
@@ -185,7 +187,11 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
 
       setSections((prev) => [...prev, section]);
       for (const article of uniqueForView) {
-        renderedArticleIdsRef.current.add(articleUniqKey(article));
+        const key = articleUniqKey(article);
+        renderedArticleKeysRef.current.add(key);
+        if ("id" in article && typeof article.id === "string" && article.id.length > 0) {
+          renderedDbArticleIdsRef.current.add(article.id);
+        }
       }
       sectionCountRef.current += 1;
 
@@ -233,7 +239,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     sectionCountRef.current = 0;
     gameSlotOrdinalRef.current = 0;
     lastArticleCategoryRef.current = undefined;
-    renderedArticleIdsRef.current = new Set();
+    renderedArticleKeysRef.current = new Set();
+    renderedDbArticleIdsRef.current = new Set();
     gameRatioRef.current = DEFAULT_GAME_RATIO;
 
     const gen = ++feedBootstrapGenRef.current;
@@ -321,7 +328,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
     loadingRef.current = false;
     setLoading(false);
     lastArticleCategoryRef.current = undefined;
-    renderedArticleIdsRef.current = new Set();
+    renderedArticleKeysRef.current = new Set();
+    renderedDbArticleIdsRef.current = new Set();
     loadMore(next);
   };
 
@@ -334,7 +342,8 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
       gameSlotOrdinalRef.current = 0;
       loadingRef.current = false;
       setError(null);
-      renderedArticleIdsRef.current = new Set();
+      renderedArticleKeysRef.current = new Set();
+      renderedDbArticleIdsRef.current = new Set();
       void loadMore();
     },
     [loadMore]

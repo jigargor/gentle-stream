@@ -32,6 +32,8 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+      - name: Pin npm version
+        run: npm install --global npm@10.8.2
       - name: Install dependencies
         run: |
           npm --version
@@ -81,6 +83,8 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+      - name: Pin npm version
+        run: npm install --global npm@10.8.2
       - name: Install dependencies
         run: |
           npm --version

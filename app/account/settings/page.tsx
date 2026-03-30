@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalDocumentShell } from "@/components/legal/LegalDocumentShell";
+import { MfaSettings } from "@/components/auth/mfa/MfaSettings";
 
 export const metadata: Metadata = {
   title: "Account settings | Gentle Stream",
@@ -36,6 +37,29 @@ export default function AccountSettingsPage() {
       title="Account settings"
       description="Update your profile, saved library, and feed preferences from the profile menu on the home page. Legal and data resources are linked below."
     >
+      <div style={{ marginTop: "-0.2rem", marginBottom: "0.85rem" }}>
+        <Link
+          href="/"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            border: "1px solid #d8d2c7",
+            background: "#fff",
+            color: "#1a1a1a",
+            textDecoration: "none",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.82rem",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            padding: "0.35rem 0.55rem",
+          }}
+        >
+          Back
+        </Link>
+      </div>
+
+      <MfaSettings />
+
       <section style={{ marginTop: 0 }}>
         <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Legal and data</h2>
         <ul

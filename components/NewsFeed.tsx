@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead, { MASTHEAD_TOP_BAR_HEIGHT_PX } from "./Masthead";
 import { ProfileMenu } from "./user/ProfileMenu";
 import CategoryDrawer from "./CategoryDrawer";
+import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
 import LoadingSection from "./LoadingSection";
@@ -64,6 +65,7 @@ export interface NewsFeedProps {
 }
 
 export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFeedProps) {
+  const [mfaPassed, setMfaPassed] = useState(userId === "dev-local");
   const [sections, setSections] = useState<FeedSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -289,6 +291,12 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
+    if (!mfaPassed) {
+      feedReadyRef.current = false;
+      setIsFeedReady(false);
+      return;
+    }
+
     feedReadyRef.current = false;
     setIsFeedReady(false);
 
@@ -391,7 +399,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     return () => {
       cancelled = true;
     };
-  }, [userId, loadMore]);
+  }, [userId, mfaPassed, loadMore]);
+
+  useEffect(() => {
+    setMfaPassed(userId === "dev-local");
+  }, [userId]);
 
   useEffect(() => {
     function onConnectionsCompleted() {
@@ -490,6 +502,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     },
     [loadMore]
   );
+
+  if (!mfaPassed) {
+    return <MfaChallengeGate onPassed={() => setMfaPassed(true)} />;
+  }
 
   return (
     <div style={{ background: "#ede9e1", minHeight: "100vh" }}>

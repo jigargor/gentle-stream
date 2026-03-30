@@ -27,6 +27,7 @@ import {
   STOCK_TOP_UP_MAX_PER_RUN,
 } from "@/lib/constants";
 import type { Category } from "@/lib/constants";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,7 +64,12 @@ function resolveIngestPipeline(category: Category): "legacy" | "overhaul" {
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const runStartedAt = Date.now();
@@ -73,10 +79,12 @@ export async function GET(request: NextRequest) {
     runId = await createCronIngestRun(triggerSource);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json(
-      { error: `Could not create ingest run: ${message}` },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: `Could not create ingest run: ${message}`,
+    });
   }
 
   const report: Record<

@@ -32,8 +32,22 @@ import {
   consumeRateLimit,
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const ANONYMOUS_USER_ID = "anonymous";
+const COLD_START_DEDUPE_MS = 45_000;
+
+type ColdStartPromiseMap = Map<string, Promise<void>>;
+
+function getColdStartJobs(): ColdStartPromiseMap {
+  const g = globalThis as typeof globalThis & {
+    __gentleStreamFeedColdStartJobs?: ColdStartPromiseMap;
+  };
+  if (!g.__gentleStreamFeedColdStartJobs) {
+    g.__gentleStreamFeedColdStartJobs = new Map<string, Promise<void>>();
+  }
+  return g.__gentleStreamFeedColdStartJobs;
+}
 
 function isDevLight(): boolean {
   const v = process.env.DEV_LIGHT;
@@ -55,6 +69,114 @@ function parseContentKinds(searchParams: URLSearchParams): ArticleContentKind[] 
   return allowed.length > 0 ? Array.from(new Set(allowed)) : null;
 }
 
+function buildColdStartKey(params: {
+  userId: string;
+  category: string;
+  contentKinds: ArticleContentKind[] | null;
+}): string {
+  const kinds = params.contentKinds?.slice().sort().join(",") ?? "all";
+  return `${params.userId}|${params.category}|${kinds}`;
+}
+
+function startColdStartInBackground(input: {
+  userId: string;
+  category: Category;
+  pageSize: number;
+}): boolean {
+  const jobs = getColdStartJobs();
+  const key = buildColdStartKey({
+    userId: input.userId,
+    category: input.category,
+    contentKinds: ["news"],
+  });
+  if (jobs.has(key)) return false;
+
+  const ingestCount = Math.min(input.pageSize + 2, 6);
+  const job = (async () => {
+    let runId: string | null = null;
+    try {
+      runId = await createCronIngestRun("feed-cold-start-async");
+    } catch (error) {
+      console.warn("[/api/feed] Could not create async cold-start ingest run:", error);
+    }
+
+    let ingestResult: Awaited<ReturnType<typeof runIngestAgent>> | null = null;
+    let coldStartError: string | null = null;
+    try {
+      ingestResult = await runIngestAgent(input.category, ingestCount);
+      await runTaggerAgent(Math.min(20, ingestCount + 5));
+
+      if (runId) {
+        try {
+          await appendCronIngestCategoryLogs(runId, [
+            {
+              category: input.category,
+              beforeCount: 0,
+              requestedCount: ingestCount,
+              insertedCount: ingestResult.inserted.length,
+              attemptedCount: ingestResult.attemptedCount,
+              skippedCount: ingestResult.skippedCount,
+              failedCount: ingestResult.failedCount,
+              retryCount: ingestResult.retryCount,
+              durationMs: ingestResult.durationMs,
+              warningFlag:
+                ingestResult.failedCount > 0 || ingestResult.inserted.length === 0,
+              reason: "threshold",
+              newestFetchedAt: null,
+              errorSummary: ingestResult.errorSummary ?? undefined,
+            },
+          ]);
+          await finishCronIngestRun(runId, {
+            ok: true,
+            totalInserted: ingestResult.inserted.length,
+            totalAttempted: ingestResult.attemptedCount,
+            totalSkipped: ingestResult.skippedCount,
+            totalFailed: ingestResult.failedCount,
+            totalRetried: ingestResult.retryCount,
+            warningCount:
+              ingestResult.failedCount > 0 || ingestResult.inserted.length === 0 ? 1 : 0,
+            errorSummary: ingestResult.errorSummary ?? undefined,
+            categoriesChecked: 1,
+            notes: `trigger=feed-cold-start-async; category=${input.category}; user=${input.userId}`,
+          });
+        } catch (logError) {
+          console.warn("[/api/feed] Could not persist async cold-start ingest logs:", logError);
+        }
+      }
+    } catch (error: unknown) {
+      coldStartError = error instanceof Error ? error.message : "Unknown ingest error";
+      if (runId) {
+        try {
+          await finishCronIngestRun(runId, {
+            ok: false,
+            totalInserted: ingestResult?.inserted.length ?? 0,
+            totalAttempted: ingestResult?.attemptedCount ?? ingestCount,
+            totalSkipped: ingestResult?.skippedCount ?? 0,
+            totalFailed: ingestResult?.failedCount ?? ingestCount,
+            totalRetried: ingestResult?.retryCount ?? 0,
+            warningCount: 1,
+            errorSummary: coldStartError,
+            categoriesChecked: 1,
+            notes: `trigger=feed-cold-start-async; category=${input.category}; user=${input.userId}`,
+          });
+        } catch (logError) {
+          console.warn("[/api/feed] Could not finalize async cold-start ingest log:", logError);
+        }
+      }
+      console.error("[/api/feed] Async cold-start failed:", error);
+    } finally {
+      // Keep key briefly to avoid bursty requeues from many clients.
+      setTimeout(() => {
+        const current = getColdStartJobs().get(key);
+        if (current === job) getColdStartJobs().delete(key);
+      }, COLD_START_DEDUPE_MS);
+    }
+  })();
+
+  jobs.set(key, job);
+  return true;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
@@ -64,7 +186,7 @@ export async function GET(request: NextRequest) {
       ? process.env.DEV_USER_ID ?? "dev-local"
       : sessionUserId || ANONYMOUS_USER_ID;
 
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     policy:
       userId === ANONYMOUS_USER_ID
         ? { id: "feed-anon", windowMs: 60_000, max: 45 }
@@ -75,7 +197,7 @@ export async function GET(request: NextRequest) {
       routeId: "api-feed",
     }),
   });
-  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const categoryParam = searchParams.get("category");
   const contentKinds = parseContentKinds(searchParams);
@@ -126,108 +248,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(result);
     }
 
-    // ── 2. True cold start (zero articles) — refill with a *small* ingest ────
+    // ── 2. True cold start (zero articles) — enqueue async refill ─────────────
     console.log(
-      `[/api/feed] No articles for this request ("${result.category}") — running live ingest`
+      `[/api/feed] No articles for this request ("${result.category}") — queueing async ingest`
     );
 
     const resolvedCategory = (result.category || category || CATEGORIES[sectionIndex % CATEGORIES.length]) as Category;
-    // Default ingest agent pulls 6 articles; that can take many minutes under rate limits.
-    // Only fetch enough to satisfy this one section (+ small buffer for tagging misses).
-    const ingestCount = Math.min(pageSize + 2, 6);
-    let runId: string | null = null;
-    try {
-      runId = await createCronIngestRun("feed-cold-start");
-    } catch (error) {
-      console.warn("[/api/feed] Could not create cold-start ingest log run:", error);
-    }
-    let ingestResult: Awaited<ReturnType<typeof runIngestAgent>> | null = null;
-    let coldStartError: string | null = null;
-    try {
-      ingestResult = await runIngestAgent(resolvedCategory, ingestCount);
-      await runTaggerAgent(Math.min(20, ingestCount + 5));
-
-      if (runId) {
-        try {
-          await appendCronIngestCategoryLogs(runId, [
-            {
-              category: resolvedCategory,
-              beforeCount: 0,
-              requestedCount: ingestCount,
-              insertedCount: ingestResult.inserted.length,
-              attemptedCount: ingestResult.attemptedCount,
-              skippedCount: ingestResult.skippedCount,
-              failedCount: ingestResult.failedCount,
-              retryCount: ingestResult.retryCount,
-              durationMs: ingestResult.durationMs,
-              warningFlag:
-                ingestResult.failedCount > 0 || ingestResult.inserted.length === 0,
-              reason: "threshold",
-              newestFetchedAt: null,
-              errorSummary: ingestResult.errorSummary ?? undefined,
-            },
-          ]);
-
-          await finishCronIngestRun(runId, {
-            ok: true,
-            totalInserted: ingestResult.inserted.length,
-            totalAttempted: ingestResult.attemptedCount,
-            totalSkipped: ingestResult.skippedCount,
-            totalFailed: ingestResult.failedCount,
-            totalRetried: ingestResult.retryCount,
-            warningCount:
-              ingestResult.failedCount > 0 || ingestResult.inserted.length === 0 ? 1 : 0,
-            errorSummary: ingestResult.errorSummary ?? undefined,
-            categoriesChecked: 1,
-            notes: `trigger=feed-cold-start; category=${resolvedCategory}`,
-          });
-        } catch (logError) {
-          console.warn("[/api/feed] Could not persist cold-start ingest logs:", logError);
-        }
-      }
-    } catch (error: unknown) {
-      coldStartError = error instanceof Error ? error.message : "Unknown ingest error";
-      if (runId) {
-        try {
-          await finishCronIngestRun(runId, {
-            ok: false,
-            totalInserted: ingestResult?.inserted.length ?? 0,
-            totalAttempted: ingestResult?.attemptedCount ?? ingestCount,
-            totalSkipped: ingestResult?.skippedCount ?? 0,
-            totalFailed: ingestResult?.failedCount ?? ingestCount,
-            totalRetried: ingestResult?.retryCount ?? 0,
-            warningCount: 1,
-            errorSummary: coldStartError,
-            categoriesChecked: 1,
-            notes: `trigger=feed-cold-start; category=${resolvedCategory}`,
-          });
-        } catch (logError) {
-          console.warn("[/api/feed] Could not finalize cold-start ingest log:", logError);
-        }
-      }
-      throw error;
-    }
-
-    // Retry the ranked fetch with fresh articles (preserve mixed vs filtered)
-    const retryResult = await getRankedFeed({
+    const coldStartQueued = startColdStartInBackground({
       userId,
-      category,
-      sectionIndex,
+      category: resolvedCategory,
       pageSize,
-      markSeen: userId !== ANONYMOUS_USER_ID,
-      excludeArticleIds,
-      contentKinds,
     });
 
     return NextResponse.json({
-      ...retryResult,
-      fromCache: false, // tell the client this was a live generation
+      ...result,
+      fromCache: true,
+      coldStartQueued,
+      coldStartCategory: resolvedCategory,
     });
   } catch (error: unknown) {
     console.error("[/api/feed] Error:", error);
-    return NextResponse.json(
-      { error: "Could not load feed right now." },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: "Could not load feed right now.",
+    });
   }
 }

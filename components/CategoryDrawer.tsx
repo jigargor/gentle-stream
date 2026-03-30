@@ -49,25 +49,39 @@ export default function CategoryDrawer({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="category-drawer"
+        aria-label="Open categories"
         onClick={() => setOpen(true)}
         style={{
           position: "fixed",
           top: `${topPx}px`,
           right: "0.95rem",
           zIndex: 130,
-          border: "1px solid #1a1a1a",
-          background: "#1a1a1a",
-          color: "#faf8f3",
-          padding: "0.48rem 0.82rem",
-          fontFamily: "'Playfair Display', Georgia, serif",
-          fontSize: "0.72rem",
-          letterSpacing: "0.05em",
-          textTransform: "uppercase",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "2.35rem",
+          height: "2.35rem",
+          padding: 0,
+          border: "1px solid rgba(26, 26, 26, 0.28)",
+          background: "rgba(250, 248, 243, 0.42)",
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          color: "#1a1a1a",
           cursor: "pointer",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
         }}
       >
-        Categories
+        <svg
+          width={20}
+          height={14}
+          viewBox="0 0 20 14"
+          aria-hidden
+          style={{ display: "block" }}
+        >
+          <rect x="0" y="0" width="20" height="2" rx="0.5" fill="currentColor" />
+          <rect x="0" y="6" width="20" height="2" rx="0.5" fill="currentColor" />
+          <rect x="0" y="12" width="20" height="2" rx="0.5" fill="currentColor" />
+        </svg>
       </button>
 
       {open ? (
@@ -86,7 +100,7 @@ export default function CategoryDrawer({
               position: "absolute",
               inset: 0,
               border: "none",
-              background: "rgba(0, 0, 0, 0.34)",
+              background: "rgba(0, 0, 0, 0.18)",
               cursor: "pointer",
             }}
           />
@@ -102,9 +116,11 @@ export default function CategoryDrawer({
               right: 0,
               height: "100%",
               width: "min(360px, 90vw)",
-              background: "#faf8f3",
-              borderLeft: "2px solid #1a1a1a",
-              boxShadow: "-8px 0 28px rgba(0,0,0,0.24)",
+              background: "rgba(250, 248, 243, 0.92)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
+              borderLeft: "1px solid rgba(26, 26, 26, 0.2)",
+              boxShadow: "-8px 0 28px rgba(0,0,0,0.16)",
               display: "flex",
               flexDirection: "column",
               transform: "translateX(0)",

@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { getUserGameStats } from "@/lib/db/gameStats";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const raw = request.nextUrl.searchParams.get("recent");
@@ -17,6 +23,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(stats);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

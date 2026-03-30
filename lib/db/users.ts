@@ -20,6 +20,7 @@ interface UserProfileRow {
   username_set_at?: string | null;
   avatar_url?: string | null;
   weather_location?: string | null;
+  theme_preference?: "light" | "dark" | null;
   preferred_emotions: string[];
   preferred_locales: string[];
   seen_article_ids: string[];
@@ -99,6 +100,7 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     usernameSetAt: row.username_set_at ?? null,
     avatarUrl: row.avatar_url ?? null,
     weatherLocation: row.weather_location ?? null,
+    themePreference: row.theme_preference ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
     seenArticleIds: row.seen_article_ids ?? [],
@@ -216,6 +218,7 @@ export async function updateUserPreferences(
       | "categoryWeights"
       | "gameRatio"
       | "enabledGameTypes"
+      | "themePreference"
       | "preferredEmotions"
       | "preferredLocales"
     >
@@ -226,6 +229,9 @@ export async function updateUserPreferences(
   if (prefs.gameRatio !== undefined) updates.game_ratio = prefs.gameRatio;
   if (prefs.enabledGameTypes !== undefined) {
     updates.enabled_game_types = normalizeEnabledGameTypes(prefs.enabledGameTypes);
+  }
+  if (prefs.themePreference !== undefined) {
+    updates.theme_preference = prefs.themePreference ?? null;
   }
   if (prefs.preferredEmotions) updates.preferred_emotions = prefs.preferredEmotions;
   if (prefs.preferredLocales) updates.preferred_locales = prefs.preferredLocales;

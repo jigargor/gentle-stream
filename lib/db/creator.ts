@@ -5,8 +5,8 @@ import type {
   SubmissionContentKind,
   StoredArticle,
 } from "@/lib/types";
-import type { Category } from "@/lib/constants";
-import { CATEGORIES } from "@/lib/constants";
+import type { ArticleStorageCategory, Category } from "@/lib/constants";
+import { CATEGORIES, RECIPE_CATEGORY } from "@/lib/constants";
 import { db } from "./client";
 
 interface CreatorProfileRow {
@@ -95,6 +95,11 @@ function rowToCreatorProfile(row: CreatorProfileRow): CreatorProfile {
   };
 }
 
+function resolveSubmissionCategory(row: ArticleSubmissionRow): ArticleStorageCategory {
+  if (row.content_kind === "recipe") return RECIPE_CATEGORY;
+  return isCategory(row.category) ? row.category : CATEGORIES[0];
+}
+
 function rowToSubmission(row: ArticleSubmissionRow): ArticleSubmission {
   return {
     id: row.id,
@@ -103,7 +108,7 @@ function rowToSubmission(row: ArticleSubmissionRow): ArticleSubmission {
     subheadline: row.subheadline,
     body: row.body,
     pullQuote: row.pull_quote,
-    category: isCategory(row.category) ? row.category : CATEGORIES[0],
+    category: resolveSubmissionCategory(row),
     contentKind: toSubmissionContentKind(row.content_kind),
     locale: row.locale ?? "global",
     explicitHashtags: row.explicit_hashtags ?? [],
@@ -242,7 +247,7 @@ export async function createSubmission(input: {
   subheadline: string;
   body: string;
   pullQuote: string;
-  category: Category;
+  category: ArticleStorageCategory;
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
@@ -259,7 +264,7 @@ export async function createSubmission(input: {
     subheadline: input.subheadline,
     body: input.body,
     pull_quote: input.pullQuote,
-    category: input.category,
+    category: input.contentKind === "recipe" ? RECIPE_CATEGORY : input.category,
     content_kind: input.contentKind,
     locale: input.locale,
     explicit_hashtags: normaliseHashtags(input.explicitHashtags),
@@ -304,7 +309,7 @@ export async function updateSubmissionForAuthor(input: {
   subheadline?: string;
   body?: string;
   pullQuote?: string;
-  category?: Category;
+  category?: ArticleStorageCategory;
   contentKind?: SubmissionContentKind;
   locale?: string;
   explicitHashtags?: string[];
@@ -369,6 +374,12 @@ export async function updateSubmissionForAuthor(input: {
   }
   if (input.withdraw) {
     updates.status = "withdrawn";
+  }
+
+  const nextKind =
+    (updates.content_kind as string | undefined) ?? row.content_kind ?? "";
+  if (nextKind === "recipe") {
+    updates.category = RECIPE_CATEGORY;
   }
 
   const { data, error } = await db
@@ -467,7 +478,12 @@ export async function reviewSubmission(input: {
       subheadline: submission.subheadline,
       byline,
       location,
-      category: submission.category,
+      category:
+        submission.content_kind === "recipe"
+          ? RECIPE_CATEGORY
+          : isCategory(submission.category)
+            ? submission.category
+            : CATEGORIES[0],
       content_kind: toSubmissionContentKind(submission.content_kind),
       body: submission.body,
       pull_quote: submission.pull_quote,
@@ -527,7 +543,12 @@ export async function reviewSubmission(input: {
       subheadline: submission.subheadline,
       byline,
       location,
-      category: isCategory(submission.category) ? submission.category : CATEGORIES[0],
+      category:
+        submission.content_kind === "recipe"
+          ? RECIPE_CATEGORY
+          : isCategory(submission.category)
+            ? submission.category
+            : CATEGORIES[0],
       contentKind: toSubmissionContentKind(submission.content_kind),
       body: submission.body,
       pullQuote: submission.pull_quote,

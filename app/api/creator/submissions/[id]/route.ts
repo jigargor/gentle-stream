@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
-import { CATEGORIES, type Category } from "@/lib/constants";
+import { CATEGORIES, RECIPE_CATEGORY, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { updateSubmissionForAuthor } from "@/lib/db/creator";
+import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -19,6 +22,24 @@ function toSafeText(value: unknown, maxLen: number): string | undefined {
   return value.trim().slice(0, maxLen);
 }
 
+const updateSubmissionBodySchema = z.object({
+  headline: z.string().optional(),
+  subheadline: z.string().optional(),
+  body: z.string().optional(),
+  pullQuote: z.string().optional(),
+  category: z.string().optional(),
+  contentKind: z.string().optional(),
+  locale: z.string().optional(),
+  explicitHashtags: z.array(z.string()).optional(),
+  withdraw: z.boolean().optional(),
+  recipeServings: z.union([z.number(), z.string()]).optional(),
+  recipeIngredients: z.union([z.array(z.string()), z.string()]).optional(),
+  recipeInstructions: z.union([z.array(z.string()), z.string()]).optional(),
+  recipePrepTimeMinutes: z.union([z.number(), z.string()]).optional(),
+  recipeCookTimeMinutes: z.union([z.number(), z.string()]).optional(),
+  recipeImages: z.array(z.string()).optional(),
+});
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -26,39 +47,39 @@ export async function PATCH(
   const params = await context.params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const profile = await getOrCreateUserProfile(userId);
   if (profile.userRole !== "creator") {
-    return NextResponse.json({ error: "Creator access required" }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Creator access required",
+    });
   }
 
-  const body = (await request.json()) as {
-    headline?: unknown;
-    subheadline?: unknown;
-    body?: unknown;
-    pullQuote?: unknown;
-    category?: unknown;
-    contentKind?: unknown;
-    locale?: unknown;
-    explicitHashtags?: unknown;
-    withdraw?: unknown;
-
-    recipeServings?: unknown;
-    recipeIngredients?: unknown;
-    recipeInstructions?: unknown;
-    recipePrepTimeMinutes?: unknown;
-    recipeCookTimeMinutes?: unknown;
-    recipeImages?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: updateSubmissionBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
   const rawArticleBody =
     typeof body.body === "string" ? body.body.trim() : undefined;
   if (rawArticleBody !== undefined && rawArticleBody.length > 15_000) {
-    return NextResponse.json(
-      { error: "body must be 15,000 characters or fewer." },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: "body must be 15,000 characters or fewer.",
+    });
   }
 
   const updates: Parameters<typeof updateSubmissionForAuthor>[0] = {
@@ -128,14 +149,27 @@ export async function PATCH(
   if (pullQuote !== undefined) updates.pullQuote = pullQuote;
   if (locale !== undefined) updates.locale = locale || "global";
   if (categoryRaw !== undefined) {
-    if (!categoryRaw || !isCategory(categoryRaw)) {
-      return NextResponse.json({ error: "Invalid category" }, { status: 400 });
+    if (contentKindRaw === "recipe") {
+      updates.category = RECIPE_CATEGORY;
+    } else if (!categoryRaw || !isCategory(categoryRaw)) {
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Invalid category",
+      });
+    } else {
+      updates.category = categoryRaw;
     }
-    updates.category = categoryRaw;
   }
   if (contentKindRaw !== undefined) {
     if (!contentKindRaw || !isSubmissionContentKind(contentKindRaw)) {
-      return NextResponse.json({ error: "Invalid content kind" }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Invalid content kind",
+      });
     }
     updates.contentKind = contentKindRaw;
   }
@@ -156,19 +190,44 @@ export async function PATCH(
         : undefined;
 
     if (recipeServings !== undefined && (recipeServings == null || recipeServings <= 0)) {
-      return NextResponse.json({ error: "recipeServings must be a positive integer." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "recipeServings must be a positive integer.",
+      });
     }
     if (recipePrepTimeMinutes !== undefined && (recipePrepTimeMinutes == null || recipePrepTimeMinutes < 0)) {
-      return NextResponse.json({ error: "prep time must be an integer >= 0." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "prep time must be an integer >= 0.",
+      });
     }
     if (recipeCookTimeMinutes !== undefined && (recipeCookTimeMinutes == null || recipeCookTimeMinutes < 0)) {
-      return NextResponse.json({ error: "cook time must be an integer >= 0." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "cook time must be an integer >= 0.",
+      });
     }
     if (recipeIngredients !== undefined && recipeIngredients.length === 0) {
-      return NextResponse.json({ error: "recipeIngredients is required." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "recipeIngredients is required.",
+      });
     }
     if (recipeInstructions !== undefined && recipeInstructions.length === 0) {
-      return NextResponse.json({ error: "recipeInstructions is required." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "recipeInstructions is required.",
+      });
     }
 
     if (body.recipeServings !== undefined) updates.recipeServings = recipeServings;
@@ -188,7 +247,12 @@ export async function PATCH(
   }
 
   if (Object.keys(updates).length <= 2) {
-    return NextResponse.json({ error: "No update fields supplied" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.MISSING_FIELD,
+      message: "No update fields supplied",
+    });
   }
 
   try {
@@ -201,6 +265,17 @@ export async function PATCH(
       : message.includes("pending")
         ? 409
         : 500;
-    return NextResponse.json({ error: message }, { status });
+    const code =
+      status === 404
+        ? API_ERROR_CODES.NOT_FOUND
+        : status === 409
+          ? API_ERROR_CODES.INVALID_REQUEST
+          : API_ERROR_CODES.INTERNAL;
+    return apiErrorResponse({
+      request,
+      status,
+      code,
+      message,
+    });
   }
 }

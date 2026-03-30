@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { parseJsonBody, parseQuery } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const getQuerySchema = z.object({
+  articleId: z.string().uuid().optional(),
+});
+const deleteQuerySchema = z.object({
+  id: z.string().min(1),
+});
+const postBodySchema = z.object({
+  articleId: z.string().uuid(),
+  articleTitle: z.string().trim().min(1),
+  articleUrl: z.string().optional(),
+  summary: z.string().optional(),
+});
 
 async function logSaveEvent(userId: string, articleId: string): Promise<void> {
   const { error } = await db.from("article_engagement_events").insert({
@@ -36,13 +51,29 @@ function saveErrorPayload(message: string): { error: string; hint?: string } {
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
-  const articleId = request.nextUrl.searchParams.get("articleId");
+  const parsedQuery = parseQuery({
+    request,
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: getQuerySchema,
+  });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const articleId = parsedQuery.data.articleId ?? null;
   if (articleId !== null && articleId !== "") {
     if (!UUID_RE.test(articleId)) {
-      return NextResponse.json({ error: "Invalid articleId" }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Invalid articleId",
+      });
     }
 
     const { data, error } = await db
@@ -53,7 +84,15 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
 
     if (error) {
-      return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+      return apiErrorResponse({
+        request,
+        status: 500,
+        code: API_ERROR_CODES.INTERNAL,
+        message: error.message,
+        details: saveErrorPayload(error.message).hint
+          ? { hint: saveErrorPayload(error.message).hint }
+          : undefined,
+      });
     }
 
     return NextResponse.json({
@@ -70,7 +109,15 @@ export async function GET(request: NextRequest) {
     .limit(100);
 
   if (error) {
-    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+      details: saveErrorPayload(error.message).hint
+        ? { hint: saveErrorPayload(error.message).hint }
+        : undefined,
+    });
   }
 
   const items = (data ?? []).map((r) => ({
@@ -89,22 +136,20 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
-  const body = (await request.json()) as {
-    articleId?: unknown;
-    articleTitle?: unknown;
-    articleUrl?: unknown;
-    summary?: unknown;
-  };
-
-  if (typeof body.articleId !== "string" || !body.articleId) {
-    return NextResponse.json({ error: "articleId required" }, { status: 400 });
-  }
-  if (typeof body.articleTitle !== "string" || !body.articleTitle.trim()) {
-    return NextResponse.json({ error: "articleTitle required" }, { status: 400 });
-  }
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: postBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   const { data, error } = await db
     .from("article_saves")
@@ -129,7 +174,15 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+      details: saveErrorPayload(error.message).hint
+        ? { hint: saveErrorPayload(error.message).hint }
+        : undefined,
+    });
   }
 
   await logSaveEvent(userId, body.articleId);
@@ -140,13 +193,21 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
-  const id = request.nextUrl.searchParams.get("id");
-  if (!id) {
-    return NextResponse.json({ error: "id required" }, { status: 400 });
-  }
+  const parsedDeleteQuery = parseQuery({
+    request,
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: deleteQuerySchema,
+  });
+  if (!parsedDeleteQuery.ok) return parsedDeleteQuery.response;
+  const id = parsedDeleteQuery.data.id;
 
   const { error } = await db
     .from("article_saves")
@@ -155,7 +216,15 @@ export async function DELETE(request: NextRequest) {
     .eq("id", id);
 
   if (error) {
-    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+      details: saveErrorPayload(error.message).hint
+        ? { hint: saveErrorPayload(error.message).hint }
+        : undefined,
+    });
   }
 
   return NextResponse.json({ ok: true });

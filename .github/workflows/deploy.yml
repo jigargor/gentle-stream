@@ -57,8 +57,14 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+      - name: Pin npm version
+        run: npm install --global npm@10.8.2
 
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          npm --version
+          node --version
+          npm ci || npm ci --legacy-peer-deps
 
       - name: Install Vercel CLI
         run: npm install --global vercel@latest

@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { parseJsonBody, parseQuery } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const articleQuerySchema = z.object({
+  articleId: z.string().uuid(),
+});
+const postBodySchema = z.object({
+  articleId: z.string().uuid(),
+  articleTitle: z.string().trim().min(1),
+});
 
 async function logLikeEvent(userId: string, articleId: string): Promise<void> {
   const { error } = await db.from("article_engagement_events").insert({
@@ -22,13 +32,21 @@ async function logLikeEvent(userId: string, articleId: string): Promise<void> {
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
-  const articleId = request.nextUrl.searchParams.get("articleId");
-  if (!articleId || !UUID_RE.test(articleId)) {
-    return NextResponse.json({ error: "Invalid articleId" }, { status: 400 });
-  }
+  const parsedQuery = parseQuery({
+    request,
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: articleQuerySchema,
+  });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const articleId = parsedQuery.data.articleId;
 
   const { data, error } = await db
     .from("article_likes")
@@ -38,7 +56,12 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json({ liked: Boolean(data) });
@@ -47,20 +70,20 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
-  const body = (await request.json()) as {
-    articleId?: unknown;
-    articleTitle?: unknown;
-  };
-
-  if (typeof body.articleId !== "string" || !UUID_RE.test(body.articleId)) {
-    return NextResponse.json({ error: "Invalid articleId" }, { status: 400 });
-  }
-  if (typeof body.articleTitle !== "string" || !body.articleTitle.trim()) {
-    return NextResponse.json({ error: "articleTitle required" }, { status: 400 });
-  }
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: postBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   const { error } = await db.from("article_likes").upsert(
     {
@@ -73,7 +96,12 @@ export async function POST(request: NextRequest) {
   );
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   await logLikeEvent(userId, body.articleId);
@@ -84,13 +112,21 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
-  const articleId = request.nextUrl.searchParams.get("articleId");
-  if (!articleId || !UUID_RE.test(articleId)) {
-    return NextResponse.json({ error: "Invalid articleId" }, { status: 400 });
-  }
+  const parsedQuery = parseQuery({
+    request,
+    query: Object.fromEntries(request.nextUrl.searchParams.entries()),
+    schema: articleQuerySchema,
+  });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const articleId = parsedQuery.data.articleId;
 
   const { error } = await db
     .from("article_likes")
@@ -99,7 +135,12 @@ export async function DELETE(request: NextRequest) {
     .eq("article_id", articleId);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json({ ok: true, liked: false });

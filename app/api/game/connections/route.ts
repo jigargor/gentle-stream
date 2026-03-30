@@ -20,6 +20,7 @@ import {
 } from "@/lib/games/connectionsIngestAgent";
 import { ensureConnectionsIdentity } from "@/lib/games/connectionsUniqueness";
 import type { Category } from "@/lib/constants";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 export const maxDuration = 60; // Vercel max for hobby plan
 
@@ -121,33 +122,34 @@ export async function GET(request: NextRequest) {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          excludeSignatures.length > 0
-            ? "No unseen Connections puzzle available right now."
-            : "Pool empty and ANTHROPIC_API_KEY not set",
-      },
-      { status: excludeSignatures.length > 0 ? 409 : 503 }
-    );
+    const status = excludeSignatures.length > 0 ? 409 : 503;
+    return apiErrorResponse({
+      request,
+      status,
+      code: status === 409 ? API_ERROR_CODES.NOT_FOUND : API_ERROR_CODES.BAD_GATEWAY,
+      message:
+        excludeSignatures.length > 0
+          ? "No unseen Connections puzzle available right now."
+          : "Pool empty and ANTHROPIC_API_KEY not set",
+    });
   }
 
   try {
     const gate = await canTriggerConnectionsGeneration();
     if (!gate.allowed) {
-      const headers = gate.retryAfterSeconds
-        ? { "Retry-After": String(gate.retryAfterSeconds) }
-        : undefined;
-      return NextResponse.json(
-        {
-          error:
-            excludeSignatures.length > 0
-              ? "No unseen Connections puzzle available right now."
-              : "Connections pool is empty right now.",
-          retryAfterSeconds: gate.retryAfterSeconds,
-        },
-        { status: 409, headers }
-      );
+      return apiErrorResponse({
+        request,
+        status: 409,
+        code: API_ERROR_CODES.RATE_LIMITED,
+        message:
+          excludeSignatures.length > 0
+            ? "No unseen Connections puzzle available right now."
+            : "Connections pool is empty right now.",
+        retryAfterSec: gate.retryAfterSeconds ?? undefined,
+        headers: gate.retryAfterSeconds
+          ? { "Retry-After": String(gate.retryAfterSeconds) }
+          : undefined,
+      });
     }
 
     await recordConnectionsGenerationTriggered();
@@ -157,10 +159,12 @@ export async function GET(request: NextRequest) {
     const inserted = await runConnectionsIngest(promptTheme);
 
     if (inserted === 0) {
-      return NextResponse.json(
-        { error: "Generation failed — please try again" },
-        { status: 500 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 500,
+        code: API_ERROR_CODES.INTERNAL,
+        message: "Generation failed — please try again",
+      });
     }
 
     if (isDaily) {
@@ -183,10 +187,12 @@ export async function GET(request: NextRequest) {
       allowExcludedFallback: false,
     });
     if (!row) {
-      return NextResponse.json(
-        { error: "Generation succeeded but no unseen puzzle was available yet" },
-        { status: 409 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 409,
+        code: API_ERROR_CODES.NOT_FOUND,
+        message: "Generation succeeded but no unseen puzzle was available yet",
+      });
     }
 
     void markGameUsed(row.id);
@@ -198,6 +204,11 @@ export async function GET(request: NextRequest) {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

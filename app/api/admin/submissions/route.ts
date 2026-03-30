@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isAdmin } from "@/lib/auth/admin";
 import { listSubmissionsForAdmin } from "@/lib/db/creator";
 import type { ArticleSubmissionStatus } from "@/lib/types";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 function parseStatus(value: string | null): ArticleSubmissionStatus | undefined {
   if (
@@ -23,10 +24,20 @@ export async function GET(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
   if (!isAdmin({ userId: user.id, email: user.email ?? null })) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Admin access required",
+    });
   }
 
   const status = parseStatus(new URL(request.url).searchParams.get("status"));

@@ -3,10 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignOutButton } from "@/components/auth/SignOutButton";
-import {
-  GAME_RATIO_PRESETS,
-  nearestPresetValue,
-} from "@/lib/user/feed-settings";
 import { FEED_GAME_TYPES } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
 import { isCreator } from "@/lib/user/creator";
@@ -20,14 +16,18 @@ import type {
   UserGameStats,
   WeatherModuleData,
   SpotifyMoodTileData,
+  NasaModuleData,
 } from "@/lib/types";
 import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
 import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
+import NasaApodCard from "@/components/feed/NasaApodCard";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
   userEmail: string;
   onGameRatioSaved: (ratio: number) => void;
+  themePreference: "light" | "dark";
+  onThemePreferenceToggle: () => Promise<void>;
   isAdmin?: boolean;
 }
 
@@ -55,16 +55,23 @@ function formatDuration(totalSec: number): string {
 export function ProfileMenu({
   userEmail,
   onGameRatioSaved,
+  themePreference,
+  onThemePreferenceToggle,
   isAdmin = false,
 }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
-  const [additionalGoodiesOpen, setAdditionalGoodiesOpen] = useState(false);
+  const [feedModuleModal, setFeedModuleModal] = useState<
+    null | "weather" | "spotify" | "apod"
+  >(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [themeSaving, setThemeSaving] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [ratioDraft, setRatioDraft] = useState(0.2);
   const [profileForm, setProfileForm] = useState({
     displayName: "",
     username: "",
@@ -82,6 +89,8 @@ export function ProfileMenu({
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [weatherModuleData, setWeatherModuleData] = useState<WeatherModuleData | null>(null);
   const [spotifyModuleData, setSpotifyModuleData] = useState<SpotifyMoodTileData | null>(null);
+  const [apodModuleData, setApodModuleData] = useState<NasaModuleData | null>(null);
+  const [apodLoading, setApodLoading] = useState(false);
 
   useEffect(() => {
     if (!profile?.avatarUrl) {
@@ -151,8 +160,12 @@ export function ProfileMenu({
   useEffect(() => {
     if (open) return;
     setGameSettingsOpen(false);
-    setAdditionalGoodiesOpen(false);
+    setEditingProfile(false);
   }, [open]);
+
+  useEffect(() => {
+    setRatioDraft(profile?.gameRatio ?? 0.2);
+  }, [profile?.gameRatio]);
 
   useEffect(() => {
     if (!profile) return;
@@ -203,6 +216,24 @@ export function ProfileMenu({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveThemePreference() {
+    setSaveError(null);
+    setThemeSaving(true);
+    try {
+      await onThemePreferenceToggle();
+    } catch {
+      setSaveError("Could not update theme preference.");
+    } finally {
+      setThemeSaving(false);
+    }
+  }
+
+  function commitRatioDraft() {
+    const rounded = Math.round(ratioDraft * 100) / 100;
+    if (Math.abs((profile?.gameRatio ?? 0.2) - rounded) < 0.005) return;
+    void saveGameRatio(rounded);
   }
 
   async function saveEnabledGameTypes(next: GameType[]) {
@@ -341,6 +372,27 @@ export function ProfileMenu({
     }
   }
 
+  async function fetchApodModule() {
+    setModuleError(null);
+    setApodLoading(true);
+    try {
+      const res = await fetch("/api/feed/modules/apod", { cache: "no-store" });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        data?: NasaModuleData;
+      };
+      if (!res.ok || !body.data) {
+        setModuleError(body.error ?? "Could not fetch NASA APOD.");
+        return;
+      }
+      setApodModuleData(body.data);
+    } catch {
+      setModuleError("Could not fetch NASA APOD.");
+    } finally {
+      setApodLoading(false);
+    }
+  }
+
   const displayGameTypes: Array<{ value: GameType; label: string; description: string }> = [
     { value: "connections", label: "Connections (daily)", description: "One daily puzzle per session." },
     { value: "crossword", label: "Crossword", description: "Mini word-square crossword." },
@@ -444,7 +496,7 @@ export function ProfileMenu({
     );
   }
 
-  async function saveProfileFields() {
+  async function saveProfileFields(): Promise<boolean> {
     setSaveError(null);
     setSaving(true);
     try {
@@ -484,7 +536,7 @@ export function ProfileMenu({
             typeof data.error === "string" ? data.error : "Could not save profile."
           );
         }
-        return;
+        return false;
       }
       setProfile(data as UserProfile);
       try {
@@ -499,13 +551,13 @@ export function ProfileMenu({
       }
     } catch {
       setSaveError("Could not save profile.");
+      return false;
     } finally {
       setSaving(false);
     }
+    return true;
   }
 
-  const currentRatio = profile?.gameRatio ?? 0.2;
-  const highlightedPreset = nearestPresetValue(currentRatio);
   const creator = profile ? isCreator(profile) : false;
 
   const label =
@@ -816,25 +868,85 @@ export function ProfileMenu({
               Game settings
             </button>
           </div>
-          <div style={{ margin: "0.2rem 0 1rem" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.4rem",
+              marginBottom: "1rem",
+            }}
+          >
             <button
               type="button"
-              onClick={() => setAdditionalGoodiesOpen(true)}
+              onClick={() => {
+                setOpen(false);
+                setFeedModuleModal("weather");
+                setModuleError(null);
+                void fetchAdditionalWeatherModule();
+              }}
               style={{
-                display: "inline-block",
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "0.8rem",
-                fontWeight: 700,
-                color: "#1a472a",
-                textDecoration: "underline",
-                textUnderlineOffset: "3px",
-                background: "transparent",
+                background: "none",
                 border: "none",
                 padding: 0,
                 cursor: "pointer",
+                color: "#1a472a",
+                fontWeight: 600,
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.74rem",
+                textAlign: "left",
               }}
             >
-              Additional goodies
+              Weather
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setFeedModuleModal("spotify");
+                setModuleError(null);
+                void fetchAdditionalSpotifyModule();
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: "#1a472a",
+                fontWeight: 600,
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.74rem",
+                textAlign: "left",
+              }}
+            >
+              Spotify mood
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setFeedModuleModal("apod");
+                setModuleError(null);
+                void fetchApodModule();
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: "#1a472a",
+                fontWeight: 600,
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.74rem",
+                textAlign: "left",
+              }}
+            >
+              NASA APOD
             </button>
           </div>
 
@@ -881,151 +993,312 @@ export function ProfileMenu({
             >
               Profile
             </h3>
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
-              }}
-            >
-              Display name
-            </label>
-            <input
-              value={profileForm.displayName}
-              onChange={(e) =>
-                setProfileForm((f) => ({ ...f, displayName: e.target.value }))
-              }
-              placeholder="Your name"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-              }}
-            />
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
-              }}
-            >
-              Username
-            </label>
-            {usernameLocked && profile?.usernameSetAt ? (
-              <p
-                style={{
-                  fontSize: "0.65rem",
-                  color: "#777",
-                  margin: "0 0 0.35rem",
-                  lineHeight: 1.35,
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                You can change this again after{" "}
-                {new Date(
-                  usernameChangeUnlocksAtIso(profile.usernameSetAt)
-                ).toLocaleString(undefined, {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}{" "}
-                ({USERNAME_CHANGE_COOLDOWN_HOURS}-hour lock after each change).
-              </p>
+            {!editingProfile ? (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gap: "0.28rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontSize: "0.78rem",
+                    color: "#4d4d4d",
+                    marginBottom: "0.55rem",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      Name:
+                    </strong>{" "}
+                    {profile?.displayName?.trim() || "Not set"}
+                  </div>
+                  <div>
+                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      Username:
+                    </strong>{" "}
+                    {profile?.username ? `@${profile.username}` : "Not set"}
+                  </div>
+                  <div>
+                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                      Weather:
+                    </strong>{" "}
+                    {profile?.weatherLocation?.trim() || "Automatic"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Edit profile"
+                  title="Edit profile"
+                  onClick={() => setEditingProfile(true)}
+                  style={{
+                    border: "1px solid #1a1a1a",
+                    background: "#fff",
+                    width: "2rem",
+                    height: "2rem",
+                    borderRadius: "999px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden
+                  >
+                    <path
+                      d="M4 20H8L19 9L15 5L4 16V20Z"
+                      stroke="#1a1a1a"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M13.5 6.5L17.5 10.5"
+                      stroke="#1a1a1a"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </>
             ) : (
-              <p
-                style={{
-                  fontSize: "0.62rem",
-                  color: "#aaa",
-                  margin: "0 0 0.35rem",
-                  lineHeight: 1.35,
-                }}
-              >
-                Unique on the site; lowercase letters, numbers, underscore (3–30).
-              </p>
+              <>
+                <label
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#888",
+                    display: "block",
+                    marginBottom: "0.2rem",
+                  }}
+                >
+                  Display name
+                </label>
+                <input
+                  value={profileForm.displayName}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({ ...f, displayName: e.target.value }))
+                  }
+                  placeholder="Your name"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginBottom: "0.45rem",
+                    padding: "0.35rem 0.45rem",
+                    border: "1px solid #ccc",
+                    fontSize: "0.85rem",
+                  }}
+                />
+                <label
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#888",
+                    display: "block",
+                    marginBottom: "0.2rem",
+                  }}
+                >
+                  Username
+                </label>
+                {usernameLocked && profile?.usernameSetAt ? (
+                  <p
+                    style={{
+                      fontSize: "0.65rem",
+                      color: "#777",
+                      margin: "0 0 0.35rem",
+                      lineHeight: 1.35,
+                      fontFamily: "'IM Fell English', Georgia, serif",
+                    }}
+                  >
+                    You can change this again after{" "}
+                    {new Date(
+                      usernameChangeUnlocksAtIso(profile.usernameSetAt)
+                    ).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}{" "}
+                    ({USERNAME_CHANGE_COOLDOWN_HOURS}-hour lock after each change).
+                  </p>
+                ) : (
+                  <p
+                    style={{
+                      fontSize: "0.62rem",
+                      color: "#aaa",
+                      margin: "0 0 0.35rem",
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    Unique on the site; lowercase letters, numbers, underscore (3–30).
+                  </p>
+                )}
+                <input
+                  value={profileForm.username}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""),
+                    }))
+                  }
+                  placeholder="letters_numbers_underscore"
+                  disabled={usernameLocked}
+                  aria-readonly={usernameLocked}
+                  title={
+                    usernameLocked
+                      ? "Username is locked for 24 hours after the last change"
+                      : undefined
+                  }
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginBottom: "0.45rem",
+                    padding: "0.35rem 0.45rem",
+                    border: "1px solid #ccc",
+                    fontSize: "0.85rem",
+                    background: usernameLocked ? "#f0ede6" : undefined,
+                    cursor: usernameLocked ? "not-allowed" : undefined,
+                  }}
+                />
+                <label
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#888",
+                    display: "block",
+                    marginBottom: "0.2rem",
+                  }}
+                >
+                  Weather location
+                </label>
+                <input
+                  value={profileForm.weatherLocation}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
+                  }
+                  placeholder="City or region (e.g. New York)"
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginBottom: "0.45rem",
+                    padding: "0.35rem 0.45rem",
+                    border: "1px solid #ccc",
+                    fontSize: "0.85rem",
+                  }}
+                />
+                {profile && (
+                  <AvatarInput
+                    userEmail={userEmail}
+                    displayName={profile.displayName}
+                    currentAvatarUrl={profile.avatarUrl}
+                    onProfileUpdate={(p) => setProfile(p)}
+                    onError={(msg) => setSaveError(msg)}
+                  />
+                )}
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.45rem" }}>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={async () => {
+                      const ok = await saveProfileFields();
+                      if (ok) setEditingProfile(false);
+                    }}
+                    style={{
+                      background: "#1a1a1a",
+                      color: "#faf8f3",
+                      border: "none",
+                      padding: "0.35rem 0.75rem",
+                      fontFamily: "'Playfair Display', Georgia, serif",
+                      fontSize: "0.68rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      cursor: saving ? "wait" : "pointer",
+                    }}
+                  >
+                    Save profile
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => {
+                      setEditingProfile(false);
+                      setProfileForm({
+                        displayName: profile?.displayName ?? "",
+                        username: profile?.username ?? "",
+                        weatherLocation: profile?.weatherLocation ?? "",
+                      });
+                    }}
+                    style={{
+                      border: "1px solid #777",
+                      background: "#fff",
+                      padding: "0.35rem 0.65rem",
+                      fontFamily: "'Playfair Display', Georgia, serif",
+                      fontSize: "0.68rem",
+                      cursor: saving ? "wait" : "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
             )}
-            <input
-              value={profileForm.username}
-              onChange={(e) =>
-                setProfileForm((f) => ({
-                  ...f,
-                  username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""),
-                }))
-              }
-              placeholder="letters_numbers_underscore"
-              disabled={usernameLocked}
-              aria-readonly={usernameLocked}
-              title={
-                usernameLocked
-                  ? "Username is locked for 24 hours after the last change"
-                  : undefined
-              }
+          </section>
+
+          <section style={{ marginBottom: "1rem" }}>
+            <h3
               style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-                background: usernameLocked ? "#f0ede6" : undefined,
-                cursor: usernameLocked ? "not-allowed" : undefined,
-              }}
-            />
-            <label
-              style={{
-                fontSize: "0.65rem",
-                color: "#888",
-                display: "block",
-                marginBottom: "0.2rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.78rem",
+                margin: "0 0 0.45rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#555",
               }}
             >
-              Weather location
-            </label>
-            <input
-              value={profileForm.weatherLocation}
-              onChange={(e) =>
-                setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
-              }
-              placeholder="City or region (e.g. New York)"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: "0.45rem",
-                padding: "0.35rem 0.45rem",
-                border: "1px solid #ccc",
-                fontSize: "0.85rem",
-              }}
-            />
-            {profile && (
-              <AvatarInput
-                userEmail={userEmail}
-                displayName={profile.displayName}
-                currentAvatarUrl={profile.avatarUrl}
-                onProfileUpdate={(p) => setProfile(p)}
-                onError={(msg) => setSaveError(msg)}
-              />
-            )}
+              Appearance
+            </h3>
             <button
               type="button"
-              disabled={saving}
-              onClick={() => void saveProfileFields()}
+              role="switch"
+              aria-checked={themePreference === "dark"}
+              aria-label="Toggle dark mode"
+              disabled={themeSaving}
+              onClick={() => void saveThemePreference()}
               style={{
-                background: "#1a1a1a",
-                color: "#faf8f3",
-                border: "none",
-                padding: "0.35rem 0.75rem",
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "0.68rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                cursor: saving ? "wait" : "pointer",
+                border: "1px solid #1a1a1a",
+                background: themePreference === "dark" ? "#161a21" : "#f6f4ee",
+                width: "3.2rem",
+                height: "1.85rem",
+                borderRadius: "999px",
+                position: "relative",
+                padding: 0,
+                cursor: themeSaving ? "wait" : "pointer",
               }}
             >
-              Save profile
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: "0.12rem",
+                  left: themePreference === "dark" ? "1.45rem" : "0.12rem",
+                  width: "1.48rem",
+                  height: "1.48rem",
+                  borderRadius: "999px",
+                  background: themePreference === "dark" ? "#0d1117" : "#ffffff",
+                  border: "1px solid #bdb8ad",
+                  boxShadow: "0 2px 7px rgba(0,0,0,0.22)",
+                  transition: "left 180ms ease",
+                }}
+              />
             </button>
+            <span
+              style={{
+                marginLeft: "0.55rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#666",
+              }}
+            >
+              {themePreference === "dark" ? "Dark mode" : "Light mode"}
+            </span>
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
@@ -1179,40 +1452,67 @@ export function ProfileMenu({
             >
               Changing this refreshes your stream from the top.
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-              {GAME_RATIO_PRESETS.map((preset) => {
-                const selected = preset.value === highlightedPreset;
-                return (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void saveGameRatio(preset.value)}
-                    style={{
-                      textAlign: "left",
-                      padding: "0.4rem 0.5rem",
-                      border: selected ? "2px solid #1a1a1a" : "1px solid #ddd",
-                      background: selected ? "#ede9e1" : "#fff",
-                      cursor: saving ? "wait" : "pointer",
-                      fontFamily: "'Playfair Display', Georgia, serif",
-                      fontSize: "0.7rem",
-                    }}
-                  >
-                    <span style={{ fontWeight: 700 }}>{preset.label}</span>
-                    <span
-                      style={{
-                        display: "block",
-                        fontFamily: "'IM Fell English', Georgia, serif",
-                        fontStyle: "italic",
-                        fontSize: "0.65rem",
-                        color: "#888",
-                      }}
-                    >
-                      {preset.description}
-                    </span>
-                  </button>
-                );
-              })}
+            <div style={{ padding: "0.25rem 0.05rem 0.1rem" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.68rem",
+                  color: "#6f6758",
+                  marginBottom: "0.35rem",
+                }}
+              >
+                <span>All articles</span>
+                <span>All games</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={ratioDraft}
+                disabled={saving}
+                onChange={(event) => {
+                  setRatioDraft(Number(event.target.value));
+                }}
+                onMouseUp={commitRatioDraft}
+                onTouchEnd={commitRatioDraft}
+                onBlur={commitRatioDraft}
+                style={{
+                  width: "100%",
+                  accentColor: "#6419db",
+                  cursor: saving ? "wait" : "pointer",
+                }}
+              />
+              <div
+                aria-hidden
+                style={{
+                  marginTop: "0.2rem",
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr auto 1fr auto",
+                  alignItems: "center",
+                  gap: "0.25rem",
+                  color: "#6419db",
+                }}
+              >
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+                <span style={{ height: 2, background: "currentColor", opacity: 0.3 }} />
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+                <span style={{ height: 2, background: "currentColor", opacity: 0.3 }} />
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
+              </div>
+              <div
+                style={{
+                  marginTop: "0.35rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  color: "#1a1a1a",
+                }}
+              >
+                Games: {(ratioDraft * 100).toFixed(0)}% · Articles:{" "}
+                {(100 - ratioDraft * 100).toFixed(0)}%
+              </div>
             </div>
           </section>
 
@@ -1324,13 +1624,13 @@ export function ProfileMenu({
         </div>
       )}
 
-      {open && additionalGoodiesOpen && (
+      {feedModuleModal !== null && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Additional goodies"
+          aria-label="Feed module"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setAdditionalGoodiesOpen(false);
+            if (e.target === e.currentTarget) setFeedModuleModal(null);
           }}
           style={{
             position: "fixed",
@@ -1357,39 +1657,13 @@ export function ProfileMenu({
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "0.75rem",
+                justifyContent: "flex-end",
                 marginBottom: "0.75rem",
               }}
             >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: "'Playfair Display', Georgia, serif",
-                    fontSize: "1rem",
-                    fontWeight: 800,
-                    letterSpacing: "0.02em",
-                    color: "#1a1a1a",
-                  }}
-                >
-                  Additional goodies
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.1rem",
-                    fontFamily: "'IM Fell English', Georgia, serif",
-                    fontStyle: "italic",
-                    fontSize: "0.78rem",
-                    color: "#777",
-                  }}
-                >
-                  Manually summon little extras from live APIs.
-                </div>
-              </div>
               <button
                 type="button"
-                onClick={() => setAdditionalGoodiesOpen(false)}
+                onClick={() => setFeedModuleModal(null)}
                 style={{
                   border: "1px solid #1a1a1a",
                   background: "transparent",
@@ -1405,101 +1679,104 @@ export function ProfileMenu({
               </button>
             </div>
 
-            <div style={{ display: "grid", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              <button
-                type="button"
-                onClick={() => void fetchAdditionalWeatherModule()}
-                disabled={moduleLoading}
-                style={{
-                  textAlign: "left",
-                  padding: "0.55rem 0.65rem",
-                  border: "1px solid #d8d2c7",
-                  background: "#fff",
-                  cursor: moduleLoading ? "wait" : "pointer",
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                }}
-              >
-                {moduleLoading ? "Fetching weather..." : "Weather"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void fetchAdditionalSpotifyModule()}
-                disabled={spotifyLoading}
-                style={{
-                  textAlign: "left",
-                  padding: "0.55rem 0.65rem",
-                  border: "1px solid #d8d2c7",
-                  background: "#fff",
-                  cursor: spotifyLoading ? "wait" : "pointer",
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                }}
-              >
-                {spotifyLoading
-                  ? "Fetching Spotify mood tile..."
-                  : "Spotify Mood Tile"}
-              </button>
-              <div
-                style={{
-                  padding: "0.45rem 0.55rem",
-                  border: "1px dashed #d6cfbf",
-                  background: "#f8f4ea",
-                  fontSize: "0.7rem",
-                  color: "#5e5547",
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                Upcoming: Marvel comic summon, NASA highlights, Spotify mood tile.
-              </div>
-            </div>
-
-            {moduleError && (
+            {moduleError ? (
               <p
                 style={{
-                  margin: "0.25rem 0 0.6rem",
+                  margin: "0.25rem 0 0.75rem",
                   color: "#8b4513",
                   fontSize: "0.74rem",
                 }}
               >
                 {moduleError}
               </p>
-            )}
+            ) : null}
 
-            <div style={{ display: "grid", gap: "0.75rem" }}>
-              {weatherModuleData ? (
-                <WeatherFillerCard data={weatherModuleData} reason="interval" />
-              ) : (
+            {feedModuleModal === "weather" ? (
+              moduleLoading ? (
                 <p
                   style={{
-                    margin: "0.15rem 0 0",
+                    margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
                     color: "#888",
-                    fontSize: "0.75rem",
+                    fontSize: "0.8rem",
                   }}
                 >
-                  Fetch weather data to preview the module.
+                  Loading weather&hellip;
                 </p>
-              )}
-              {spotifyModuleData ? (
-                <SpotifyMoodTile data={spotifyModuleData} reason="interval" />
+              ) : weatherModuleData ? (
+                <WeatherFillerCard data={weatherModuleData} reason="singleton" />
               ) : (
                 <p
                   style={{
-                    margin: "0.15rem 0 0",
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  No weather data yet.
+                </p>
+              )
+            ) : null}
+
+            {feedModuleModal === "spotify" ? (
+              spotifyLoading ? (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontStyle: "italic",
                     color: "#888",
-                    fontSize: "0.75rem",
+                    fontSize: "0.8rem",
                   }}
                 >
-                  Fetch Spotify data to preview the mood tile.
+                  Loading Spotify&hellip;
                 </p>
-              )}
-            </div>
+              ) : spotifyModuleData ? (
+                <SpotifyMoodTile data={spotifyModuleData} reason="singleton" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  No Spotify data yet.
+                </p>
+              )
+            ) : null}
+
+            {feedModuleModal === "apod" ? (
+              apodLoading ? (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  Loading NASA APOD&hellip;
+                </p>
+              ) : apodModuleData ? (
+                <NasaApodCard data={apodModuleData} reason="singleton" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.5rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    color: "#888",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  No APOD data yet.
+                </p>
+              )
+            ) : null}
           </div>
         </div>
       )}

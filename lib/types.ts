@@ -1,4 +1,4 @@
-import type { Category } from "./constants";
+import type { ArticleStorageCategory, Category } from "./constants";
 import type { GameType } from "./games/types";
 
 // ─── Raw shape returned by the ingest agent (LLM output) ─────────────────────
@@ -15,7 +15,9 @@ export interface RawArticle {
 }
 
 // ─── Fully enriched article as stored in the database ────────────────────────
-export interface StoredArticle extends RawArticle {
+export interface StoredArticle extends Omit<RawArticle, "category"> {
+  /** News topics use `Category`; recipes use the `recipe` storage bucket only. */
+  category: ArticleStorageCategory;
   id: string;
   fetchedAt: string;           // ISO timestamp
   expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
@@ -77,6 +79,7 @@ export interface UserProfile {
   usernameSetAt: string | null;
   avatarUrl: string | null;
   weatherLocation?: string | null;
+  themePreference?: "light" | "dark" | null;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.
@@ -115,7 +118,7 @@ export interface ArticleSubmission {
   subheadline: string;
   body: string;
   pullQuote: string;
-  category: Category;
+  category: ArticleStorageCategory;
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
@@ -192,6 +195,8 @@ export interface FeedResponse {
   articles: StoredArticle[];
   category: string;
   fromCache: boolean;          // true = served from DB, false = freshly generated
+  coldStartQueued?: boolean;
+  coldStartCategory?: string;
   /** How articles were chosen; omit = treat as profile_ranked (legacy clients) */
   selectionMode?: FeedSelectionMode;
 }
@@ -226,9 +231,9 @@ export interface ArticleFeedSection {
     columnHeightsPx?: number[];
     inlineGapPx?: number;
     inlineTargetColumn?: number | null;
-    inlineSuggestedModuleType?: "weather" | "spotify" | "generated_art" | "nasa";
+    inlineSuggestedModuleType?: "generated_art" | "todo";
     inlineModule?: {
-      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      moduleType: "generated_art" | "todo";
       reason: "inline";
       targetColumn: number;
       data: FeedModuleData;
@@ -271,6 +276,24 @@ export interface NasaModuleData {
   subtitle: string;
   imageUrl?: string;
   sourceUrl?: string;
+  /** Present when mode is "nasa" from the APOD API. */
+  mediaType?: "image" | "video";
+  date?: string;
+}
+
+export interface TodoModuleItem {
+  id: string;
+  label: string;
+  done: boolean;
+}
+
+export interface TodoModuleData {
+  mode: "todo";
+  title: string;
+  subtitle: string;
+  localDay: string;
+  timezone: string;
+  items: TodoModuleItem[];
 }
 
 export interface SpotifyMoodTrack {
@@ -298,14 +321,19 @@ export type FeedModuleData =
   | WeatherModuleData
   | SpotifyMoodTileData
   | GeneratedImageModuleData
-  | NasaModuleData;
+  | NasaModuleData
+  | TodoModuleData;
 
+/**
+ * Feed rows for API-driven modules. Todo + generated_art fill column gaps; weather / Spotify /
+ * NASA APOD can appear once each as `reason: "singleton"` (sprinkled after article milestones; data cached once per session).
+ */
 export interface ModuleFeedSection {
   sectionType: "module" | "filler";
-  moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+  moduleType: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
   /** Legacy compatibility: prefer moduleType going forward. */
-  fillerType?: "weather" | "spotify" | "generated_art" | "nasa";
-  reason: "gap" | "interval";
+  fillerType?: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
+  reason: "gap" | "interval" | "singleton";
   index: number;
   data: FeedModuleData;
 }

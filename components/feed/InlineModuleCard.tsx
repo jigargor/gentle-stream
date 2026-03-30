@@ -2,12 +2,12 @@
 
 import type {
   FeedModuleData,
-  SpotifyMoodTileData,
-  WeatherModuleData,
+  GeneratedImageModuleData,
+  TodoModuleData,
 } from "@/lib/types";
 
 interface InlineModuleCardProps {
-  moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+  moduleType: "generated_art" | "todo";
   data: FeedModuleData;
 }
 
@@ -15,11 +15,8 @@ export default function InlineModuleCard({
   moduleType,
   data,
 }: InlineModuleCardProps) {
-  const spotifyData =
-    moduleType === "spotify" && "tracks" in data
-      ? (data as SpotifyMoodTileData)
-      : null;
-  if (spotifyData) {
+  if (moduleType === "todo" && data.mode === "todo") {
+    const td = data as TodoModuleData;
     return (
       <aside
         style={{
@@ -33,34 +30,39 @@ export default function InlineModuleCard({
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "0.78rem",
             fontWeight: 700,
-            marginBottom: "0.35rem",
+            marginBottom: "0.28rem",
           }}
         >
-          {spotifyData.title}
+          {td.title}
         </div>
-        <div
+        <ul
           style={{
+            margin: 0,
+            paddingLeft: "1rem",
             fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
             fontSize: "0.7rem",
             color: "#4c463d",
-            lineHeight: 1.4,
+            lineHeight: 1.45,
           }}
         >
-          {spotifyData.tracks.slice(0, 2).map((track) => (
-            <div key={track.id}>
-              {track.name} - {track.artist}
-            </div>
+          {td.items.slice(0, 3).map((item) => (
+            <li
+              key={item.id}
+              style={{
+                textDecoration: item.done ? "line-through" : undefined,
+                opacity: item.done ? 0.65 : 1,
+              }}
+            >
+              {item.label}
+            </li>
           ))}
-        </div>
+        </ul>
       </aside>
     );
   }
 
-  const weatherData =
-    moduleType === "weather" && "mode" in data
-      ? (data as WeatherModuleData)
-      : null;
-  if (weatherData) {
+  if (moduleType === "generated_art" && data.mode === "generated_art") {
+    const art = data as GeneratedImageModuleData;
     return (
       <aside
         style={{
@@ -77,50 +79,11 @@ export default function InlineModuleCard({
             marginBottom: "0.28rem",
           }}
         >
-          {weatherData.title}
-        </div>
-        <div
-          style={{
-            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-            fontSize: "0.72rem",
-            color: "#4c463d",
-            lineHeight: 1.4,
-          }}
-        >
-          <div>
-            {typeof weatherData.temperatureC === "number"
-              ? `${weatherData.temperatureC}\u00b0C`
-              : "Weather brief"}
-            {weatherData.condition ? ` · ${weatherData.condition}` : ""}
-          </div>
-          <div>{weatherData.locationLabel ?? weatherData.subtitle}</div>
-        </div>
-      </aside>
-    );
-  }
-
-  if ("imageUrl" in data && typeof data.imageUrl === "string") {
-    return (
-      <aside
-        style={{
-          borderTop: "1px solid #d4cfc4",
-          padding: "0.45rem 0.55rem",
-          background: "rgba(250,248,243,0.9)",
-        }}
-      >
-        <div
-          style={{
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "0.78rem",
-            fontWeight: 700,
-            marginBottom: "0.28rem",
-          }}
-        >
-          {data.title}
+          {art.title}
         </div>
         <img
-          src={data.imageUrl}
-          alt={data.title}
+          src={art.imageUrl}
+          alt=""
           loading="lazy"
           style={{
             width: "100%",

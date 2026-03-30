@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
 import type { ArticleSubmission } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import {
+  formatApiClientError,
+  parseApiClientError,
+} from "@/lib/api/client-errors";
 
 interface CreatorDashboardProps {
   /** Public creator profile URL (same for author byline links). */
@@ -62,8 +66,20 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [recipeImportBusy, setRecipeImportBusy] = useState(false);
   const [recipeImportMessage, setRecipeImportMessage] = useState<string | null>(null);
   const [recipeImportIsError, setRecipeImportIsError] = useState(false);
+  const [assistBusy, setAssistBusy] = useState(false);
+  const [assistError, setAssistError] = useState<string | null>(null);
+  const [assistSuggestion, setAssistSuggestion] = useState<string | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyCharacterCount = form.body.length;
+  /** ~200 wpm, aligned with typical reading-time estimates for multi-column heuristic. */
+  const previewReadingTimeSecs = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.round((form.body.trim().split(/\s+/).filter(Boolean).length / 200) * 60)
+      ),
+    [form.body]
+  );
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
 
   const canSubmit = useMemo(() => {
@@ -133,14 +149,14 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     setLoading(true);
     try {
       const response = await fetch("/api/creator/submissions");
-      const payload = (await response.json()) as {
-        submissions?: ArticleSubmission[];
-        error?: string;
-      };
       if (!response.ok) {
-        setMessage(payload.error ?? "Failed to load submissions");
+        const apiError = await parseApiClientError(response);
+        setMessage(formatApiClientError(apiError));
         return;
       }
+      const payload = (await response.json()) as {
+        submissions?: ArticleSubmission[];
+      };
       setSubmissions(payload.submissions ?? []);
     } finally {
       setLoading(false);
@@ -213,11 +229,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           }),
         }
       );
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
       if (!response.ok) {
-        setMessage(payload.error ?? "Save failed");
+        const apiError = await parseApiClientError(response);
+        setMessage(formatApiClientError(apiError));
         return;
       }
       setForm(EMPTY_FORM);
@@ -273,11 +287,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ withdraw: true }),
       });
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
       if (!response.ok) {
-        setMessage(payload.error ?? "Could not withdraw.");
+        const apiError = await parseApiClientError(response);
+        setMessage(formatApiClientError(apiError));
         return;
       }
       await loadSubmissions();
@@ -303,8 +315,15 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         credentials: "include",
         body: JSON.stringify({ url }),
       });
+      if (!response.ok) {
+        const apiError = await parseApiClientError(response);
+        setRecipeImportMessage(
+          `Import failed (${response.status}): ${formatApiClientError(apiError)}`
+        );
+        setRecipeImportIsError(true);
+        return;
+      }
       const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
         recipe?: {
           headline?: string;
           recipeServings?: number | null;
@@ -317,10 +336,8 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           warnings?: string[];
         };
       };
-      if (!response.ok || !payload.recipe) {
-        setRecipeImportMessage(
-          `Import failed (${response.status}): ${payload.error ?? "Could not import this recipe link."}`
-        );
+      if (!payload.recipe) {
+        setRecipeImportMessage("Import failed: Could not import this recipe link.");
         setRecipeImportIsError(true);
         return;
       }
@@ -370,6 +387,40 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       setRecipeImportIsError(true);
     } finally {
       setRecipeImportBusy(false);
+    }
+  }
+
+  async function requestAssist(mode: "improve" | "continue" | "headline") {
+    setAssistBusy(true);
+    setAssistError(null);
+    setAssistSuggestion(null);
+    try {
+      const response = await fetch("/api/creator/assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          mode,
+          contentKind: form.contentKind,
+          headline: form.headline,
+          body: form.body,
+        }),
+      });
+      if (!response.ok) {
+        const apiError = await parseApiClientError(response);
+        setAssistError(formatApiClientError(apiError));
+        return;
+      }
+      const payload = (await response.json().catch(() => ({}))) as {
+        result?: string;
+      };
+      if (!payload.result) {
+        setAssistError("AI assist is unavailable right now.");
+        return;
+      }
+      setAssistSuggestion(payload.result);
+    } finally {
+      setAssistBusy(false);
     }
   }
 
@@ -475,7 +526,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
             </div>
 
             <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
-              <input value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+              <input aria-label="Headline" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
               {form.contentKind === "user_article" ? (
                 <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
                   {CATEGORIES.map((category) => (
@@ -525,6 +576,65 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </button>
               </div>
 
+              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.45rem" }}>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() => void requestAssist("improve")}
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  Improve paragraph
+                </button>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() => void requestAssist("continue")}
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  Continue draft
+                </button>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() => void requestAssist("headline")}
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  Suggest headline
+                </button>
+              </div>
+              {assistError ? (
+                <p style={{ margin: "0.4rem 0 0", color: "#8b4513", fontSize: "0.8rem" }}>
+                  {assistError}
+                </p>
+              ) : null}
+              {assistSuggestion ? (
+                <div style={{ marginTop: "0.45rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem" }}>
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#333" }}>{assistSuggestion}</p>
+                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.4rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (form.contentKind === "user_article") {
+                          setForm((f) => ({ ...f, body: `${f.body.trim()}\n\n${assistSuggestion}`.trim() }));
+                        } else {
+                          setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
+                        }
+                      }}
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Insert
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAssistSuggestion(null)}
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.5rem", marginBottom: "0.5rem" }}>
                 <button
                   type="button"
@@ -568,6 +678,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     markdown={form.body.trim() ? form.body : "*Preview appears here as you write.*"}
                     variant="reader"
                     fontPreset="literary"
+                    readingTimeSecs={previewReadingTimeSecs}
                   />
                 </div>
               )}
@@ -860,12 +971,12 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </div>
               </div>
             )}
-            <input value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <input aria-label="Pull quote" value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <input aria-label="Locale" value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <input aria-label="Explicit hashtags" value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
           </div>
 
-          {message ? <p style={{ color: "#7b2d00", margin: "0.7rem 0 0" }}>{message}</p> : null}
+          {message ? <p aria-live="polite" style={{ color: "#7b2d00", margin: "0.7rem 0 0" }}>{message}</p> : null}
 
           <div style={{ display: "flex", gap: "0.55rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
             <button onClick={submitForm} disabled={!canSubmit || busy} style={{ padding: "0.45rem 0.7rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer" }}>
@@ -896,7 +1007,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
                   </div>
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
-                    {submission.category} • {submission.contentKind === "recipe" ? "Recipe" : "Article"} • {new Date(submission.createdAt).toLocaleString()}
+                    {submission.contentKind === "recipe"
+                      ? `Recipe • ${new Date(submission.createdAt).toLocaleString()}`
+                      : `${submission.category} • Article • ${new Date(submission.createdAt).toLocaleString()}`}
                   </p>
                   {submission.adminNote ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>

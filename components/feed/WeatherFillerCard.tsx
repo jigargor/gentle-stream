@@ -6,13 +6,18 @@ import { picsumFallbackUrl } from "@/lib/article-image";
 
 interface WeatherFillerCardProps {
   data: WeatherFillerData;
-  reason: "gap" | "interval";
+  reason: "gap" | "interval" | "singleton";
 }
 
 export default function WeatherFillerCard({ data, reason }: WeatherFillerCardProps) {
   const [weatherData, setWeatherData] = useState<WeatherFillerData>(data);
   const isWeather = weatherData.mode === "weather";
-  const reasonLabel = reason === "gap" ? "gap-fill" : "interval";
+  const reasonLabel =
+    reason === "singleton"
+      ? null
+      : reason === "gap"
+        ? "gap-fill"
+        : "interval";
   const fallbackSrc = useMemo(() => {
     const seed = weatherData.locationLabel?.trim() || "weather";
     return picsumFallbackUrl(`${seed}|forecast-desk`, 1200, 700);
@@ -84,17 +89,19 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
         >
           {weatherData.title}
         </h3>
-        <span
-          style={{
-            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-            fontSize: "0.67rem",
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            color: "#746a55",
-          }}
-        >
-          {reasonLabel}
-        </span>
+        {reasonLabel ? (
+          <span
+            style={{
+              fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+              fontSize: "0.67rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "#746a55",
+            }}
+          >
+            {reasonLabel}
+          </span>
+        ) : null}
       </header>
 
       {isWeather ? (

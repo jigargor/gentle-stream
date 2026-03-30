@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const RECIPE_IMAGES_BUCKET = "recipe-images";
 const RECIPE_IMAGE_MAX_BYTES = 2 * 1024 * 1024; // 2MB each
@@ -19,29 +20,54 @@ function extFromMime(mime: string): string {
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("multipart/form-data")) {
-    return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: "Expected multipart/form-data",
+    });
   }
 
   let form: FormData;
   try {
     form = await request.formData();
   } catch {
-    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_JSON,
+      message: "Invalid form data",
+    });
   }
 
   const all = form.getAll("files");
   const files = all.filter((v): v is File => v instanceof File);
 
   if (files.length === 0) {
-    return NextResponse.json({ error: "Missing files" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.MISSING_FIELD,
+      message: "Missing files",
+    });
   }
   if (files.length > 3) {
-    return NextResponse.json({ error: "Up to 3 images are allowed." }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: "Up to 3 images are allowed.",
+    });
   }
 
   const uploadedUrls: string[] = [];
@@ -50,16 +76,20 @@ export async function POST(request: NextRequest) {
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     if (!isAllowedMime(file.type)) {
-      return NextResponse.json(
-        { error: "Use JPEG, PNG, WebP, or GIF images." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Use JPEG, PNG, WebP, or GIF images.",
+      });
     }
     if (file.size > RECIPE_IMAGE_MAX_BYTES) {
-      return NextResponse.json(
-        { error: `Image must be under ${Math.floor(RECIPE_IMAGE_MAX_BYTES / (1024 * 1024))} MB.` },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: `Image must be under ${Math.floor(RECIPE_IMAGE_MAX_BYTES / (1024 * 1024))} MB.`,
+      });
     }
 
     const ext = extFromMime(file.type);
@@ -78,10 +108,12 @@ export async function POST(request: NextRequest) {
       const hint = uploadError.message?.toLowerCase().includes("bucket")
         ? ' Create a public bucket named "recipe-images" in Supabase Storage.'
         : "";
-      return NextResponse.json(
-        { error: `Upload failed: ${uploadError.message}.${hint}` },
-        { status: 500 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 500,
+        code: API_ERROR_CODES.INTERNAL,
+        message: `Upload failed: ${uploadError.message}.${hint}`,
+      });
     }
 
     const { data: pub } = db.storage.from(RECIPE_IMAGES_BUCKET).getPublicUrl(path);

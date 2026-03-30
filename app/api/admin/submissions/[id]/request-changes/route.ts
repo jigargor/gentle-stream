@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { isAdmin } from "@/lib/auth/admin";
 import { reviewSubmission } from "@/lib/db/creator";
+import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+
+const requestChangesBodySchema = z.object({
+  adminNote: z.string().max(800).nullish(),
+});
 
 export async function POST(
   request: NextRequest,
@@ -13,15 +20,28 @@ export async function POST(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
   if (!isAdmin({ userId: user.id, email: user.email ?? null })) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Admin access required",
+    });
   }
 
-  const body = (await request.json().catch(() => ({}))) as {
-    adminNote?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: requestChangesBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
   const adminNote =
     typeof body.adminNote === "string" && body.adminNote.trim()
       ? body.adminNote.trim().slice(0, 800)
@@ -43,6 +63,16 @@ export async function POST(
       : message.includes("not found")
         ? 404
         : 500;
-    return NextResponse.json({ error: message }, { status });
+    return apiErrorResponse({
+      request,
+      status,
+      code:
+        status === 404
+          ? API_ERROR_CODES.NOT_FOUND
+          : status === 409
+            ? API_ERROR_CODES.INVALID_REQUEST
+            : API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

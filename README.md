@@ -158,7 +158,7 @@ The newspaper aesthetic is the product: blackletter masthead, rotating section l
 
 ### Prerequisites
 
-- **Node.js 20+** (matches CI)
+- **Node.js 20.x** (matches CI)
 - A [Supabase](https://supabase.com) project
 - An [Anthropic](https://console.anthropic.com) API key (for ingest / tagger)
 
@@ -167,6 +167,7 @@ The newspaper aesthetic is the product: blackletter masthead, rotating section l
 ```bash
 git clone https://github.com/your-username/gentle-stream.git
 cd gentle-stream
+nvm use
 npm install
 ```
 

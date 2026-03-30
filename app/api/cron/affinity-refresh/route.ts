@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { db } from "@/lib/db/client";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const limitParam = Number(new URL(request.url).searchParams.get("limit") ?? DEFAULT_LIMIT);
@@ -24,10 +30,12 @@ export async function GET(request: NextRequest) {
     .limit(limit * 4);
 
   if (error) {
-    return NextResponse.json(
-      { error: `Could not load engagement users: ${error.message}` },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: `Could not load engagement users: ${error.message}`,
+    });
   }
 
   const distinctUserIds = Array.from(

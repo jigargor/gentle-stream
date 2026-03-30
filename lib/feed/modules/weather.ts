@@ -1,4 +1,5 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
+import { getEnv } from "@/lib/env";
 import type { WeatherFillerData } from "@/lib/types";
 
 interface WeatherSnapshot {
@@ -18,6 +19,7 @@ interface CachedEntry {
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const WEATHER_TIMEOUT_MS = 5_000;
 const cache = new Map<string, CachedEntry>();
+const env = getEnv();
 
 const CATEGORY_DEFAULT_CITY: Record<string, string> = {
   world: "London",
@@ -157,7 +159,7 @@ function fallbackArtData(input: {
   category?: string | null;
 }): WeatherFillerData {
   const fallbackMode =
-    process.env.NEXT_PUBLIC_FEED_FILLER_FALLBACK?.trim().toLowerCase() ??
+    env.NEXT_PUBLIC_FEED_FILLER_FALLBACK?.trim().toLowerCase() ??
     "generated_art";
   const city = (input.location ?? "").trim() || defaultCityForCategory(input.category);
   if (fallbackMode !== "generated_art") {
@@ -201,6 +203,22 @@ function weatherDataToCard(snapshot: WeatherSnapshot): WeatherFillerData {
   };
 }
 
+async function fetchDefaultLocationWeather(input: {
+  category?: string | null;
+  apiKey: string;
+}): Promise<WeatherFillerData | null> {
+  const defaultCity = defaultCityForCategory(input.category);
+  const geocoded = await resolveCoordinates(defaultCity, input.apiKey);
+  if (!geocoded) return null;
+  const onecall = await fetchOneCallWeather(geocoded.lat, geocoded.lon, input.apiKey);
+  const snapshot: WeatherSnapshot = {
+    city: geocoded.city,
+    country: geocoded.country,
+    ...onecall,
+  };
+  return weatherDataToCard(snapshot);
+}
+
 export async function getWeatherFillerData(input: {
   location?: string | null;
   category?: string | null;
@@ -212,7 +230,7 @@ export async function getWeatherFillerData(input: {
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.data;
 
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
+  const apiKey = env.OPENWEATHER_API_KEY?.trim();
   if (!apiKey) {
     console.warn("[weather-module] OPENWEATHER_API_KEY is missing; serving generated_art fallback.");
     const fallback = fallbackArtData(input);
@@ -266,7 +284,25 @@ export async function getWeatherFillerData(input: {
     return data;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[weather-module] One Call fetch failed: ${message}. Serving fallback.`);
+    console.warn(
+      `[weather-module] One Call fetch failed: ${message}. Retrying with default location.`
+    );
+    try {
+      const fallbackWeather = await fetchDefaultLocationWeather({
+        category: input.category,
+        apiKey,
+      });
+      if (fallbackWeather) {
+        cache.set(cacheKey, { data: fallbackWeather, expiresAt: now + CACHE_TTL_MS });
+        return fallbackWeather;
+      }
+    } catch (retryError) {
+      const retryMessage =
+        retryError instanceof Error ? retryError.message : String(retryError);
+      console.warn(
+        `[weather-module] Default-location retry failed: ${retryMessage}. Serving fallback art.`
+      );
+    }
     const fallback = fallbackArtData(input);
     return fallback;
   }

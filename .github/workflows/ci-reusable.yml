@@ -26,23 +26,34 @@ jobs:
     name: Type check, build, unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Scripts that import App Router modules may load lib/db/client.ts, which calls getEnv() at module load.
+    # Keep these set for every step so Zod never sees missing NEXT_PUBLIC_SUPABASE_* keys.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+      - name: Pin npm version
+        run: npm install --global npm@10.8.2
+      - name: Install dependencies
+        run: |
+          npm --version
+          node --version
+          npm ci || npm ci --legacy-peer-deps
+      - run: npm run env:check
       - run: npm run security:inventory
       - run: npm run security:rls-audit
+      - run: npm run validation:route-json-casts
       - run: npm run security:audit
         continue-on-error: true
       - run: npx tsc --noEmit
       - run: npm run build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
-          SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
           ANTHROPIC_API_KEY: "placeholder-anthropic-key"
           CRON_SECRET: "placeholder-cron-secret"
       - run: npx tsx scripts/test-sudoku.ts
@@ -53,9 +64,10 @@ jobs:
       - run: npx tsx scripts/test-recommendation-ranking.ts
       - run: npx tsx scripts/test-engagement-guardrails.ts
         env:
-          # Route imports lib/db/client.ts at load time; placeholders match npm run build.
-          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
-          SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
+          # engagement-health/route imports db; job-level placeholders cover Supabase keys.
+          CRON_SECRET: "placeholder-cron-secret"
+      - run: npm run test:unit
+      - run: npm run test:integration
 
   integration:
     name: DB integration tests
@@ -63,26 +75,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: Production
+    # Same as fast-checks: any script importing lib/db/client needs full Supabase env at parse time.
+    # Add these to the Production environment (or repository secrets) so they are never undefined.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+      - name: Pin npm version
+        run: npm install --global npm@10.8.2
+      - name: Install dependencies
+        run: |
+          npm --version
+          node --version
+          npm ci || npm ci --legacy-peer-deps
       - run: npx tsx scripts/test-dedup.ts
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - run: npx tsx scripts/test-url-dedup.ts
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - run: npx tsx scripts/test-article-engagement-db.ts
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - run: npx tsx scripts/test-recommendation-e2e.ts
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

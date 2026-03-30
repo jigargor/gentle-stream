@@ -142,9 +142,12 @@ export default function ArticleCard({
   index = 0,
   sectionIndex = 0,
 }: ArticleCardProps) {
-  const accentColor =
-    CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
-    "#1a1a1a";
+  const isRecipeCard =
+    "contentKind" in article && article.contentKind === "recipe";
+  const accentColor = isRecipeCard
+    ? "#1a472a"
+    : CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
+      "#1a1a1a";
 
   const isHero = layout === "hero";
   const isWide = layout === "wide";
@@ -277,8 +280,6 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
-  const isRecipeCard =
-    "contentKind" in article && article.contentKind === "recipe";
   const engagementContext = useMemo(
     () => ({
       source: "feed" as const,
@@ -768,24 +769,25 @@ export default function ArticleCard({
       }}
     >
       <div ref={contentWrapRef} style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-      {/* Category tag */}
-      <div
-        style={{
-          display: "inline-block",
-          background: accentColor,
-          color: "#fff",
-          fontSize: "0.6rem",
-          fontFamily: "'Playfair Display', Georgia, serif",
-          letterSpacing: "0.13em",
-          textTransform: "uppercase",
-          padding: "0.18rem 0.5rem",
-          marginBottom: "0.2rem",
-          fontWeight: 700,
-          alignSelf: "flex-start",
-        }}
-      >
-        {article.category}
-      </div>
+      {!isRecipeCard ? (
+        <div
+          style={{
+            display: "inline-block",
+            background: accentColor,
+            color: "#fff",
+            fontSize: "0.6rem",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            letterSpacing: "0.13em",
+            textTransform: "uppercase",
+            padding: "0.18rem 0.5rem",
+            marginBottom: "0.2rem",
+            fontWeight: 700,
+            alignSelf: "flex-start",
+          }}
+        >
+          {article.category}
+        </div>
+      ) : null}
 
       {/* Headline — links to primary source when we have URLs from ingest */}
       <h2 style={headlineStyle}>
@@ -947,56 +949,105 @@ export default function ArticleCard({
       {isRecipeCard && showRecipeRating && (
         <div
           style={{
+            marginTop: "0.35rem",
             display: "flex",
-            alignItems: "center",
-            gap: "0.45rem",
-            flexWrap: "wrap",
-            marginTop: "0.1rem",
+            flexDirection: "column",
+            gap: "0.35rem",
           }}
         >
           <span
             style={{
               fontFamily: "'IM Fell English', Georgia, serif",
               fontSize: "0.72rem",
-              color: "#555",
+              color: "var(--gs-muted)",
+              letterSpacing: "0.02em",
             }}
           >
-            Rate recipe:
+            Rate recipe
           </span>
-          {[0, 1, 2, 3, 4, 5].map((value) => {
-            const active = (recipeRating ?? -1) >= value && value > 0;
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => void rateRecipe(value)}
-                disabled={recipeRatingBusy || !recipeRatingLoaded}
-                style={{
-                  border: "1px solid #d8d2c7",
-                  background: value === 0 ? "#fff" : active ? "#f7d26a" : "#fff",
-                  color: "#1a1a1a",
-                  padding: "0.2rem 0.42rem",
-                  lineHeight: 1,
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: value === 0 ? "0.72rem" : "0.82rem",
-                  cursor:
-                    recipeRatingBusy || !recipeRatingLoaded ? "wait" : "pointer",
-                }}
-                aria-label={`Rate recipe ${value} star${value === 1 ? "" : "s"}`}
-              >
-                {value === 0 ? "0" : "★"}
-              </button>
-            );
-          })}
-          <span
+          <div
             style={{
-              fontFamily: "'IM Fell English', Georgia, serif",
-              fontSize: "0.68rem",
-              color: "#666",
+              display: "inline-flex",
+              alignItems: "center",
+              maxWidth: "100%",
+              filter: "drop-shadow(0 2px 8px rgba(0, 0, 0, 0.07))",
             }}
           >
-            {recipeRating == null ? "Not rated" : `${recipeRating}/5`}
-          </span>
+            <div
+              aria-hidden
+              style={{
+                width: "2.35rem",
+                height: "2.35rem",
+                borderRadius: "50%",
+                background: "linear-gradient(145deg, #6b4c9c 0%, #4a3270 100%)",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily:
+                  "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
+                fontSize: "0.9rem",
+                fontWeight: 700,
+                flexShrink: 0,
+                zIndex: 1,
+                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.12)",
+              }}
+              title={recipeRating == null ? "Not rated yet" : `Your rating: ${recipeRating} of 5`}
+            >
+              {recipeRating == null ? "—" : recipeRating}
+            </div>
+            <div
+              role="group"
+              aria-label="Recipe star rating"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.06rem",
+                marginLeft: "-0.55rem",
+                paddingLeft: "0.85rem",
+                paddingRight: "0.7rem",
+                paddingTop: "0.32rem",
+                paddingBottom: "0.32rem",
+                background: "var(--gs-surface)",
+                borderRadius: "999px",
+                border: "1px solid var(--gs-border)",
+                boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.65)",
+              }}
+            >
+              {[1, 2, 3, 4, 5].map((value) => {
+                const filled =
+                  recipeRating != null && recipeRating >= value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => void rateRecipe(value)}
+                    disabled={recipeRatingBusy || !recipeRatingLoaded}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      padding: "0.12rem 0.14rem",
+                      lineHeight: 1,
+                      fontSize: "1.05rem",
+                      cursor:
+                        recipeRatingBusy || !recipeRatingLoaded
+                          ? "wait"
+                          : "pointer",
+                      color: filled ? "#d4a012" : "var(--gs-border)",
+                      opacity: filled ? 1 : 0.42,
+                      textShadow: filled
+                        ? "0 0.5px 0 rgba(0,0,0,0.06)"
+                        : undefined,
+                    }}
+                    aria-label={`Rate ${value} out of 5 stars`}
+                    aria-pressed={filled}
+                  >
+                    ★
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1171,6 +1222,9 @@ export default function ArticleCard({
             markdown={article.body ?? ""}
             variant="feed"
             fontPreset="classic"
+            readingTimeSecs={
+              "readingTimeSecs" in article ? article.readingTimeSecs : undefined
+            }
           />
         )}
       </div>

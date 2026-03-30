@@ -26,6 +26,7 @@ export default async function EmbedArticlePage({
   const article = await getArticleById(articleId);
   if (!article) notFound();
 
+  const isRecipe = article.contentKind === "recipe";
   const excerpt = excerptFromBody(article.body ?? "");
 
   return (
@@ -64,17 +65,19 @@ export default async function EmbedArticlePage({
           />
         ) : null}
         <div style={{ padding: "0.85rem 0.95rem" }}>
-          <div
-            style={{
-              fontSize: "0.69rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "#666",
-              marginBottom: "0.38rem",
-            }}
-          >
-            {article.category}
-          </div>
+          {!isRecipe ? (
+            <div
+              style={{
+                fontSize: "0.69rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#666",
+                marginBottom: "0.38rem",
+              }}
+            >
+              {article.category}
+            </div>
+          ) : null}
           <h1
             style={{
               fontFamily: "'Playfair Display', Georgia, serif",

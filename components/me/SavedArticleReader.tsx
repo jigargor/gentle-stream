@@ -96,6 +96,7 @@ export function SavedArticleReader({
         markdown={article.body ?? ""}
         variant="reader"
         fontPreset="literary"
+        readingTimeSecs={article.readingTimeSecs}
       />
 
       {article.pullQuote?.trim() ? (

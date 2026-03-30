@@ -12,7 +12,7 @@ export interface NewspaperLayoutPlan {
   columnHeightsPx: number[];
   inlineGapPx: number;
   inlineTargetColumn: number | null;
-  inlineSuggestedModuleType: "weather" | "spotify" | "generated_art";
+  inlineSuggestedModuleType: "generated_art" | "todo";
   residualGapPx: number;
 }
 
@@ -124,7 +124,7 @@ export function chooseNewspaperLayout(
       columnHeightsPx: [left, right],
       inlineGapPx: imbalanceToResidualPx(imbalance),
       inlineTargetColumn: target,
-      inlineSuggestedModuleType: "weather",
+      inlineSuggestedModuleType: "generated_art",
       residualGapPx: 0,
     };
   }
@@ -162,7 +162,7 @@ export function chooseNewspaperLayout(
       article.contentKind === "recipe"
     );
   });
-  const inlineSuggestedModuleType = hasRecipe ? "weather" : "spotify";
+  const inlineSuggestedModuleType = hasRecipe ? "todo" : "generated_art";
 
   return {
     templateId: best.templateId,

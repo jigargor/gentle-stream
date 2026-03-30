@@ -1,4 +1,6 @@
-import { NextResponse } from "next/server";
+import { db } from "@/lib/db/client";
+import { getEnv } from "@/lib/env";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 interface RateLimitPolicy {
   id: string;
@@ -23,9 +25,9 @@ interface RateLimitResult {
   resetAt: number;
 }
 
-const RATE_LIMIT_DISABLED =
-  process.env.RATE_LIMIT_DISABLED === "1" ||
-  process.env.RATE_LIMIT_DISABLED === "true";
+const env = getEnv();
+const RATE_LIMIT_DISABLED = env.RATE_LIMIT_DISABLED === true;
+const RATE_LIMIT_USE_MEMORY = env.RATE_LIMIT_USE_MEMORY === true;
 
 function getStore(): Map<string, RateLimitRecord> {
   const g = globalThis as typeof globalThis & {
@@ -60,16 +62,7 @@ export function buildRateLimitKey(params: {
   return `${params.routeId}:ip:${getClientIp(params.request)}`;
 }
 
-export function consumeRateLimit(options: RateLimitOptions): RateLimitResult {
-  if (RATE_LIMIT_DISABLED) {
-    return {
-      allowed: true,
-      remaining: options.policy.max,
-      retryAfterSec: 0,
-      resetAt: nowMs() + options.policy.windowMs,
-    };
-  }
-
+function consumeRateLimitInMemory(options: RateLimitOptions): RateLimitResult {
   const store = getStore();
   const key = `${options.policy.id}:${options.key}`;
   const now = nowMs();
@@ -98,13 +91,62 @@ export function consumeRateLimit(options: RateLimitOptions): RateLimitResult {
   };
 }
 
-export function rateLimitExceededResponse(result: RateLimitResult): NextResponse {
-  const response = NextResponse.json(
-    { error: "Too many requests. Please retry shortly." },
-    { status: 429 }
-  );
-  response.headers.set("Retry-After", String(result.retryAfterSec));
-  response.headers.set("X-RateLimit-Remaining", String(result.remaining));
-  response.headers.set("X-RateLimit-Reset", String(result.resetAt));
-  return response;
+interface ConsumeRateLimitRpcRow {
+  allowed: boolean;
+  remaining: number;
+  retry_after_sec: number;
+  reset_at: string;
+}
+
+export async function consumeRateLimit(
+  options: RateLimitOptions
+): Promise<RateLimitResult> {
+  if (RATE_LIMIT_DISABLED) {
+    return {
+      allowed: true,
+      remaining: options.policy.max,
+      retryAfterSec: 0,
+      resetAt: nowMs() + options.policy.windowMs,
+    };
+  }
+  if (RATE_LIMIT_USE_MEMORY) return consumeRateLimitInMemory(options);
+
+  try {
+    const { data, error } = await db.rpc("consume_rate_limit", {
+      p_policy_id: options.policy.id,
+      p_bucket_key: options.key,
+      p_window_ms: options.policy.windowMs,
+      p_max: options.policy.max,
+    });
+    if (error || !Array.isArray(data) || data.length === 0) {
+      return consumeRateLimitInMemory(options);
+    }
+    const row = data[0] as ConsumeRateLimitRpcRow;
+    return {
+      allowed: row.allowed === true,
+      remaining: Math.max(0, Number(row.remaining ?? 0)),
+      retryAfterSec: Math.max(1, Number(row.retry_after_sec ?? 1)),
+      resetAt: Date.parse(row.reset_at),
+    };
+  } catch {
+    return consumeRateLimitInMemory(options);
+  }
+}
+
+export function rateLimitExceededResponse(
+  result: RateLimitResult,
+  request?: Request
+) {
+  return apiErrorResponse({
+    request,
+    status: 429,
+    code: API_ERROR_CODES.RATE_LIMITED,
+    message: "Too many requests. Please retry shortly.",
+    retryAfterSec: result.retryAfterSec,
+    headers: {
+      "Retry-After": String(result.retryAfterSec),
+      "X-RateLimit-Remaining": String(result.remaining),
+      "X-RateLimit-Reset": String(result.resetAt),
+    },
+  });
 }

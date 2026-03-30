@@ -8,8 +8,17 @@ import {
   normaliseUrl,
   precheckIngestCandidate,
 } from "../db/articles";
+import { getEnv } from "@/lib/env";
+import {
+  buildClaudeWebSearchMessageParams,
+  createMessageBatch,
+  fetchMessageBatchResultsJsonl,
+  parseMessageBatchJsonlLine,
+  pollMessageBatchUntilEnded,
+} from "@/lib/anthropic/messageBatch";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const env = getEnv();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,7 +119,7 @@ async function runOverhaulIngest(
   total: number,
   options: RunIngestAgentOptions
 ): Promise<IngestResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const allInserted: StoredArticle[] = [];
@@ -134,11 +143,27 @@ async function runOverhaulIngest(
     1,
     Math.min(options.maxExpansionCalls ?? total, total)
   );
-  const hardDeadlineAt = startedAt + (options.softDeadlineMs ?? Number(process.env.INGEST_SOFT_DEADLINE_MS ?? 55_000));
+  const softDeadlineMs = options.softDeadlineMs ?? Number(env.INGEST_SOFT_DEADLINE_MS ?? 55_000);
+  const useMessageBatch = Boolean(env.INGEST_MESSAGE_BATCH);
+  const batchMaxWaitMs = Math.max(
+    60_000,
+    env.INGEST_BATCH_MAX_WAIT_MS ?? 3_600_000
+  );
+  const batchPollMs = Math.max(3_000, env.INGEST_BATCH_POLL_MS ?? 10_000);
+  const hardDeadlineAt =
+    startedAt +
+    (useMessageBatch
+      ? Math.max(softDeadlineMs, batchMaxWaitMs + 120_000)
+      : softDeadlineMs);
 
   console.log(
-    `[IngestAgent:overhaul] "${category}" target=${total}, maxExpansions=${maxExpansionCalls}, ` +
-      `caps(in=${budget.inputCap},out=${budget.outputCap})`
+    '[IngestAgent:overhaul] "%s" target=%s, maxExpansions=%s, caps(in=%s,out=%s), messageBatch=%s',
+    category,
+    String(total),
+    String(maxExpansionCalls),
+    String(budget.inputCap),
+    String(budget.outputCap),
+    useMessageBatch ? "on" : "off"
   );
 
   let rounds = 0;
@@ -146,12 +171,12 @@ async function runOverhaulIngest(
     rounds += 1;
     if (Date.now() >= hardDeadlineAt) {
       stoppedEarly = true;
-      console.log(`[IngestAgent:overhaul] "${category}" stopping early due to runtime budget`);
+      console.log('[IngestAgent:overhaul] "%s" stopping early due to runtime budget', category);
       break;
     }
     if (!canSpendTokens(budget, 1200, 300)) {
       stoppedEarly = true;
-      console.log(`[IngestAgent:overhaul] "${category}" stopping early due to token budget`);
+      console.log('[IngestAgent:overhaul] "%s" stopping early due to token budget', category);
       break;
     }
 
@@ -174,7 +199,7 @@ async function runOverhaulIngest(
       failedCount += 1;
       const message = error instanceof Error ? error.message : "Discovery failed";
       if (errors.length < 8) errors.push(message);
-      console.error(`[IngestAgent:overhaul] Discovery failed for "${category}":`, message);
+      console.error('[IngestAgent:overhaul] Discovery failed for "%s": %s', category, message);
       break;
     }
 
@@ -191,7 +216,13 @@ async function runOverhaulIngest(
         skippedCount += 1;
         if (precheck.conflict) {
           console.log(
-            `[IngestAgent:overhaul] Precheck duplicate (${precheck.reason}) candidate="${candidate.headline.slice(0, 72)}" conflict_id=${precheck.conflict.id} conflict_cat=${precheck.conflict.category} fetched_at=${precheck.conflict.fetchedAt} matched_url=${precheck.conflict.matchedUrl ?? "n/a"}`
+            '[IngestAgent:overhaul] Precheck duplicate (%s) candidate="%s" conflict_id=%s conflict_cat=%s fetched_at=%s matched_url=%s',
+            precheck.reason,
+            candidate.headline.slice(0, 72),
+            String(precheck.conflict.id),
+            precheck.conflict.category,
+            String(precheck.conflict.fetchedAt),
+            precheck.conflict.matchedUrl ?? "n/a"
           );
         }
         seenHeadlines.push(candidate.headline);
@@ -204,63 +235,163 @@ async function runOverhaulIngest(
     if (accepted.length === 0) {
       if (rounds >= 2) {
         stoppedEarly = true;
-        console.log(`[IngestAgent:overhaul] "${category}" no viable candidates after precheck`);
+        console.log('[IngestAgent:overhaul] "%s" no viable candidates after precheck', category);
         break;
       }
       continue;
     }
 
-    for (const candidate of accepted) {
-      if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
-      if (Date.now() >= hardDeadlineAt) {
-        stoppedEarly = true;
-        break;
+    const processExpansionResult = async (expanded: FetchResult) => {
+      const toInsert = {
+        ...expanded.article,
+        category,
+        tags: [],
+        sentiment: "uplifting" as const,
+        emotions: [],
+        locale: "global",
+        readingTimeSecs: estimateReadingTime(expanded.article.body),
+        qualityScore: 0.5,
+      };
+      const inserted = await insertArticles([toInsert]);
+      if (inserted.length > 0) {
+        allInserted.push(inserted[0]);
+        seenHeadlines.push(expanded.article.headline);
+        seenUrls.push(...expanded.article.sourceUrls);
+      } else {
+        skippedCount += 1;
       }
-      if (!canSpendTokens(budget, 2600, 700)) {
-        stoppedEarly = true;
-        break;
-      }
+    };
 
-      attemptedCount += 1;
-      expansionCount += 1;
+    if (useMessageBatch && accepted.length > 0) {
       try {
-        const expanded = await fetchExpandedArticle(
+        const batchRows = await expandAcceptedViaMessageBatch({
           apiKey,
           category,
-          candidate,
+          accepted,
           seenHeadlines,
-          seenUrls
-        );
-        retryCount += expanded.retryCount;
-        spendTokens(budget, expanded.usage);
-
-        const toInsert = {
-          ...expanded.article,
-          category,
-          tags: [],
-          sentiment: "uplifting" as const,
-          emotions: [],
-          locale: "global",
-          readingTimeSecs: estimateReadingTime(expanded.article.body),
-          qualityScore: 0.5,
-        };
-
-        const inserted = await insertArticles([toInsert]);
-        if (inserted.length > 0) {
-          allInserted.push(inserted[0]);
-          seenHeadlines.push(expanded.article.headline);
-          seenUrls.push(...expanded.article.sourceUrls);
-        } else {
-          skippedCount += 1;
+          seenUrls,
+          budget,
+          maxWaitMs: batchMaxWaitMs,
+          pollIntervalMs: batchPollMs,
+        });
+        for (const row of batchRows) {
+          if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
+          if (!canSpendTokens(budget, 2600, 700)) {
+            stoppedEarly = true;
+            break;
+          }
+          attemptedCount += 1;
+          expansionCount += 1;
+          if (row.fetch) {
+            retryCount += row.fetch.retryCount;
+            try {
+              await processExpansionResult(row.fetch);
+            } catch (error) {
+              failedCount += 1;
+              const message = error instanceof Error ? error.message : "Insert failed";
+              if (errors.length < 8) errors.push(message);
+            }
+            continue;
+          }
+          try {
+            const expanded = await fetchExpandedArticle(
+              apiKey,
+              category,
+              row.candidate,
+              seenHeadlines,
+              seenUrls
+            );
+            retryCount += expanded.retryCount;
+            spendTokens(budget, expanded.usage);
+            await processExpansionResult(expanded);
+          } catch (error) {
+            failedCount += 1;
+            const message = error instanceof Error ? error.message : "Expansion failed";
+            if (errors.length < 8) errors.push(message);
+            console.error(
+              '[IngestAgent:overhaul] Expansion failed for "%s" candidate="%s": %s',
+              category,
+              row.candidate.headline.slice(0, 72),
+              message
+            );
+          }
         }
-      } catch (error) {
-        failedCount += 1;
-        const message = error instanceof Error ? error.message : "Expansion failed";
-        if (errors.length < 8) errors.push(message);
-        console.error(
-          `[IngestAgent:overhaul] Expansion failed for "${category}" candidate="${candidate.headline.slice(0, 72)}":`,
-          message
-        );
+      } catch (batchErr) {
+        const msg = batchErr instanceof Error ? batchErr.message : "Message batch failed";
+        console.error("[IngestAgent:overhaul] Message batch error, falling back to sync: %s", msg);
+        if (errors.length < 8) errors.push(msg);
+        for (const candidate of accepted) {
+          if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
+          if (Date.now() >= hardDeadlineAt) {
+            stoppedEarly = true;
+            break;
+          }
+          if (!canSpendTokens(budget, 2600, 700)) {
+            stoppedEarly = true;
+            break;
+          }
+          attemptedCount += 1;
+          expansionCount += 1;
+          try {
+            const expanded = await fetchExpandedArticle(
+              apiKey,
+              category,
+              candidate,
+              seenHeadlines,
+              seenUrls
+            );
+            retryCount += expanded.retryCount;
+            spendTokens(budget, expanded.usage);
+            await processExpansionResult(expanded);
+          } catch (error) {
+            failedCount += 1;
+            const message = error instanceof Error ? error.message : "Expansion failed";
+            if (errors.length < 8) errors.push(message);
+            console.error(
+              '[IngestAgent:overhaul] Expansion failed for "%s" candidate="%s": %s',
+              category,
+              candidate.headline.slice(0, 72),
+              message
+            );
+          }
+        }
+      }
+    } else {
+      for (const candidate of accepted) {
+        if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
+        if (Date.now() >= hardDeadlineAt) {
+          stoppedEarly = true;
+          break;
+        }
+        if (!canSpendTokens(budget, 2600, 700)) {
+          stoppedEarly = true;
+          break;
+        }
+
+        attemptedCount += 1;
+        expansionCount += 1;
+        try {
+          const expanded = await fetchExpandedArticle(
+            apiKey,
+            category,
+            candidate,
+            seenHeadlines,
+            seenUrls
+          );
+          retryCount += expanded.retryCount;
+          spendTokens(budget, expanded.usage);
+          await processExpansionResult(expanded);
+        } catch (error) {
+          failedCount += 1;
+          const message = error instanceof Error ? error.message : "Expansion failed";
+          if (errors.length < 8) errors.push(message);
+          console.error(
+            '[IngestAgent:overhaul] Expansion failed for "%s" candidate="%s": %s',
+            category,
+            candidate.headline.slice(0, 72),
+            message
+          );
+        }
       }
     }
   }
@@ -273,7 +404,14 @@ async function runOverhaulIngest(
     candidateCount > 0 ? Number((precheckRejectedCount / candidateCount).toFixed(4)) : 0;
 
   console.log(
-    `[IngestAgent:overhaul] "${category}" inserted=${allInserted.length}/${total}, candidates=${candidateCount}, precheckRejected=${precheckRejectedCount}, inputTokens=${inputTokens}, outputTokens=${outputTokens}`
+    '[IngestAgent:overhaul] "%s" inserted=%s/%s, candidates=%s, precheckRejected=%s, inputTokens=%s, outputTokens=%s',
+    category,
+    String(allInserted.length),
+    String(total),
+    String(candidateCount),
+    String(precheckRejectedCount),
+    String(inputTokens),
+    String(outputTokens)
   );
 
   return {
@@ -301,7 +439,7 @@ async function runLegacyIngest(
   category: Category,
   total: number
 ): Promise<IngestResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const allInserted: StoredArticle[] = [];
@@ -422,7 +560,10 @@ async function fetchOneArticle(
   const sourceUrls = extraction.urls;
   if (extraction.anomalies.length > 0) {
     console.warn(
-      `[IngestAgent] URL extraction anomalies (${extraction.anomalies.length}) in "${category}": ${extraction.anomalies.join(" | ").slice(0, 400)}`
+      '[IngestAgent] URL extraction anomalies (%s) in "%s": %s',
+      String(extraction.anomalies.length),
+      category,
+      extraction.anomalies.join(" | ").slice(0, 400)
     );
   }
 
@@ -542,10 +683,10 @@ function resolvePipelineMode(
   override?: "legacy" | "overhaul"
 ): "legacy" | "overhaul" {
   if (override) return override;
-  const enabledFlag = process.env.INGEST_OVERHAUL_ENABLED;
-  const enabled = enabledFlag == null ? true : isTruthy(enabledFlag);
+  const enabledFlag = env.INGEST_OVERHAUL_ENABLED;
+  const enabled = enabledFlag == null ? true : enabledFlag;
   if (!enabled) return "legacy";
-  const canaryRaw = process.env.INGEST_OVERHAUL_CANARY_CATEGORIES ?? "";
+  const canaryRaw = env.INGEST_OVERHAUL_CANARY_CATEGORIES ?? "";
   const canary = canaryRaw
     .split(",")
     .map((v) => v.trim().toLowerCase())
@@ -554,16 +695,10 @@ function resolvePipelineMode(
   return canary.includes(category.toLowerCase()) ? "overhaul" : "legacy";
 }
 
-function isTruthy(value: string | undefined): boolean {
-  if (!value) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
-}
-
 function createTokenBudget(options: RunIngestAgentOptions): TokenBudget {
   return {
-    inputCap: Math.max(1500, options.inputTokenCap ?? Number(process.env.INGEST_RUN_INPUT_TOKEN_CAP ?? 25_000)),
-    outputCap: Math.max(500, options.outputTokenCap ?? Number(process.env.INGEST_RUN_OUTPUT_TOKEN_CAP ?? 8_000)),
+    inputCap: Math.max(1500, options.inputTokenCap ?? Number(env.INGEST_RUN_INPUT_TOKEN_CAP ?? 25_000)),
+    outputCap: Math.max(500, options.outputTokenCap ?? Number(env.INGEST_RUN_OUTPUT_TOKEN_CAP ?? 8_000)),
     inputUsed: 0,
     outputUsed: 0,
   };
@@ -655,16 +790,15 @@ function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
   return out;
 }
 
-async function fetchExpandedArticle(
-  apiKey: string,
+function buildExpansionPrompt(
   category: Category,
   candidate: DiscoveryCandidate,
   seenHeadlines: string[],
   seenUrls: string[]
-): Promise<FetchResult> {
+): string {
   const avoidHeadlines = seenHeadlines.slice(-20).join("; ");
   const avoidUrls = seenUrls.slice(-35).join(", ");
-  const prompt =
+  return (
     `You are expanding one discovered story into a publishable article.\n` +
     `Target category: "${category}".\n` +
     `Priority candidate headline: "${candidate.headline}".\n` +
@@ -678,19 +812,24 @@ async function fetchExpandedArticle(
     `- imagePrompt must describe a concrete, story-specific editorial scene with people/place/action when applicable.\n` +
     `- imagePrompt must avoid generic stock wording and must not request text overlays, logos, or watermarks.\n` +
     (avoidHeadlines ? `- Do not repeat these stories: ${avoidHeadlines}\n` : "") +
-    (avoidUrls ? `- Do not use these URLs: ${avoidUrls}\n` : "");
+    (avoidUrls ? `- Do not use these URLs: ${avoidUrls}\n` : "")
+  );
+}
 
-  const { data, retryCount } = await callClaudeWithWebSearch({
-    apiKey,
-    prompt,
-    maxTokens: 1200,
-  });
+function expansionFromClaudeData(
+  data: Record<string, unknown>,
+  candidate: DiscoveryCandidate,
+  category: Category,
+  retryCount: number
+): FetchResult {
   const usage = readClaudeUsage(data, { input_tokens: 1500, output_tokens: 500 });
   const blocks = readContentBlocks(data);
   const extraction = extractSourceUrls(blocks);
   if (extraction.anomalies.length > 0) {
     console.warn(
-      `[IngestAgent:overhaul] URL extraction anomalies for candidate "${candidate.headline.slice(0, 72)}": ${extraction.anomalies.join(" | ").slice(0, 300)}`
+      '[IngestAgent:overhaul] URL extraction anomalies for candidate "%s": %s',
+      candidate.headline.slice(0, 72),
+      extraction.anomalies.join(" | ").slice(0, 300)
     );
   }
 
@@ -705,6 +844,98 @@ async function fetchExpandedArticle(
   if (article.sourceUrls.length === 0) article.sourceUrls = [normaliseUrl(candidate.sourceUrl)];
 
   return { article, usage, retryCount };
+}
+
+interface BatchExpansionRow {
+  candidate: DiscoveryCandidate;
+  fetch: FetchResult | null;
+}
+
+async function expandAcceptedViaMessageBatch(input: {
+  apiKey: string;
+  category: Category;
+  accepted: DiscoveryCandidate[];
+  seenHeadlines: string[];
+  seenUrls: string[];
+  budget: TokenBudget;
+  maxWaitMs: number;
+  pollIntervalMs: number;
+}): Promise<BatchExpansionRow[]> {
+  const {
+    apiKey,
+    category,
+    accepted,
+    seenHeadlines,
+    seenUrls,
+    budget,
+    maxWaitMs,
+    pollIntervalMs,
+  } = input;
+
+  const requests = accepted.map((candidate, i) => ({
+    custom_id: `exp-${i}`,
+    params: buildClaudeWebSearchMessageParams({
+      prompt: buildExpansionPrompt(category, candidate, seenHeadlines, seenUrls),
+      maxTokens: 1200,
+    }),
+  }));
+
+  const { id: batchId } = await createMessageBatch(apiKey, requests);
+  console.log(
+    "[IngestAgent:overhaul] Submitted message batch %s (%s expansions)",
+    batchId,
+    String(requests.length)
+  );
+  await pollMessageBatchUntilEnded(apiKey, batchId, { maxWaitMs, pollIntervalMs });
+  const lines = await fetchMessageBatchResultsJsonl(apiKey, batchId);
+
+  const byIndex = new Map<number, FetchResult>();
+  for (const line of lines) {
+    const parsed = parseMessageBatchJsonlLine(line);
+    if (!parsed?.succeeded || !parsed.message) continue;
+    const m = /^exp-(\d+)$/.exec(parsed.custom_id);
+    if (!m) continue;
+    const idx = Number(m[1]);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= accepted.length) continue;
+    try {
+      const fr = expansionFromClaudeData(
+        parsed.message,
+        accepted[idx]!,
+        category,
+        0
+      );
+      spendTokens(budget, fr.usage);
+      byIndex.set(idx, fr);
+    } catch (e) {
+      console.warn(
+        "[IngestAgent:overhaul] Batch expansion parse failed exp-%s: %s",
+        String(idx),
+        e instanceof Error ? e.message : String(e)
+      );
+    }
+  }
+
+  return accepted.map((candidate, i) => ({
+    candidate,
+    fetch: byIndex.get(i) ?? null,
+  }));
+}
+
+async function fetchExpandedArticle(
+  apiKey: string,
+  category: Category,
+  candidate: DiscoveryCandidate,
+  seenHeadlines: string[],
+  seenUrls: string[]
+): Promise<FetchResult> {
+  const prompt = buildExpansionPrompt(category, candidate, seenHeadlines, seenUrls);
+
+  const { data, retryCount } = await callClaudeWithWebSearch({
+    apiKey,
+    prompt,
+    maxTokens: 1200,
+  });
+  return expansionFromClaudeData(data, candidate, category, retryCount);
 }
 
 interface ClaudeRequestInput {
@@ -727,12 +958,12 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "web-search-2025-03-05",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: input.maxTokens,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: input.prompt }],
-      }),
+      body: JSON.stringify(
+        buildClaudeWebSearchMessageParams({
+          prompt: input.prompt,
+          maxTokens: input.maxTokens,
+        })
+      ),
     });
 
     if ((response.status === 429 || response.status === 529) && attempt < maxAttempts) {

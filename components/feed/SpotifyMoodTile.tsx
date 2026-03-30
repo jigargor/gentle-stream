@@ -4,11 +4,16 @@ import type { SpotifyMoodTileData } from "@/lib/types";
 
 interface SpotifyMoodTileProps {
   data: SpotifyMoodTileData;
-  reason: "gap" | "interval";
+  reason: "gap" | "interval" | "singleton";
 }
 
 export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) {
-  const reasonLabel = reason === "gap" ? "gap-fill" : "interval";
+  const reasonLabel =
+    reason === "singleton"
+      ? null
+      : reason === "gap"
+        ? "gap-fill"
+        : "interval";
   const hasBackgroundImage = Boolean(data.imageUrl);
 
   return (
@@ -49,17 +54,19 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
         >
           {data.title}
         </h3>
-        <span
-          style={{
-            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-            fontSize: "0.67rem",
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            color: "#746a55",
-          }}
-        >
-          {reasonLabel}
-        </span>
+        {reasonLabel ? (
+          <span
+            style={{
+              fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+              fontSize: "0.67rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "#746a55",
+            }}
+          >
+            {reasonLabel}
+          </span>
+        ) : null}
       </header>
 
       <p

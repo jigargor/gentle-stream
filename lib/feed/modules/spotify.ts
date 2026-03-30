@@ -1,9 +1,11 @@
 import type { SpotifyMoodTileData, SpotifyMoodTrack } from "@/lib/types";
+import { getEnv } from "@/lib/env";
 
 const SPOTIFY_ACCOUNTS_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const TOKEN_SKEW_MS = 30_000;
 const TILE_CACHE_TTL_MS = 10 * 60 * 1000;
+const env = getEnv();
 
 interface SpotifyTokenCache {
   accessToken: string;
@@ -68,12 +70,12 @@ function pickMood(input: { category?: string | null; mood?: string | null }): st
   const categoryKey = (input.category ?? "").trim().toLowerCase();
   const categoryMoods = CATEGORY_MOOD_MAP[categoryKey];
   if (categoryMoods && categoryMoods.length > 0) return randomFrom(categoryMoods);
-  const defaults = normalizeMoodList(process.env.SPOTIFY_MODULE_DEFAULT_MOODS);
+  const defaults = normalizeMoodList(env.SPOTIFY_MODULE_DEFAULT_MOODS);
   return randomFrom(defaults);
 }
 
 function normalizeMarket(input: string | null | undefined): string {
-  const market = (input ?? process.env.SPOTIFY_MODULE_MARKET ?? "US").trim().toUpperCase();
+  const market = (input ?? env.SPOTIFY_MODULE_MARKET ?? "US").trim().toUpperCase();
   return market.length === 2 ? market : "US";
 }
 
@@ -131,8 +133,8 @@ async function fetchSpotifyToken(): Promise<string> {
     return tokenCache.accessToken;
   }
 
-  const clientId = process.env.SPOTIFY_CLIENT_ID?.trim();
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET?.trim();
+  const clientId = env.SPOTIFY_CLIENT_ID?.trim();
+  const clientSecret = env.SPOTIFY_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) throw new Error("Spotify credentials are not configured.");
 
   const creds = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -274,13 +276,10 @@ export async function getSpotifyMoodTileData(input: {
   mood?: string | null;
   market?: string | null;
 }): Promise<SpotifyMoodTileData> {
-  const enabledRaw = process.env.SPOTIFY_MODULE_ENABLED?.trim().toLowerCase();
+  const enabledRaw = env.SPOTIFY_MODULE_ENABLED;
   const isEnabled =
-    enabledRaw == null ||
-    enabledRaw === "" ||
-    enabledRaw === "1" ||
-    enabledRaw === "true" ||
-    enabledRaw === "yes";
+    enabledRaw === undefined ||
+    enabledRaw === true;
   const mood = pickMood({ category: input.category, mood: input.mood });
   const genre = pickGenreForMood(mood);
   const market = normalizeMarket(input.market);

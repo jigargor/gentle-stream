@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORIES, type Category } from "@/lib/constants";
 import {
@@ -7,6 +8,8 @@ import {
   upsertCreatorProfile,
 } from "@/lib/db/creator";
 import { getOrCreateUserProfile } from "@/lib/db/users";
+import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -20,13 +23,30 @@ function cleanNullableString(value: unknown, maxLen: number): string | null {
   return trimmed.slice(0, maxLen);
 }
 
-export async function GET() {
+const onboardingBodySchema = z.object({
+  penName: z.string().trim().min(1).max(80),
+  bio: z.string().trim().max(400).optional().nullable(),
+  interestCategories: z.array(z.string()).optional().default([]),
+  websiteUrl: z.string().trim().max(300).optional().nullable(),
+  locale: z.string().trim().max(64).optional().nullable(),
+  timezone: z.string().trim().max(64).optional().nullable(),
+  guidelinesAccepted: z.boolean(),
+  consentOptIn: z.boolean(),
+  consentProof: z.string().trim().max(500),
+});
+
+export async function GET(request: NextRequest) {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const profile = await getCreatorProfile(user.id);
@@ -45,38 +65,43 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const phoneConfirmedAt = (user as { phone_confirmed_at?: string | null }).phone_confirmed_at ?? null;
   if (!user.phone || !phoneConfirmedAt) {
-    return NextResponse.json(
-      { error: "Phone verification is required before creator onboarding." },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "Phone verification is required before creator onboarding.",
+    });
   }
 
-  const body = (await request.json()) as {
-    penName?: unknown;
-    bio?: unknown;
-    interestCategories?: unknown;
-    websiteUrl?: unknown;
-    locale?: unknown;
-    timezone?: unknown;
-    guidelinesAccepted?: unknown;
-    consentOptIn?: unknown;
-    consentProof?: unknown;
-  };
+  const parsedBody = await parseJsonBody({
+    request,
+    schema: onboardingBodySchema,
+  });
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.data;
 
   const penNameRaw = cleanNullableString(body.penName, 80);
   if (!penNameRaw) {
-    return NextResponse.json({ error: "penName is required" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.MISSING_FIELD,
+      message: "penName is required",
+    });
   }
 
   const bio = cleanNullableString(body.bio, 400) ?? "";
-  const interestValues = Array.isArray(body.interestCategories)
-    ? body.interestCategories.filter((v): v is string => typeof v === "string")
-    : [];
+  const interestValues = body.interestCategories;
   const interestCategories = interestValues
     .map((v) => v.trim())
     .filter(isCategory);
@@ -87,25 +112,29 @@ export async function POST(request: NextRequest) {
   const consentOptIn = body.consentOptIn === true;
   const consentProof = cleanNullableString(body.consentProof, 500);
   if (!guidelinesAccepted) {
-    return NextResponse.json(
-      { error: "You must acknowledge the creator content guidelines." },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "You must acknowledge the creator content guidelines.",
+    });
   }
   if (!consentOptIn) {
-    return NextResponse.json(
-      { error: "You must confirm consent opt-in is collected." },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "You must confirm consent opt-in is collected.",
+    });
   }
   if (!consentProof) {
-    return NextResponse.json(
-      {
-        error:
-          "Provide proof of consent (URL to the SMS consent screenshot evidence).",
-      },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.MISSING_FIELD,
+      message:
+        "Provide proof of consent (URL to the SMS consent screenshot evidence).",
+    });
   }
 
   await getOrCreateUserProfile(user.id);

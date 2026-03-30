@@ -15,9 +15,27 @@ html {
   scroll-behavior: smooth;
 }
 
+:root {
+  color-scheme: light;
+  --gs-bg: #ede9e1;
+  --gs-surface: #faf8f3;
+  --gs-text: #0d0d0d;
+  --gs-muted: #6c6457;
+  --gs-border: #d4cfc4;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --gs-bg: #121315;
+  --gs-surface: #1a1c1f;
+  --gs-text: #f2efe8;
+  --gs-muted: #b0a89b;
+  --gs-border: #3d3f45;
+}
+
 body {
-  background-color: #ede9e1;
-  color: #0d0d0d;
+  background-color: var(--gs-bg);
+  color: var(--gs-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -27,10 +45,10 @@ body {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #ede9e1;
+  background: var(--gs-bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: #a09880;
+  background: #7f7666;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -278,6 +296,47 @@ body {
 
 .article-markdown--admin {
   font-size: 0.92rem;
+}
+
+/* Long-form: balance body across columns (reduces single-column “tower” + grid gaps) */
+.article-markdown--multicolumn {
+  column-width: 17.5rem;
+  column-gap: 1.45rem;
+  column-rule: 1px solid var(--gs-border);
+  column-fill: balance;
+}
+
+.article-markdown--multicolumn h1,
+.article-markdown--multicolumn h2,
+.article-markdown--multicolumn h3 {
+  column-span: all;
+  break-after: avoid;
+}
+
+.article-markdown--multicolumn h4 {
+  break-after: avoid;
+}
+
+.article-markdown--multicolumn blockquote,
+.article-markdown--multicolumn pre,
+.article-markdown--multicolumn hr,
+.article-markdown--multicolumn table {
+  column-span: all;
+}
+
+.article-markdown--multicolumn img {
+  column-span: all;
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+@media (max-width: 639px) {
+  .article-markdown--multicolumn {
+    column-count: 1 !important;
+    column-width: auto !important;
+    column-rule: none;
+  }
 }
 
 /* ─── Responsive grid overrides ──────────────────────── */

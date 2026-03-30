@@ -106,10 +106,15 @@ function buildTaggerPrompt(article: StoredArticle): string {
         ? "user-written article"
         : "news article";
 
+  const categoryLine =
+    contentKind === "recipe"
+      ? "Recipes are not assigned editorial categories."
+      : `Category: ${article.category}`;
+
   return `Classify this ${classifyLabel}. Return raw JSON only, no markdown.
 
 Headline: ${article.headline}
-Category: ${article.category}
+${categoryLine}
 Content kind: ${contentKind}
 Body: ${article.body.slice(0, 800)}
 ${explicitTagLine}

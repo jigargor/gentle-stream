@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { parseEnv } from "@/lib/env";
 import {
   parseSessionStart,
   SESSION_MAX_AGE_SEC,
@@ -7,6 +8,7 @@ import {
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import {
   rejectIfSupabaseKeyIsPlatformSecret,
   rejectIfSupabaseKeyIsServiceRole,
@@ -30,27 +32,37 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-export async function updateSession(request: NextRequest) {
-  if (process.env.AUTH_DISABLED === "1") {
-    return NextResponse.next({ request });
+export async function updateSession(request: NextRequest, traceId?: string) {
+  const requestTraceId = traceId ?? crypto.randomUUID();
+  function finish(response: NextResponse) {
+    response.headers.set("X-Trace-Id", requestTraceId);
+    return response;
+  }
+
+  const env = parseEnv(process.env);
+  if (env.NODE_ENV === "production" && env.AUTH_DISABLED) {
+    throw new Error("AUTH_DISABLED must never be enabled in production.");
+  }
+  if (env.AUTH_DISABLED) {
+    return finish(NextResponse.next({ request }));
   }
 
   const { pathname } = request.nextUrl;
   // Scheduled jobs use CRON_SECRET, not browser cookies
   if (pathname.startsWith("/api/cron")) {
-    return NextResponse.next({ request });
+    return finish(NextResponse.next({ request }));
   }
 
   // Let the Route Handler own cookie exchange; refreshing here can keep the prior session
   // while /auth/callback sets the new one, so the wrong user can appear signed in.
   if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {
-    return NextResponse.next({ request });
+    return finish(NextResponse.next({ request }));
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
-    return NextResponse.next({ request });
+    return finish(NextResponse.next({ request }));
   }
 
   rejectIfSupabaseKeyIsPlatformSecret(key);
@@ -98,7 +110,7 @@ export async function updateSession(request: NextRequest) {
       const signOutClient = createSupabaseResponseClient(request, r);
       await signOutClient.auth.signOut();
       r.cookies.delete(SESSION_START_COOKIE);
-      return r;
+      return finish(r);
     }
 
     if (startRaw && started === null) {
@@ -122,13 +134,21 @@ export async function updateSession(request: NextRequest) {
     // Puzzle generators are public — no user data; route handlers must still run (not 401).
     const isPublicGameApi = pathname.startsWith("/api/game");
     if (pathname.startsWith("/api") && !isPublicGameApi && !isPublicPath(pathname)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return finish(
+        apiErrorResponse({
+          request,
+          traceId: requestTraceId,
+          status: 401,
+          code: API_ERROR_CODES.UNAUTHORIZED,
+          message: "Unauthorized",
+        })
+      );
     }
     if (!isPublicPath(pathname)) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/login";
       redirectUrl.searchParams.set("next", pathname);
-      return NextResponse.redirect(redirectUrl);
+      return finish(NextResponse.redirect(redirectUrl));
     }
   } else if (pathname === "/login") {
     const sp = request.nextUrl.searchParams;
@@ -139,9 +159,9 @@ export async function updateSession(request: NextRequest) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/";
       redirectUrl.searchParams.delete("next");
-      return NextResponse.redirect(redirectUrl);
+      return finish(NextResponse.redirect(redirectUrl));
     }
   }
 
-  return supabaseResponse;
+  return finish(supabaseResponse);
 }

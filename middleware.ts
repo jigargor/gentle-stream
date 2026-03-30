@@ -1,8 +1,12 @@
 import { type NextRequest } from "next/server";
+import { getOrCreateTraceId } from "@/lib/api/errors";
 import { updateSession } from "@/lib/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
-  return updateSession(request);
+  const traceId = getOrCreateTraceId(request);
+  const response = await updateSession(request, traceId);
+  response.headers.set("X-Trace-Id", traceId);
+  return response;
 }
 
 export const config = {

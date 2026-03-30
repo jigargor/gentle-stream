@@ -19,5 +19,13 @@ export default async function CreatorOnboardingPage() {
     redirect("/creator");
   }
 
-  return <CreatorOnboardingForm initialPhone={user.phone ?? ""} />;
+  const phoneConfirmedAt = (user as { phone_confirmed_at?: string | null }).phone_confirmed_at ?? null;
+  const initialPhoneConfirmed = Boolean(user.phone && phoneConfirmedAt);
+
+  return (
+    <CreatorOnboardingForm
+      initialPhone={user.phone ?? ""}
+      initialPhoneConfirmed={initialPhoneConfirmed}
+    />
+  );
 }

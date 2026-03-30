@@ -7,6 +7,8 @@ import { CATEGORIES } from "@/lib/constants";
 
 interface CreatorOnboardingFormProps {
   initialPhone: string;
+  /** Supabase already has a confirmed phone — skip SMS steps. */
+  initialPhoneConfirmed?: boolean;
 }
 
 function parseCommaTags(input: string): string[] {
@@ -52,12 +54,61 @@ function normalizePhoneE164(input: string):
   };
 }
 
-export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormProps) {
+/** US/CA national 10 digits → (555) 123-4567 while typing. */
+function formatUsNationalDigits(digits: string): string {
+  const d = digits.replace(/\D/g, "").slice(0, 10);
+  if (d.length === 0) return "";
+  if (d.length <= 3) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+}
+
+/**
+ * Pretty-print for the input: US/CA without + as (555) 123-4567;
+ * +1… as +1 (555) 123-4567; other +country as spaced digit groups.
+ */
+function formatPhoneInput(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+
+  if (v.startsWith("+")) {
+    const digits = v.slice(1).replace(/\D/g, "").slice(0, 15);
+    if (digits.length === 0) return "+";
+
+    const isNanp =
+      digits.startsWith("1") &&
+      digits.length <= 11 &&
+      (digits.length === 1 || digits.length >= 4);
+
+    if (isNanp) {
+      if (digits.length === 1) return "+1";
+      const national = digits.slice(1);
+      return `+1 ${formatUsNationalDigits(national)}`;
+    }
+
+    // + then exactly 10 digits (e.g. "+(555) 123-4567" paste) → assume +1 NANP.
+    if (digits.length === 10 && /^[2-9]\d{9}$/.test(digits)) {
+      return `+1 ${formatUsNationalDigits(digits)}`;
+    }
+
+    return `+${digits.replace(/(\d{3})(?=\d)/g, "$1 ").trimEnd()}`;
+  }
+
+  const digits = v.replace(/\D/g, "").slice(0, 10);
+  return formatUsNationalDigits(digits);
+}
+
+export function CreatorOnboardingForm({
+  initialPhone,
+  initialPhoneConfirmed = false,
+}: CreatorOnboardingFormProps) {
   const router = useRouter();
-  const [phone, setPhone] = useState(initialPhone);
+  const [phone, setPhone] = useState(() => formatPhoneInput(initialPhone));
   const [otpToken, setOtpToken] = useState("");
   const [phoneBusy, setPhoneBusy] = useState(false);
-  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  /** True after OTP is sent; shows step 2 (enter code). */
+  const [otpSent, setOtpSent] = useState(false);
+  const [isPhoneVerified, setIsPhoneVerified] = useState(initialPhoneConfirmed);
   const [penName, setPenName] = useState("");
   const [bio, setBio] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
@@ -91,11 +142,18 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
         setMessage(`${error.message}${extra}`);
         return;
       }
-      setPhone(normalized.e164);
-      setMessage("OTP sent to your phone. Enter it below to verify.");
+      setPhone(formatPhoneInput(normalized.e164));
+      setOtpSent(true);
+      setOtpToken("");
     } finally {
       setPhoneBusy(false);
     }
+  }
+
+  function handleUseDifferentNumber() {
+    setOtpSent(false);
+    setOtpToken("");
+    setMessage(null);
   }
 
   async function verifyPhoneOtp() {
@@ -127,7 +185,8 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
         }
       }
       setIsPhoneVerified(true);
-      setMessage("Phone number verified.");
+      setOtpSent(false);
+      setMessage(null);
     } finally {
       setPhoneBusy(false);
     }
@@ -172,58 +231,145 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
           Creator onboarding
         </h1>
         <p style={{ margin: "0.4rem 0 1rem", color: "#555", fontFamily: "'IM Fell English', Georgia, serif" }}>
-          Verify phone, set your creator profile, then start submitting stories for review.
+          {isPhoneVerified
+            ? "Complete your creator profile, then you can submit stories for review."
+            : "First verify your phone number. After that, you’ll set your creator profile."}
         </p>
 
-        <section style={{ borderTop: "1px solid #ddd", paddingTop: "0.9rem" }}>
-          <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>1) Verify phone number</h2>
-          <div style={{ display: "grid", gap: "0.5rem", maxWidth: "420px" }}>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+1 555 123 4567"
-              autoComplete="tel"
-              inputMode="tel"
-              style={{ padding: "0.45rem", border: "1px solid #bbb" }}
-            />
+        {!isPhoneVerified ? (
+          <section style={{ borderTop: "1px solid #ddd", paddingTop: "0.9rem" }}>
+            <h2
+              style={{
+                margin: "0 0 0.5rem",
+                fontSize: "1rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+              }}
+            >
+              Verify phone number
+            </h2>
+            {!otpSent ? (
+              <div style={{ display: "grid", gap: "0.5rem", maxWidth: "420px" }}>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
+                  placeholder="(555) 123-4567"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  disabled={phoneBusy}
+                  style={{ padding: "0.45rem", border: "1px solid #bbb" }}
+                />
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "0.75rem",
+                    color: "#666",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Use a full international number (E.164). US/Canada: 10 digits is fine; other
+                  countries: start with + and country code. 422 errors are usually a bad format
+                  or Phone/SMS not configured in the Supabase dashboard.
+                </p>
+                <button
+                  type="button"
+                  onClick={sendPhoneOtp}
+                  disabled={phoneBusy}
+                  style={{
+                    padding: "0.45rem",
+                    border: "1px solid #777",
+                    background: "#fff",
+                    cursor: phoneBusy ? "wait" : "pointer",
+                  }}
+                >
+                  {phoneBusy ? "Sending…" : "Send OTP"}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: "0.65rem", maxWidth: "420px" }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "0.85rem",
+                    color: "#333",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  We sent a code to{" "}
+                  <strong style={{ fontFamily: "Georgia, serif" }}>{phone}</strong>. Enter it
+                  below to confirm your number.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleUseDifferentNumber}
+                  disabled={phoneBusy}
+                  style={{
+                    justifySelf: "start",
+                    padding: "0.2rem 0",
+                    border: "none",
+                    background: "none",
+                    color: "#1a472a",
+                    cursor: phoneBusy ? "not-allowed" : "pointer",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontSize: "0.8rem",
+                    textDecoration: "underline",
+                    textUnderlineOffset: "2px",
+                  }}
+                >
+                  Use a different number
+                </button>
+                <input
+                  value={otpToken}
+                  onChange={(e) => setOtpToken(e.target.value)}
+                  placeholder="6-digit code"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  disabled={phoneBusy}
+                  style={{ padding: "0.45rem", border: "1px solid #bbb" }}
+                />
+                <button
+                  type="button"
+                  onClick={verifyPhoneOtp}
+                  disabled={phoneBusy || otpToken.trim().length < 4}
+                  style={{
+                    padding: "0.45rem",
+                    border: "1px solid #1a472a",
+                    background: "#fff",
+                    cursor: phoneBusy ? "wait" : "pointer",
+                  }}
+                >
+                  {phoneBusy ? "Checking…" : "Confirm code"}
+                </button>
+              </div>
+            )}
+          </section>
+        ) : initialPhoneConfirmed ? (
+          <section
+            style={{
+              borderTop: "1px solid #ddd",
+              paddingTop: "0.9rem",
+              marginBottom: "0.25rem",
+            }}
+          >
             <p
               style={{
                 margin: 0,
-                fontSize: "0.75rem",
-                color: "#666",
+                fontSize: "0.88rem",
+                color: "#1a472a",
                 fontFamily: "'IM Fell English', Georgia, serif",
-                lineHeight: 1.4,
               }}
             >
-              Use a full international number (E.164). US/Canada: 10 digits is fine; other
-              countries: start with + and country code. 422 errors are usually a bad format
-              or Phone/SMS not configured in the Supabase dashboard.
+              Phone number on your account is already verified — continue to your profile below.
             </p>
-            <button
-              onClick={sendPhoneOtp}
-              disabled={phoneBusy || isPhoneVerified}
-              style={{ padding: "0.45rem", border: "1px solid #777", background: "#fff", cursor: "pointer" }}
-            >
-              {isPhoneVerified ? "Phone verified" : "Send OTP"}
-            </button>
-            <input
-              value={otpToken}
-              onChange={(e) => setOtpToken(e.target.value)}
-              placeholder="6-digit OTP"
-              style={{ padding: "0.45rem", border: "1px solid #bbb" }}
-            />
-            <button
-              onClick={verifyPhoneOtp}
-              disabled={phoneBusy || isPhoneVerified || otpToken.trim().length < 4}
-              style={{ padding: "0.45rem", border: "1px solid #777", background: "#fff", cursor: "pointer" }}
-            >
-              Confirm OTP
-            </button>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
+        {isPhoneVerified ? (
         <section style={{ borderTop: "1px solid #ddd", marginTop: "0.9rem", paddingTop: "0.9rem" }}>
-          <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>2) Creator profile</h2>
+          <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem", fontFamily: "'Playfair Display', Georgia, serif" }}>
+            Creator profile
+          </h2>
           <div style={{ display: "grid", gap: "0.5rem", maxWidth: "520px" }}>
             <input value={penName} onChange={(e) => setPenName(e.target.value)} placeholder="Pen name" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
             <textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Short bio (optional)" style={{ minHeight: "80px", padding: "0.45rem", border: "1px solid #bbb" }} />
@@ -267,20 +413,29 @@ export function CreatorOnboardingForm({ initialPhone }: CreatorOnboardingFormPro
             </label>
           </div>
         </section>
+        ) : null}
 
         {message ? (
           <p style={{ marginTop: "0.9rem", fontSize: "0.85rem", color: "#7b2d00" }}>{message}</p>
         ) : null}
 
-        <div style={{ marginTop: "1rem" }}>
-          <button
-            onClick={saveOnboarding}
-            disabled={!canSubmit || saving}
-            style={{ padding: "0.55rem 0.8rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer" }}
-          >
-            {saving ? "Saving..." : "Finish onboarding"}
-          </button>
-        </div>
+        {isPhoneVerified ? (
+          <div style={{ marginTop: "1rem" }}>
+            <button
+              type="button"
+              onClick={saveOnboarding}
+              disabled={!canSubmit || saving}
+              style={{
+                padding: "0.55rem 0.8rem",
+                border: "1px solid #1a472a",
+                background: "#fff",
+                cursor: saving || !canSubmit ? "not-allowed" : "pointer",
+              }}
+            >
+              {saving ? "Saving..." : "Finish onboarding"}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

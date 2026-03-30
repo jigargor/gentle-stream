@@ -1,17 +1,10 @@
 import type { Metadata } from "next";
+import { LegalDocumentShell } from "@/components/legal/LegalDocumentShell";
+import { LEGAL_LAST_UPDATED } from "@/lib/legal/legal-meta";
 
 export const metadata: Metadata = {
   title: "User data deletion | Gentle Stream",
   description: "How to request deletion of your Gentle Stream account and data.",
-};
-
-const cardStyle = {
-  fontSize: "0.95rem" as const,
-  lineHeight: 1.65,
-  background: "#faf8f3",
-  borderTop: "2px solid #1a1a1a",
-  padding: "1.5rem 1.25rem",
-  boxShadow: "0 0 24px rgba(0,0,0,0.06)",
 };
 
 /**
@@ -22,30 +15,13 @@ export default function DataDeletionPage() {
   const supportEmail = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim();
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#ede9e1",
-        padding: "2rem 1.25rem 3rem",
-        fontFamily: "Georgia, serif",
-        color: "#1a1a1a",
-      }}
+    <LegalDocumentShell
+      title="User data deletion"
+      description="How to request deletion of data associated with your Gentle Stream account."
+      lastUpdated={LEGAL_LAST_UPDATED}
     >
-      <div style={{ maxWidth: "40rem", margin: "0 auto" }}>
-        <h1
-          style={{
-            fontFamily: "'Playfair Display', Georgia, serif",
-            fontSize: "1.75rem",
-            marginBottom: "0.5rem",
-          }}
-        >
-          User data deletion
-        </h1>
-        <p style={{ fontSize: "0.9rem", color: "#555", marginBottom: "1.5rem" }}>
-          How to ask us to delete data associated with your account.
-        </p>
-
-        <div style={cardStyle}>
+      <section>
+        <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>How to request deletion</h2>
           <p style={{ marginTop: 0 }}>
             If you signed in to Gentle Stream (including with Google or other providers), you
             can request deletion of your account and associated data we store (for example:
@@ -82,9 +58,10 @@ export default function DataDeletionPage() {
               contact method you publish on your site or app store listing.
             </p>
           )}
-        </div>
+      </section>
 
-        <div style={{ ...cardStyle, marginTop: "1.25rem" }}>
+      <section>
+        <h2 style={{ fontSize: "1.15rem" }}>Third-party sign-in</h2>
           <p style={{ marginTop: 0, marginBottom: "0.75rem" }}>
             <strong>Third-party sign-in (e.g. Google, Facebook)</strong>
           </p>
@@ -101,18 +78,7 @@ export default function DataDeletionPage() {
             </a>
             ; you may also review their policies for data they process as a processor.
           </p>
-        </div>
-
-        <p style={{ marginTop: "1.5rem", fontSize: "0.85rem" }}>
-          <a href="/privacy" style={{ color: "#5c4a32" }}>
-            Privacy policy
-          </a>
-          {" · "}
-          <a href="/login" style={{ color: "#5c4a32" }}>
-            Sign in
-          </a>
-        </p>
-      </div>
-    </div>
+      </section>
+    </LegalDocumentShell>
   );
 }

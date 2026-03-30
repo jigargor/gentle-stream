@@ -59,6 +59,8 @@ export function LoginForm({
   const authError = initialAuthError;
 
   const [email, setEmail] = useState("");
+  /** Clickwrap: required before OAuth or email sign-in (unchecked by default). */
+  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
@@ -117,6 +119,10 @@ export function LoginForm({
   async function signInWithEmail(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
+    if (!legalConsentAccepted) {
+      setMessage("Please agree to the Terms and Privacy Policy before continuing.");
+      return;
+    }
     setEmailBusy(true);
     try {
       const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
@@ -250,6 +256,40 @@ export function LoginForm({
           </p>
         )}
 
+        <label
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "0.45rem",
+            fontFamily: "'IM Fell English', Georgia, serif",
+            fontSize: "0.78rem",
+            color: "#555",
+            lineHeight: 1.5,
+            marginBottom: "1rem",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={legalConsentAccepted}
+            onChange={(e) => setLegalConsentAccepted(e.target.checked)}
+            style={{ marginTop: "0.18rem" }}
+          />
+          <span>
+            I have read and agree to the{" "}
+            <a href="/terms" style={{ color: "#5c4a32" }}>
+              Terms of service
+            </a>{" "}
+            and{" "}
+            <a href="/privacy" style={{ color: "#5c4a32" }}>
+              Privacy policy
+            </a>
+            . For email sign-in, you must agree before continuing.
+            <span style={{ display: "block", marginTop: "0.25rem", color: "#777" }}>
+              Google/Facebook sign-in prompts agreement on a follow-up screen.
+            </span>
+          </span>
+        </label>
+
         <button
           type="button"
           disabled={oauthBusy}
@@ -264,6 +304,7 @@ export function LoginForm({
             fontSize: "0.8rem",
             letterSpacing: "0.04em",
             cursor: oauthBusy ? "wait" : "pointer",
+            opacity: 1,
             marginBottom: "0.6rem",
           }}
         >
@@ -286,6 +327,7 @@ export function LoginForm({
             fontSize: "0.8rem",
             letterSpacing: "0.04em",
             cursor: oauthBusy ? "wait" : "pointer",
+            opacity: 1,
             marginBottom: "1.25rem",
           }}
         >
@@ -355,12 +397,24 @@ export function LoginForm({
                 background: "#fff",
                 fontFamily: "Georgia, serif",
                 fontSize: "0.95rem",
-                marginBottom: "0.85rem",
+                marginBottom: "0.5rem",
               }}
             />
+            <p
+              style={{
+                margin: "0 0 0.85rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#777",
+                lineHeight: 1.45,
+              }}
+            >
+              We will send a one-time sign-in link to this address. The link is for signing in
+              only, not marketing email.
+            </p>
             <button
               type="submit"
-              disabled={emailBusy}
+              disabled={emailBusy || !legalConsentAccepted}
               style={{
                 width: "100%",
                 padding: "0.6rem 1rem",
@@ -371,7 +425,8 @@ export function LoginForm({
                 fontSize: "0.78rem",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                cursor: emailBusy ? "wait" : "pointer",
+                cursor: emailBusy ? "wait" : !legalConsentAccepted ? "not-allowed" : "pointer",
+                opacity: legalConsentAccepted ? 1 : 0.6,
               }}
             >
               {emailBusy ? "Sending…" : "Email me a sign-in link"}
@@ -492,6 +547,10 @@ export function LoginForm({
         >
           <a href="/privacy" style={{ color: "#777", textDecoration: "underline" }}>
             Privacy
+          </a>
+          {" · "}
+          <a href="/terms" style={{ color: "#777", textDecoration: "underline" }}>
+            Terms
           </a>
           {" · "}
           <a

@@ -420,6 +420,88 @@ export function ProfileMenu({
               — your submissions are routed through approval before publishing.
             </div>
           )}
+
+          <section style={{ marginBottom: "1rem" }}>
+            <h3
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.78rem",
+                margin: "0 0 0.45rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#555",
+              }}
+            >
+              Account
+            </h3>
+            <Link
+              href="/account/settings"
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                marginBottom: "0.55rem",
+              }}
+            >
+              Account settings
+            </Link>
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: "1.1rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.35rem",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.72rem",
+                color: "#555",
+                lineHeight: 1.45,
+              }}
+            >
+              <li>
+                <Link
+                  href="/privacy"
+                  onClick={() => setOpen(false)}
+                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                >
+                  Privacy
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/terms"
+                  onClick={() => setOpen(false)}
+                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                >
+                  Terms
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/data-deletion"
+                  onClick={() => setOpen(false)}
+                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                >
+                  Data deletion
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/sms-consent"
+                  onClick={() => setOpen(false)}
+                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                >
+                  SMS consent
+                </Link>
+              </li>
+            </ul>
+          </section>
+
           <section style={{ marginBottom: "1rem" }}>
             <h3
               style={{

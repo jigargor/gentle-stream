@@ -9,12 +9,12 @@ export interface AppLogoProps {
 
 export function AppLogo({ heightPx = 44, priority = true }: AppLogoProps) {
   return (
-    // Local file in /public; dimensions vary by asset — img keeps aspect ratio.
+    // Local SVG in /public (square); CSS height + width:auto scales crisply at any DPR.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={APP_LOGO_SRC}
       alt="Gentle Stream"
-      width={200}
+      width={heightPx}
       height={heightPx}
       loading={priority ? "eager" : "lazy"}
       decoding="async"

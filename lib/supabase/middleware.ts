@@ -17,7 +17,9 @@ const PUBLIC_PREFIXES = [
   "/auth/callback",
   "/auth/auth-code-error",
   "/privacy",
+  "/terms",
   "/data-deletion",
+  "/sms-consent",
 ];
 
 function isPublicPath(pathname: string): boolean {

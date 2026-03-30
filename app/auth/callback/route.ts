@@ -5,6 +5,7 @@ import {
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
+import { TERMS_ACCEPTED_COOKIE } from "@/lib/legal/terms-policy";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -135,6 +136,20 @@ export async function GET(request: NextRequest) {
 
   if (await isSsoEmailConflict(user)) {
     return redirectToLoginCleared(request, { error: "sso_email_conflict" });
+  }
+
+  const provider = readPrimaryProvider(user);
+  const termsAccepted = request.cookies.get(TERMS_ACCEPTED_COOKIE)?.value === "1";
+  const needsTermsAccept =
+    (provider === "google" || provider === "facebook") && !termsAccepted;
+
+  if (needsTermsAccept && destination.pathname !== "/terms/accept") {
+    const gateUrl = new URL("/terms/accept", request.url);
+    gateUrl.searchParams.set("next", next);
+    // Route Handler quirks: we start with a redirect to `next`, but then override
+    // the Location header to redirect to the terms gate.
+    response.headers.set("Location", gateUrl.toString());
+    response.headers.set("location", gateUrl.toString());
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

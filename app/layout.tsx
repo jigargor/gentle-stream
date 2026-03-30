@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description:
     "Uplifting stories from around the world — a calmer broadsheet feed, delivered with care.",
   icons: {
-    icon: [{ url: APP_LOGO_SRC, type: "image/png" }],
+    icon: [{ url: APP_LOGO_SRC, type: "image/svg+xml" }],
   },
   openGraph: {
     title: "Gentle Stream",

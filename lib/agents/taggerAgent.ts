@@ -91,15 +91,24 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
 }
 
 function buildTaggerPrompt(article: StoredArticle): string {
+  const explicitTags = (article.creatorExplicitTags ?? [])
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+  const explicitTagLine =
+    explicitTags.length > 0
+      ? `Author-supplied tags (must all appear in "tags"): ${explicitTags.join(", ")}`
+      : "Author-supplied tags: none";
+
   return `Classify this news article. Return raw JSON only, no markdown.
 
 Headline: ${article.headline}
 Category: ${article.category}
 Body: ${article.body.slice(0, 800)}
+${explicitTagLine}
 
 Return exactly:
 {
-  "tags": ["3 to 6 specific topic tags, lowercase, e.g. ocean, coral-reef, australia"],
+  "tags": ["3 to 8 specific topic tags, lowercase, include all author-supplied tags if present"],
   "sentiment": "uplifting" | "inspiring" | "heartwarming" | "triumphant",
   "emotions": ["1 to 3 emotions from: joy, awe, hope, pride, gratitude, wonder, excitement"],
   "locale": "global" | "US" | "UK" | "AU" | "EU" | "Asia" | "Africa" | "LatAm",

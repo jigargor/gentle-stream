@@ -28,6 +28,10 @@ interface ArticleRow {
   tagged: boolean;
   fingerprint: string;
   source_urls: string[];
+  source?: string;
+  author_user_id?: string | null;
+  submission_id?: string | null;
+  creator_explicit_tags?: string[];
 }
 
 function rowToArticle(row: ArticleRow): StoredArticle {
@@ -52,7 +56,28 @@ function rowToArticle(row: ArticleRow): StoredArticle {
     usedCount: row.used_count ?? 0,
     tagged: row.tagged ?? false,
     sourceUrls: row.source_urls ?? [],
+    source: row.source === "creator" ? "creator" : "ingest",
+    authorUserId: row.author_user_id ?? null,
+    submissionId: row.submission_id ?? null,
+    creatorExplicitTags: row.creator_explicit_tags ?? [],
   };
+}
+
+function normaliseTag(input: string): string {
+  return input.trim().replace(/^#/, "").toLowerCase();
+}
+
+function mergeTags(explicitTags: string[], inferredTags: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of [...explicitTags, ...inferredTags]) {
+    const normalised = normaliseTag(tag);
+    if (!normalised || seen.has(normalised)) continue;
+    seen.add(normalised);
+    out.push(normalised);
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 // ─── Deduplication helpers ────────────────────────────────────────────────────
@@ -170,7 +195,7 @@ async function fetchExistingFingerprints(fps: string[]): Promise<Set<string>> {
 export async function insertArticles(
   articles: Omit<
     StoredArticle,
-    "id" | "fetchedAt" | "expiresAt" | "usedCount" | "tagged"
+    "id" | "fetchedAt" | "expiresAt" | "usedCount" | "tagged" | "source" | "authorUserId" | "submissionId" | "creatorExplicitTags"
   >[]
 ): Promise<StoredArticle[]> {
   if (articles.length === 0) return [];
@@ -245,6 +270,10 @@ export async function insertArticles(
     tagged: false,
     fingerprint: fp,
     source_urls: normUrls,
+    source: "ingest",
+    author_user_id: null,
+    submission_id: null,
+    creator_explicit_tags: [],
   }));
 
   const { data, error } = await db
@@ -492,10 +521,22 @@ export async function updateArticleTags(
     qualityScore: number;
   }
 ): Promise<void> {
+  const { data: existing, error: fetchError } = await db
+    .from("articles")
+    .select("creator_explicit_tags")
+    .eq("id", id)
+    .single();
+
+  if (fetchError) throw new Error(`updateArticleTags fetch existing: ${fetchError.message}`);
+  const explicit = ((existing as { creator_explicit_tags?: string[] } | null)?.creator_explicit_tags ?? [])
+    .map(normaliseTag)
+    .filter(Boolean);
+  const mergedTags = mergeTags(explicit, enrichment.tags ?? []);
+
   const { error } = await db
     .from("articles")
     .update({
-      tags: enrichment.tags,
+      tags: mergedTags,
       sentiment: enrichment.sentiment,
       emotions: enrichment.emotions,
       locale: enrichment.locale,

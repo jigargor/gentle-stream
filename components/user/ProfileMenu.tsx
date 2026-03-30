@@ -412,9 +412,38 @@ export function ProfileMenu({ userEmail, onGameRatioSaved }: ProfileMenuProps) {
               <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
                 Creator
               </strong>
-              — publishing tools will arrive in a future update.
+              — your submissions are routed through approval before publishing.
             </div>
           )}
+          <section style={{ marginBottom: "1rem" }}>
+            <h3
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.78rem",
+                margin: "0 0 0.45rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#555",
+              }}
+            >
+              Creator tools
+            </h3>
+            <Link
+              href={creator ? "/creator" : "/creator/onboarding"}
+              onClick={() => setOpen(false)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+              }}
+            >
+              {creator ? "Open creator studio" : "Apply as a creator"}
+            </Link>
+          </section>
 
           <section style={{ marginBottom: "1rem" }}>
             <h3

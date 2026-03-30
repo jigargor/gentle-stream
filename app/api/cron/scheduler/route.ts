@@ -28,6 +28,38 @@ import {
 } from "@/lib/constants";
 import type { Category } from "@/lib/constants";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const DEFAULT_RUNTIME_BUDGET_MS = 240_000;
+const DEFAULT_MAX_EXPANSIONS_PER_RUN = 20;
+
+function readPositiveInt(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.trunc(n);
+}
+
+function isTruthy(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function resolveIngestPipeline(category: Category): "legacy" | "overhaul" {
+  const enabled = isTruthy(process.env.INGEST_OVERHAUL_ENABLED);
+  if (!enabled) return "legacy";
+
+  const canaryRaw = process.env.INGEST_OVERHAUL_CANARY_CATEGORIES ?? "";
+  const canary = canaryRaw
+    .split(",")
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+  if (canary.length === 0) return "overhaul";
+  return canary.includes(category.toLowerCase()) ? "overhaul" : "legacy";
+}
+
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -65,6 +97,22 @@ export async function GET(request: NextRequest) {
   let totalSkipped = 0;
   let totalFailed = 0;
   let totalRetried = 0;
+  let totalCandidates = 0;
+  let totalPrecheckRejected = 0;
+  let totalExpansions = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let categoriesChecked = 0;
+  let remainingExpansionBudget = readPositiveInt(
+    process.env.CRON_INGEST_MAX_EXPANSIONS_PER_RUN,
+    DEFAULT_MAX_EXPANSIONS_PER_RUN
+  );
+  const runtimeBudgetMs = readPositiveInt(
+    process.env.CRON_INGEST_RUNTIME_BUDGET_MS,
+    DEFAULT_RUNTIME_BUDGET_MS
+  );
+  let stoppedByRuntimeBudget = false;
+  let stoppedByExpansionBudget = false;
   const errorSummaryParts: string[] = [];
 
   try {
@@ -72,6 +120,20 @@ export async function GET(request: NextRequest) {
     const nowMs = Date.now();
 
     for (const cat of CATEGORIES) {
+      const elapsedMs = Date.now() - runStartedAt;
+      if (elapsedMs >= runtimeBudgetMs) {
+        stoppedByRuntimeBudget = true;
+        console.warn(
+          `[Scheduler] Runtime budget hit (${elapsedMs}ms/${runtimeBudgetMs}ms). Ending run early.`
+        );
+        break;
+      }
+      if (remainingExpansionBudget <= 0) {
+        stoppedByExpansionBudget = true;
+        console.warn("[Scheduler] Expansion budget exhausted. Ending run early.");
+        break;
+      }
+
       const row = snapshot[cat];
       const available = row?.count ?? 0;
       const newestFetchedAt = row?.newestFetchedAt ?? null;
@@ -103,6 +165,7 @@ export async function GET(request: NextRequest) {
       report[cat].reason = reason;
 
       if (ingestCount === 0) {
+        categoriesChecked += 1;
         categoryLogs.push({
           category: cat,
           beforeCount: available,
@@ -116,23 +179,41 @@ export async function GET(request: NextRequest) {
           warningFlag: false,
           reason,
           newestFetchedAt,
+          candidateCount: 0,
+          precheckRejectedCount: 0,
+          expansionCount: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          insertPer1kTokens: 0,
+          duplicateSkipRate: 0,
+          pipelineMode: "legacy",
         });
         continue;
       }
 
+      const cappedIngestCount = Math.min(ingestCount, remainingExpansionBudget);
+      report[cat].requested = cappedIngestCount;
+
       console.log(
         reason === "threshold"
-          ? `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${ingestCount}`
-          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${ingestCount})`
+          ? `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${cappedIngestCount}`
+          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${cappedIngestCount})`
       );
 
       const categoryStartedAt = Date.now();
       try {
-        const result = await runIngestAgent(cat as Category, ingestCount);
+        const pipeline = resolveIngestPipeline(cat as Category);
+        const remainingRuntimeMs = Math.max(5_000, runtimeBudgetMs - (Date.now() - runStartedAt) - 2_000);
+        const result = await runIngestAgent(cat as Category, cappedIngestCount, {
+          pipeline,
+          maxExpansionCalls: cappedIngestCount,
+          softDeadlineMs: remainingRuntimeMs,
+        });
         const insertedCount = result.inserted.length;
         const warningFlag =
-          result.failedCount > 0 || (ingestCount > 0 && insertedCount === 0);
+          result.failedCount > 0 || (cappedIngestCount > 0 && insertedCount === 0);
         if (warningFlag) warningCount += 1;
+        categoriesChecked += 1;
 
         report[cat].ingested = insertedCount;
         if (result.errorSummary) report[cat].error = result.errorSummary;
@@ -142,6 +223,12 @@ export async function GET(request: NextRequest) {
         totalSkipped += result.skippedCount;
         totalFailed += result.failedCount;
         totalRetried += result.retryCount;
+        totalCandidates += result.candidateCount;
+        totalPrecheckRejected += result.precheckRejectedCount;
+        totalExpansions += result.expansionCount;
+        totalInputTokens += result.inputTokens;
+        totalOutputTokens += result.outputTokens;
+        remainingExpansionBudget = Math.max(0, remainingExpansionBudget - result.expansionCount);
 
         if (result.errorSummary) {
           errorSummaryParts.push(`${cat}: ${result.errorSummary}`);
@@ -150,7 +237,7 @@ export async function GET(request: NextRequest) {
         categoryLogs.push({
           category: cat,
           beforeCount: available,
-          requestedCount: ingestCount,
+          requestedCount: cappedIngestCount,
           insertedCount,
           attemptedCount: result.attemptedCount,
           skippedCount: result.skippedCount,
@@ -162,24 +249,33 @@ export async function GET(request: NextRequest) {
           newestFetchedAt,
           errorMessage: report[cat].error,
           errorSummary: result.errorSummary ?? undefined,
+          candidateCount: result.candidateCount,
+          precheckRejectedCount: result.precheckRejectedCount,
+          expansionCount: result.expansionCount,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          insertPer1kTokens: result.insertPer1kTokens,
+          duplicateSkipRate: result.duplicateSkipRate,
+          pipelineMode: result.pipelineMode,
         });
       } catch (e) {
         console.error(`[Scheduler] Ingest failed for "${cat}":`, e);
         hadErrors = true;
+        categoriesChecked += 1;
         const message = e instanceof Error ? e.message : "Unknown ingest error";
         report[cat].error = message;
         errorSummaryParts.push(`${cat}: ${message}`);
-        totalFailed += ingestCount;
+        totalFailed += cappedIngestCount;
         warningCount += 1;
 
         categoryLogs.push({
           category: cat,
           beforeCount: available,
-          requestedCount: ingestCount,
+          requestedCount: cappedIngestCount,
           insertedCount: 0,
-          attemptedCount: ingestCount,
+          attemptedCount: cappedIngestCount,
           skippedCount: 0,
-          failedCount: ingestCount,
+          failedCount: cappedIngestCount,
           retryCount: 0,
           durationMs: Date.now() - categoryStartedAt,
           warningFlag: true,
@@ -187,6 +283,14 @@ export async function GET(request: NextRequest) {
           newestFetchedAt,
           errorMessage: message,
           errorSummary: message,
+          candidateCount: 0,
+          precheckRejectedCount: 0,
+          expansionCount: cappedIngestCount,
+          inputTokens: 0,
+          outputTokens: 0,
+          insertPer1kTokens: 0,
+          duplicateSkipRate: 0,
+          pipelineMode: resolveIngestPipeline(cat as Category),
         });
       }
     }
@@ -205,7 +309,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const notes = `durationMs=${Date.now() - runStartedAt}; categories=${CATEGORIES.length}`;
+    const insertPer1kTokens =
+      totalInputTokens > 0 ? Number(((totalInserted * 1000) / totalInputTokens).toFixed(3)) : 0;
+    const duplicateSkipRate =
+      totalCandidates > 0 ? Number((totalPrecheckRejected / totalCandidates).toFixed(4)) : 0;
+
+    const notes = `durationMs=${Date.now() - runStartedAt}; checked=${categoriesChecked}; runtimeBudgetMs=${runtimeBudgetMs}; stopRuntime=${stoppedByRuntimeBudget}; stopExpansion=${stoppedByExpansionBudget}`;
     try {
       await finishCronIngestRun(runId, {
         ok: !hadErrors,
@@ -216,7 +325,14 @@ export async function GET(request: NextRequest) {
         totalRetried,
         warningCount,
         errorSummary: errorSummaryParts.join(" | ").slice(0, 1200),
-        categoriesChecked: CATEGORIES.length,
+        categoriesChecked,
+        totalCandidates,
+        totalPrecheckRejected,
+        totalExpansions,
+        totalInputTokens,
+        totalOutputTokens,
+        insertPer1kTokens,
+        duplicateSkipRate,
         notes,
       });
     } catch (e) {
@@ -234,6 +350,18 @@ export async function GET(request: NextRequest) {
       failed: totalFailed,
       retried: totalRetried,
       warnings: warningCount,
+      candidates: totalCandidates,
+      precheckRejected: totalPrecheckRejected,
+      expansions: totalExpansions,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+    },
+    budget: {
+      runtimeMs: runtimeBudgetMs,
+      stoppedByRuntimeBudget,
+      stoppedByExpansionBudget,
+      remainingExpansionBudget,
+      categoriesChecked,
     },
     report,
     checkedAt: new Date().toISOString(),

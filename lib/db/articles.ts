@@ -170,13 +170,29 @@ function mergeTags(explicitTags: string[], inferredTags: string[]): string[] {
  * with punctuation stripped so "Bull Sharks' Social Lives" and
  * "Bull Sharks Social Lives" hash identically.
  */
-function headlineFingerprint(headline: string, category: string): string {
+export function buildHeadlineFingerprint(headline: string, category: string): string {
   const normalised = headline
     .toLowerCase()
     .replace(/['''"",.:;!?()[\]]/g, "")  // strip punctuation
     .replace(/\s+/g, " ")
     .trim();
   return `${normalised}|${category.toLowerCase()}`;
+}
+
+export interface IngestConflictRecord {
+  id: string;
+  headline: string;
+  category: string;
+  fetchedAt: string;
+  matchedUrl?: string;
+}
+
+export interface IngestPrecheckResult {
+  isDuplicate: boolean;
+  reason: "fingerprint" | "url_overlap" | null;
+  fingerprint: string;
+  normalizedUrls: string[];
+  conflict: IngestConflictRecord | null;
 }
 
 /**
@@ -211,15 +227,16 @@ export function normaliseUrl(url: string): string {
  */
 async function findUrlConflict(
   normalisedUrls: string[]
-): Promise<string | null> {
+): Promise<IngestConflictRecord | null> {
   if (normalisedUrls.length === 0) return null;
 
   // Postgres GIN array overlap: source_urls && ARRAY[...]
   const { data, error } = await db
     .from("articles")
-    .select("headline, source_urls")
+    .select("id, headline, category, fetched_at, source_urls")
     .overlaps("source_urls", normalisedUrls)
-    .limit(1);
+    .order("fetched_at", { ascending: false })
+    .limit(20);
 
   if (error) {
     // Don't hard-fail — URL check is best-effort
@@ -227,7 +244,32 @@ async function findUrlConflict(
     return null;
   }
 
-  return data && data.length > 0 ? (data[0] as { headline: string }).headline : null;
+  if (!data || data.length === 0) return null;
+
+  const ordered = [...(data as {
+    id: string;
+    headline: string;
+    category: string;
+    fetched_at: string;
+    source_urls: string[] | null;
+  }[])].sort((a, b) => {
+    const timeDelta = Date.parse(b.fetched_at) - Date.parse(a.fetched_at);
+    if (timeDelta !== 0) return timeDelta;
+    return a.id.localeCompare(b.id);
+  });
+
+  const top = ordered[0];
+  if (!top) return null;
+  const rowUrls = (top.source_urls ?? []).map(normaliseUrl);
+  const matchedUrl = rowUrls.find((u) => normalisedUrls.includes(u));
+
+  return {
+    id: top.id,
+    headline: top.headline,
+    category: top.category,
+    fetchedAt: top.fetched_at,
+    matchedUrl,
+  };
 }
 
 /**
@@ -288,7 +330,7 @@ export async function insertArticles(
   // ── Layer 1: fingerprint pre-flight ───────────────────────────────────────
   const candidates = articles.map((a) => ({
     article: a,
-    fp: headlineFingerprint(a.headline, a.category),
+    fp: buildHeadlineFingerprint(a.headline, a.category),
     normUrls: (a.sourceUrls ?? []).map(normaliseUrl),
   }));
 
@@ -309,7 +351,7 @@ export async function insertArticles(
     const conflict = await findUrlConflict(candidate.normUrls);
     if (conflict) {
       console.log(
-        `[insertArticles] URL overlap with "${conflict}" — skipping: "${candidate.article.headline}"`
+        `[insertArticles] URL overlap with "${conflict.headline}" (${conflict.id}) — skipping: "${candidate.article.headline}"`
       );
       continue;
     }
@@ -367,6 +409,63 @@ export async function insertArticles(
 
   if (error) throw new Error(`insertArticles: ${error.message}`);
   return (data as ArticleRow[]).map(rowToArticle);
+}
+
+export async function precheckIngestCandidate(input: {
+  headline: string;
+  category: string;
+  sourceUrls: string[];
+}): Promise<IngestPrecheckResult> {
+  const fingerprint = buildHeadlineFingerprint(input.headline, input.category);
+  const normalizedUrls = Array.from(new Set((input.sourceUrls ?? []).map(normaliseUrl)));
+
+  const { data: fpRows, error: fpError } = await db
+    .from("articles")
+    .select("id,headline,category,fetched_at")
+    .eq("fingerprint", fingerprint)
+    .order("fetched_at", { ascending: false })
+    .limit(1);
+  if (fpError) throw new Error(`precheckIngestCandidate fingerprint lookup: ${fpError.message}`);
+
+  const fpRow = (fpRows?.[0] as {
+    id: string;
+    headline: string;
+    category: string;
+    fetched_at: string;
+  } | undefined);
+  if (fpRow) {
+    return {
+      isDuplicate: true,
+      reason: "fingerprint",
+      fingerprint,
+      normalizedUrls,
+      conflict: {
+        id: fpRow.id,
+        headline: fpRow.headline,
+        category: fpRow.category,
+        fetchedAt: fpRow.fetched_at,
+      },
+    };
+  }
+
+  const urlConflict = await findUrlConflict(normalizedUrls);
+  if (urlConflict) {
+    return {
+      isDuplicate: true,
+      reason: "url_overlap",
+      fingerprint,
+      normalizedUrls,
+      conflict: urlConflict,
+    };
+  }
+
+  return {
+    isDuplicate: false,
+    reason: null,
+    fingerprint,
+    normalizedUrls,
+    conflict: null,
+  };
 }
 
 /**

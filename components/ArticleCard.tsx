@@ -239,10 +239,14 @@ export default function ArticleCard({
       pollinationsImageUrl(
         article.imagePrompt,
         HERO_IMG_W,
-        HERO_IMG_H
+        HERO_IMG_H,
+        {
+          category: article.category,
+          location: article.location,
+        }
       ) ?? picsumFallbackUrl(articleSeed, HERO_IMG_W, HERO_IMG_H)
     );
-  }, [article.imagePrompt, articleSeed, imageStage]);
+  }, [article.category, article.imagePrompt, article.location, articleSeed, imageStage]);
 
   const headlineSizePx = isHero
     ? "clamp(1.55rem, 2.8vw, 2.3rem)"

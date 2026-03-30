@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   let runsQuery = db
     .from("cron_ingest_runs")
     .select(
-      "id,trigger_source,started_at,finished_at,ok,total_inserted,total_attempted,total_skipped,total_failed,total_retried,warning_count,error_summary,categories_checked,notes"
+      "id,trigger_source,started_at,finished_at,ok,total_inserted,total_attempted,total_skipped,total_failed,total_retried,warning_count,error_summary,categories_checked,total_candidates,total_precheck_rejected,total_expansions,total_input_tokens,total_output_tokens,insert_per_1k_tokens,duplicate_skip_rate,notes"
     )
     .order("started_at", { ascending: false })
     .limit(limit);
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
   const { data: categoryRows, error: rowsError } = await db
     .from("cron_ingest_category_runs")
     .select(
-      "run_id,category,before_count,requested_count,inserted_count,attempted_count,skipped_count,failed_count,retry_count,duration_ms,warning_flag,reason,newest_fetched_at,error_message,error_summary,created_at"
+      "run_id,category,before_count,requested_count,inserted_count,attempted_count,skipped_count,failed_count,retry_count,duration_ms,warning_flag,reason,newest_fetched_at,error_message,error_summary,candidate_count,precheck_rejected_count,expansion_count,input_tokens,output_tokens,insert_per_1k_tokens,duplicate_skip_rate,pipeline_mode,created_at"
     )
     .in("run_id", runIds)
     .order("created_at", { ascending: true });
@@ -84,6 +84,14 @@ export async function GET(request: NextRequest) {
       newestFetchedAt: row.newest_fetched_at,
       errorMessage: row.error_message,
       errorSummary: row.error_summary,
+      candidateCount: row.candidate_count,
+      precheckRejectedCount: row.precheck_rejected_count,
+      expansionCount: row.expansion_count,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      insertPer1kTokens: row.insert_per_1k_tokens,
+      duplicateSkipRate: row.duplicate_skip_rate,
+      pipelineMode: row.pipeline_mode,
       createdAt: row.created_at,
     });
     grouped.set(row.run_id, current);
@@ -105,6 +113,13 @@ export async function GET(request: NextRequest) {
       warningCount: run.warning_count,
       errorSummary: run.error_summary,
       categoriesChecked: run.categories_checked,
+      totalCandidates: run.total_candidates,
+      totalPrecheckRejected: run.total_precheck_rejected,
+      totalExpansions: run.total_expansions,
+      totalInputTokens: run.total_input_tokens,
+      totalOutputTokens: run.total_output_tokens,
+      insertPer1kTokens: run.insert_per_1k_tokens,
+      duplicateSkipRate: run.duplicate_skip_rate,
       notes: run.notes,
       health: {
         isPartialFailure:

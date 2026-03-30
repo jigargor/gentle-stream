@@ -17,12 +17,36 @@ export function sanitizeImagePrompt(prompt: string): string {
     .slice(0, 400);
 }
 
+export function composeArticleImagePrompt(input: {
+  imagePrompt: string;
+  category?: string | null;
+  location?: string | null;
+}): string {
+  const base = sanitizeImagePrompt(input.imagePrompt);
+  if (!base) return "";
+  const category = (input.category ?? "").trim();
+  const location = (input.location ?? "").trim();
+  const contextParts = [category, location].filter(Boolean);
+  const context = contextParts.length > 0 ? `Context: ${contextParts.join(" | ")}.` : "";
+  const guardrails =
+    "Editorial documentary style, realistic scene, story-specific details, no text overlay, no logos, no watermark.";
+  return sanitizeImagePrompt(`${base}. ${context} ${guardrails}`);
+}
+
 export function pollinationsImageUrl(
   imagePrompt: string,
   width: number,
-  height: number
+  height: number,
+  context?: {
+    category?: string | null;
+    location?: string | null;
+  }
 ): string | null {
-  const q = sanitizeImagePrompt(imagePrompt);
+  const q = composeArticleImagePrompt({
+    imagePrompt,
+    category: context?.category ?? null,
+    location: context?.location ?? null,
+  });
   if (!q) return null;
   const params = new URLSearchParams({
     width: String(width),

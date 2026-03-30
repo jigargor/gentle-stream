@@ -172,6 +172,114 @@ body {
   column-rule: 1px solid #d4cfc4;
 }
 
+/* Shared Markdown body styles */
+.article-markdown {
+  color: #1f1f1f;
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+}
+
+.article-font--classic {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.article-font--literary {
+  font-family: "IM Fell English", Georgia, serif;
+}
+
+.article-markdown p {
+  margin: 0 0 0.85rem;
+}
+
+.article-markdown h1,
+.article-markdown h2,
+.article-markdown h3,
+.article-markdown h4 {
+  font-family: "Playfair Display", Georgia, serif;
+  line-height: 1.24;
+  color: #141414;
+  margin: 1rem 0 0.55rem;
+}
+
+.article-markdown h1 {
+  font-size: clamp(1.4rem, 2.7vw, 1.9rem);
+}
+
+.article-markdown h2 {
+  font-size: clamp(1.15rem, 2.3vw, 1.5rem);
+}
+
+.article-markdown h3 {
+  font-size: clamp(1.02rem, 1.9vw, 1.25rem);
+}
+
+.article-markdown blockquote {
+  margin: 0.95rem 0;
+  padding: 0.55rem 0 0.55rem 0.8rem;
+  border-left: 3px solid #b8af9d;
+  color: #3c3c3c;
+  font-style: italic;
+}
+
+.article-markdown ul,
+.article-markdown ol {
+  margin: 0 0 0.9rem;
+  padding-left: 1.2rem;
+}
+
+.article-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.article-markdown hr {
+  border: 0;
+  border-top: 1px solid #ccc5b7;
+  margin: 1.15rem 0;
+}
+
+.article-markdown a {
+  color: #1a472a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.article-markdown code {
+  background: #efe9de;
+  border-radius: 3px;
+  padding: 0.1rem 0.2rem;
+  font-size: 0.92em;
+}
+
+.article-markdown pre {
+  background: #efe9de;
+  border: 1px solid #d8cfbf;
+  border-radius: 6px;
+  padding: 0.7rem;
+  margin: 0 0 0.95rem;
+  overflow-x: auto;
+}
+
+.article-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.article-markdown--feed {
+  font-size: 0.87rem;
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+.article-markdown--reader {
+  font-size: 1.03rem;
+  text-align: justify;
+}
+
+.article-markdown--admin {
+  font-size: 0.92rem;
+}
+
 /* ─── Responsive grid overrides ──────────────────────── */
 @media (max-width: 768px) {
   .news-grid {

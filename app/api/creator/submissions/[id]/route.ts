@@ -38,6 +38,14 @@ export async function PATCH(
     explicitHashtags?: unknown;
     withdraw?: unknown;
   };
+  const rawArticleBody =
+    typeof body.body === "string" ? body.body.trim() : undefined;
+  if (rawArticleBody !== undefined && rawArticleBody.length > 15_000) {
+    return NextResponse.json(
+      { error: "body must be 15,000 characters or fewer." },
+      { status: 400 }
+    );
+  }
 
   const updates: Parameters<typeof updateSubmissionForAuthor>[0] = {
     id: context.params.id,
@@ -45,7 +53,7 @@ export async function PATCH(
   };
   const headline = toSafeText(body.headline, 180);
   const subheadline = toSafeText(body.subheadline, 220);
-  const articleBody = toSafeText(body.body, 15000);
+  const articleBody = rawArticleBody;
   const pullQuote = toSafeText(body.pullQuote, 400);
   const locale = toSafeText(body.locale, 64);
   const categoryRaw = toSafeText(body.category, 80);

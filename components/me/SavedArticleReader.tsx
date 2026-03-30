@@ -6,6 +6,7 @@ import {
   toClickableSourceUrl,
   uniqueSourceUrls,
 } from "@/lib/source-links";
+import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
 interface SavedArticleReaderProps {
   article: StoredArticle;
@@ -17,7 +18,6 @@ export function SavedArticleReader({
   article,
   savedOriginalUrl,
 }: SavedArticleReaderProps) {
-  const paragraphs = article.body?.split("\n\n").filter(Boolean) ?? [];
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
 
   const wrap: CSSProperties = {
@@ -68,21 +68,11 @@ export function SavedArticleReader({
         </div>
       </header>
 
-      <div
-        style={{
-          fontFamily: "'IM Fell English', Georgia, serif",
-          fontSize: "1.02rem",
-          lineHeight: 1.65,
-          color: "#1a1a1a",
-          textAlign: "justify",
-        }}
-      >
-        {paragraphs.map((p, i) => (
-          <p key={i} style={{ margin: "0 0 1rem" }}>
-            {p}
-          </p>
-        ))}
-      </div>
+      <ArticleBodyMarkdown
+        markdown={article.body ?? ""}
+        variant="reader"
+        fontPreset="literary"
+      />
 
       {article.pullQuote?.trim() ? (
         <blockquote

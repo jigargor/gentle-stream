@@ -23,6 +23,7 @@ import {
   uniqueSourceUrls,
 } from "@/lib/source-links";
 import { trackArticleEngagement } from "@/lib/engagement/client";
+import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
@@ -141,7 +142,6 @@ export default function ArticleCard({
   const accentColor =
     CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
     "#1a1a1a";
-  const paragraphs = article.body?.split("\n\n").filter(Boolean) || [];
 
   const isHero = layout === "hero";
   const isWide = layout === "wide";
@@ -874,61 +874,29 @@ export default function ArticleCard({
           columnRule: "1px solid #d4cfc4",
         }}
       >
-        {paragraphs.map((para, i) => (
-          <div key={i}>
-            {/* Pull quote between paragraphs 1 and 2 */}
-            {article.pullQuote && i === 1 && (
-              <blockquote
-                style={{
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontStyle: "italic",
-                  fontSize: "1.02rem",
-                  fontWeight: 600,
-                  color: accentColor,
-                  borderTop: `2px solid ${accentColor}`,
-                  borderBottom: `2px solid ${accentColor}`,
-                  padding: "0.55rem 0.5rem",
-                  margin: "0.6rem 0",
-                  lineHeight: 1.42,
-                  breakInside: "avoid",
-                  columnSpan: isHero ? "all" : "none",
-                }}
-              >
-                &ldquo;{article.pullQuote}&rdquo;
-              </blockquote>
-            )}
-            <p
-              className="newspaper-body"
-              style={{
-                fontFamily: "Georgia, 'Times New Roman', serif",
-                fontSize: isHero ? "0.91rem" : "0.84rem",
-                lineHeight: 1.66,
-                color: "#222",
-                margin: "0 0 0.55rem 0",
-              }}
-            >
-              {/* Drop cap on first letter of first paragraph */}
-              {i === 0 && (
-                <span
-                  style={{
-                    float: "left",
-                    fontSize: "3.3em",
-                    lineHeight: 0.78,
-                    fontFamily: "'Playfair Display', Georgia, serif",
-                    fontWeight: 700,
-                    marginRight: "0.08em",
-                    marginTop: "0.08em",
-                    color: accentColor,
-                  }}
-                >
-                  {para[0]}
-                </span>
-              )}
-              {i === 0 ? para.slice(1) : para}
-            </p>
-          </div>
-        ))}
+        <ArticleBodyMarkdown markdown={article.body ?? ""} variant="feed" fontPreset="classic" />
       </div>
+
+      {article.pullQuote?.trim() ? (
+        <blockquote
+          style={{
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontStyle: "italic",
+            fontSize: "1.02rem",
+            fontWeight: 600,
+            color: accentColor,
+            borderTop: `2px solid ${accentColor}`,
+            borderBottom: `2px solid ${accentColor}`,
+            padding: "0.55rem 0.5rem",
+            margin: "0.6rem 0",
+            lineHeight: 1.42,
+            breakInside: "avoid",
+            columnSpan: isHero ? "all" : "none",
+          }}
+        >
+          &ldquo;{article.pullQuote}&rdquo;
+        </blockquote>
+      ) : null}
 
       {sourceUrls.length > 0 && (
         <footer

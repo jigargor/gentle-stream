@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
 import type { ArticleSubmission } from "@/lib/types";
+import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
 interface FormState {
   headline: string;
@@ -24,6 +25,8 @@ const EMPTY_FORM: FormState = {
   explicitHashtags: "",
 };
 
+const MAX_SUBMISSION_BODY_CHARS = 15_000;
+
 export function CreatorDashboard() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [submissions, setSubmissions] = useState<ArticleSubmission[]>([]);
@@ -31,11 +34,40 @@ export function CreatorDashboard() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [bodyEditorTab, setBodyEditorTab] = useState<"write" | "preview">("write");
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const bodyCharacterCount = form.body.length;
+  const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
 
   const canSubmit = useMemo(
-    () => form.headline.trim().length > 0 && form.body.trim().length > 0,
-    [form.body, form.headline]
+    () =>
+      form.headline.trim().length > 0 &&
+      form.body.trim().length > 0 &&
+      !isBodyTooLong,
+    [form.body, form.headline, isBodyTooLong]
   );
+
+  function insertMarkdown(before: string, after = "", placeholder = "text") {
+    const textarea = bodyTextareaRef.current;
+    if (!textarea) {
+      setForm((prev) => ({ ...prev, body: `${prev.body}${before}${placeholder}${after}` }));
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = form.body.slice(start, end);
+    const insertion = `${before}${selectedText || placeholder}${after}`;
+    const nextBody = `${form.body.slice(0, start)}${insertion}${form.body.slice(end)}`;
+
+    setForm((prev) => ({ ...prev, body: nextBody }));
+    const cursorStart = start + before.length;
+    const cursorEnd = cursorStart + (selectedText || placeholder).length;
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(cursorStart, cursorEnd);
+    });
+  }
 
   async function loadSubmissions() {
     setLoading(true);
@@ -103,6 +135,7 @@ export function CreatorDashboard() {
 
   function beginEdit(submission: ArticleSubmission) {
     setEditingId(submission.id);
+    setBodyEditorTab("write");
     setForm({
       headline: submission.headline,
       subheadline: submission.subheadline,
@@ -162,7 +195,100 @@ export function CreatorDashboard() {
                 </option>
               ))}
             </select>
-            <textarea value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} placeholder="Article body" style={{ minHeight: "180px", padding: "0.45rem", border: "1px solid #bbb" }} />
+            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.6rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>Article body (Markdown)</label>
+                <span style={{ fontSize: "0.78rem", color: isBodyTooLong ? "#8b4513" : "#666" }}>
+                  {bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+                <button type="button" onClick={() => insertMarkdown("**", "**", "bold")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Bold
+                </button>
+                <button type="button" onClick={() => insertMarkdown("_", "_", "italic")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Italic
+                </button>
+                <button type="button" onClick={() => insertMarkdown("## ", "", "Section title")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Heading
+                </button>
+                <button type="button" onClick={() => insertMarkdown("> ", "", "Quote")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Quote
+                </button>
+                <button type="button" onClick={() => insertMarkdown("- ", "", "List item")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Bullet list
+                </button>
+                <button type="button" onClick={() => insertMarkdown("[", "](https://example.com)", "Link text")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Link
+                </button>
+                <button type="button" onClick={() => insertMarkdown("\n\n---\n\n", "", "")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
+                  Section break
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.5rem", marginBottom: "0.5rem" }}>
+                <button
+                  type="button"
+                  onClick={() => setBodyEditorTab("write")}
+                  style={{
+                    padding: "0.25rem 0.55rem",
+                    border: bodyEditorTab === "write" ? "1px solid #1a472a" : "1px solid #bbb",
+                    background: bodyEditorTab === "write" ? "#eaf4ed" : "#fff",
+                    cursor: "pointer",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Write
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBodyEditorTab("preview")}
+                  style={{
+                    padding: "0.25rem 0.55rem",
+                    border: bodyEditorTab === "preview" ? "1px solid #1a472a" : "1px solid #bbb",
+                    background: bodyEditorTab === "preview" ? "#eaf4ed" : "#fff",
+                    cursor: "pointer",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Preview
+                </button>
+              </div>
+
+              {bodyEditorTab === "write" ? (
+                <textarea
+                  ref={bodyTextareaRef}
+                  value={form.body}
+                  onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                  placeholder={"Write in Markdown...\n\n## Section heading\n\nParagraph text with **bold** and _italic_.\n\n> Pull quote or emphasis.\n\n---\n\nNext section..."}
+                  style={{ minHeight: "220px", width: "100%", padding: "0.55rem", border: "1px solid #bbb", resize: "vertical" }}
+                />
+              ) : (
+                <div style={{ minHeight: "220px", border: "1px solid #bbb", padding: "0.6rem", background: "#faf8f3" }}>
+                  <ArticleBodyMarkdown
+                    markdown={form.body.trim() ? form.body : "*Preview appears here as you write.*"}
+                    variant="reader"
+                    fontPreset="literary"
+                  />
+                </div>
+              )}
+
+              <details style={{ marginTop: "0.55rem" }}>
+                <summary style={{ cursor: "pointer", color: "#555", fontSize: "0.8rem" }}>
+                  Markdown quick guide
+                </summary>
+                <div style={{ fontSize: "0.78rem", color: "#666", lineHeight: 1.55, marginTop: "0.4rem" }}>
+                  <div><strong>Bold:</strong> <code>**text**</code> &nbsp; <strong>Italic:</strong> <code>_text_</code></div>
+                  <div><strong>Heading:</strong> <code>## Title</code> &nbsp; <strong>Quote:</strong> <code>&gt; line</code></div>
+                  <div><strong>List:</strong> <code>- item</code> &nbsp; <strong>Link:</strong> <code>[label](https://...)</code></div>
+                  <div><strong>Section/Page break:</strong> <code>---</code> on its own line</div>
+                </div>
+              </details>
+              <p style={{ margin: "0.45rem 0 0", fontSize: "0.76rem", color: "#666" }}>
+                Typography is handled with curated reading presets in the app for consistency and safety.
+              </p>
+            </div>
             <input value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
             <input value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
             <input value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />

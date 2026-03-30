@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ArticleSubmission } from "@/lib/types";
+import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
 type AdminFilter = "pending" | "approved" | "rejected" | "withdrawn" | "all";
 
@@ -120,9 +121,19 @@ export function AdminSubmissionsPanel() {
                       Explicit tags: {submission.explicitHashtags.join(", ")}
                     </p>
                   ) : null}
-                  <p style={{ margin: "0.55rem 0 0", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                    {submission.body}
-                  </p>
+                  <div
+                    style={{
+                      marginTop: "0.55rem",
+                      borderTop: "1px solid #ece7db",
+                      paddingTop: "0.55rem",
+                    }}
+                  >
+                    <ArticleBodyMarkdown
+                      markdown={submission.body}
+                      variant="admin"
+                      fontPreset="classic"
+                    />
+                  </div>
 
                   {submission.status === "pending" ? (
                     <div style={{ marginTop: "0.7rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>

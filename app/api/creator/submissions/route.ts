@@ -76,10 +76,18 @@ export async function POST(request: NextRequest) {
     locale?: unknown;
     explicitHashtags?: unknown;
   };
+  const rawArticleBody =
+    typeof body.body === "string" ? body.body.trim() : "";
+  if (rawArticleBody.length > 15_000) {
+    return NextResponse.json(
+      { error: "body must be 15,000 characters or fewer." },
+      { status: 400 }
+    );
+  }
 
   const headline = toSafeText(body.headline, 180);
   const subheadline = toSafeText(body.subheadline, 220);
-  const articleBody = toSafeText(body.body, 15000);
+  const articleBody = rawArticleBody;
   const pullQuote = toSafeText(body.pullQuote, 400);
   const locale = toSafeText(body.locale, 64) || "global";
   const categoryRaw = toSafeText(body.category, 80);

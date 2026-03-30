@@ -16,8 +16,9 @@ function toSafeText(value: unknown, maxLen: number): string | undefined {
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const params = await context.params;
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -48,7 +49,7 @@ export async function PATCH(
   }
 
   const updates: Parameters<typeof updateSubmissionForAuthor>[0] = {
-    id: context.params.id,
+    id: params.id,
     authorUserId: userId,
   };
   const headline = toSafeText(body.headline, 180);

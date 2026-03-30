@@ -20,13 +20,15 @@ export function createClient() {
 
   return createServerClient(url, key, {
     cookies: {
-      getAll() {
-        return cookieStore.getAll();
+      async getAll() {
+        const store = await cookieStore;
+        return store.getAll();
       },
-      setAll(cookiesToSet) {
+      async setAll(cookiesToSet) {
         try {
+          const store = await cookieStore;
           cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
+            store.set(name, value, options)
           );
         } catch {
           // Called from a Server Component without mutable cookies; middleware refreshes session.

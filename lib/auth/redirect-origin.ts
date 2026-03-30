@@ -13,8 +13,8 @@ import { headers } from "next/headers";
  * 4. `NEXT_PUBLIC_SITE_URL` → deployed canonical URL
  * 5. Infer from host + `X-Forwarded-Proto` / Vercel
  */
-export function getAuthRedirectBaseFromRequest(): string {
-  const h = headers();
+export async function getAuthRedirectBaseFromRequest(): Promise<string> {
+  const h = await headers();
   const raw =
     (h.get("x-forwarded-host") ?? h.get("host") ?? "").trim() || "";
   const firstHost = raw.split(",")[0].trim();

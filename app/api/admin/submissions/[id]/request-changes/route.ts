@@ -5,8 +5,9 @@ import { reviewSubmission } from "@/lib/db/creator";
 
 export async function POST(
   request: NextRequest,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const params = await context.params;
   const supabase = createClient();
   const {
     data: { user },
@@ -28,7 +29,7 @@ export async function POST(
 
   try {
     const reviewed = await reviewSubmission({
-      submissionId: context.params.id,
+      submissionId: params.id,
       reviewerUserId: user.id,
       action: "request_changes",
       adminNote,

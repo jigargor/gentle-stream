@@ -15,13 +15,13 @@ function firstParam(
  * Reads `searchParams` on the server so the client bundle does not need
  * `useSearchParams` (avoids fragile Suspense/async chunks in Next dev on Windows).
  */
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Record<string, string | string[] | undefined>;
 }) {
   const errorParam = firstParam(searchParams.error) ?? null;
-  const authRedirectBase = getAuthRedirectBaseFromRequest();
+  const authRedirectBase = await getAuthRedirectBaseFromRequest();
 
   return (
     <LoginForm

@@ -187,6 +187,16 @@ export default function GameSlot({
   useEffect(() => {
     let cancelled = false;
 
+    // Feed rows keep stable keys like `game-0` across category changes, so React reuses
+    // this instance. Clear puzzle immediately so we never render the previous game's
+    // shape as the new type (e.g. word search → nonogram) while fetch is in flight.
+    setPuzzle(null);
+    setError(null);
+    setHasNoUniqueAvailable(false);
+    setSudokuCloud(null);
+    setWordCloud(null);
+    setLoading(true);
+
     async function bootstrap() {
       const useCloud = persistCloud && !embedded;
       // Embedded hero/sidebar games: skip user APIs — they blocked puzzle load and only
@@ -249,7 +259,6 @@ export default function GameSlot({
       }
 
       if (cancelled) return;
-      setLoading(true);
       try {
         const url = puzzleEndpoint(
           gameType,

@@ -116,14 +116,22 @@ export function CreatorOnboardingForm({
   const [timezone, setTimezone] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [guidelinesAccepted, setGuidelinesAccepted] = useState(false);
+  const [consentOptIn, setConsentOptIn] = useState(false);
+  const [consentProof, setConsentProof] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const canSubmit = useMemo(() => {
-    return isPhoneVerified && penName.trim().length > 0 && guidelinesAccepted;
-  }, [guidelinesAccepted, isPhoneVerified, penName]);
+    return (
+      isPhoneVerified &&
+      penName.trim().length > 0 &&
+      guidelinesAccepted &&
+      consentOptIn &&
+      consentProof.trim().length > 0
+    );
+  }, [consentOptIn, consentProof, guidelinesAccepted, isPhoneVerified, penName]);
 
-  async function sendPhoneOtp() {
+  async function sendPhoneOtp(isResend = false) {
     setMessage(null);
     const normalized = normalizePhoneE164(phone);
     if (!normalized.ok) {
@@ -145,6 +153,7 @@ export function CreatorOnboardingForm({
       setPhone(formatPhoneInput(normalized.e164));
       setOtpSent(true);
       setOtpToken("");
+      if (isResend) setMessage("A new OTP has been sent.");
     } finally {
       setPhoneBusy(false);
     }
@@ -208,6 +217,8 @@ export function CreatorOnboardingForm({
           locale,
           timezone,
           guidelinesAccepted,
+          consentOptIn,
+          consentProof,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
@@ -273,7 +284,7 @@ export function CreatorOnboardingForm({
                 </p>
                 <button
                   type="button"
-                  onClick={sendPhoneOtp}
+                  onClick={() => void sendPhoneOtp()}
                   disabled={phoneBusy}
                   style={{
                     padding: "0.45rem",
@@ -318,6 +329,25 @@ export function CreatorOnboardingForm({
                   }}
                 >
                   Use a different number
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sendPhoneOtp(true)}
+                  disabled={phoneBusy}
+                  style={{
+                    justifySelf: "start",
+                    padding: "0.2rem 0",
+                    border: "none",
+                    background: "none",
+                    color: "#1a472a",
+                    cursor: phoneBusy ? "not-allowed" : "pointer",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontSize: "0.8rem",
+                    textDecoration: "underline",
+                    textUnderlineOffset: "2px",
+                  }}
+                >
+                  {phoneBusy ? "Resending..." : "Resend code"}
                 </button>
                 <input
                   value={otpToken}
@@ -411,6 +441,20 @@ export function CreatorOnboardingForm({
               />
               I agree to submit original, respectful, and factual writing.
             </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
+              <input
+                type="checkbox"
+                checked={consentOptIn}
+                onChange={(e) => setConsentOptIn(e.target.checked)}
+              />
+              Proof of consent (opt-in) collected.
+            </label>
+            <textarea
+              value={consentProof}
+              onChange={(e) => setConsentProof(e.target.value)}
+              placeholder="Proof of consent (required): URL, form/version id, or internal audit reference"
+              style={{ minHeight: "70px", padding: "0.45rem", border: "1px solid #bbb" }}
+            />
           </div>
         </section>
         ) : null}

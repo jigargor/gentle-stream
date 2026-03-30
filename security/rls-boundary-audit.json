@@ -1,0 +1,137 @@
+{
+  "generatedAt": "2026-03-30T05:15:46.299Z",
+  "summary": {
+    "totalTables": 14,
+    "tablesWithRlsEnabled": 6,
+    "tablesWithPolicies": 6,
+    "serviceRoleRouteCount": 9
+  },
+  "tableRlsStatus": [
+    {
+      "table": "article_engagement_events",
+      "rlsEnabled": true,
+      "policyCount": 2
+    },
+    {
+      "table": "article_likes",
+      "rlsEnabled": true,
+      "policyCount": 2
+    },
+    {
+      "table": "article_saves",
+      "rlsEnabled": true,
+      "policyCount": 2
+    },
+    {
+      "table": "article_submissions",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "creator_profiles",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "cron_ingest_category_runs",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "cron_ingest_runs",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "game_completions",
+      "rlsEnabled": true,
+      "policyCount": 2
+    },
+    {
+      "table": "game_flavor_defaults",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "game_saves",
+      "rlsEnabled": true,
+      "policyCount": 2
+    },
+    {
+      "table": "game_word_pool",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "games",
+      "rlsEnabled": false,
+      "policyCount": 0
+    },
+    {
+      "table": "user_article_affinity",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "user_word_search_exposure",
+      "rlsEnabled": false,
+      "policyCount": 0
+    }
+  ],
+  "serviceRoleRouteUsage": [
+    {
+      "route": "/api/admin/cron/ingest-logs",
+      "authSignals": [
+        "cron_secret"
+      ]
+    },
+    {
+      "route": "/api/cron/engagement-health",
+      "authSignals": [
+        "cron_secret"
+      ]
+    },
+    {
+      "route": "/api/user/article-engagement",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/article-likes",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/article-saves",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/avatar",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/connections-daily",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/game-completion",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
+      "route": "/api/user/game-save",
+      "authSignals": [
+        "session_user"
+      ]
+    }
+  ]
+}

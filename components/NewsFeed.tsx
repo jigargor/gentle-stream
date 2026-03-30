@@ -78,7 +78,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const connectionsCompletedTodayRef = useRef(false);
   const connectionsShownInSessionRef = useRef(false);
   const activeCategoryRef = useRef<Category | null>(null);
-  const userIdRef = useRef<string>("anonymous");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
@@ -146,7 +145,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     // ── Article section ──────────────────────────────────────────────────────
     try {
       const params = new URLSearchParams();
-      params.set("userId", userIdRef.current);
       params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
       const excludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
@@ -245,7 +243,6 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
-    userIdRef.current = userId;
     feedReadyRef.current = false;
     setIsFeedReady(false);
 

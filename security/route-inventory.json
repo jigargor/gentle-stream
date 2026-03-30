@@ -1,0 +1,332 @@
+{
+  "generatedAt": "2026-03-30T05:15:45.326Z",
+  "totalRoutes": 32,
+  "items": [
+    {
+      "route": "/api/admin/cron/ingest-logs",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "cron_secret",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/admin/submissions/[id]/approve",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "admin_guard",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/submissions/[id]/reject",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "admin_guard",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/submissions/[id]/request-changes",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "admin_guard",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/admin/submissions",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "admin_guard",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/auth/email-link",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/onboarding",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/submissions/[id]",
+      "methods": [
+        "PATCH"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/creator/submissions",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/cron/cleanup",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "cron_secret",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/cron/engagement-health",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "cron_secret",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/cron/games",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/cron/scheduler",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "cron_secret",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/cron/tagger",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "cron_secret",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/feed",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "public-expensive-ingest-path"
+      ]
+    },
+    {
+      "route": "/api/game/connections",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/game/crossword",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/game/killer-sudoku",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/game/nonogram",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/game/sudoku",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/game/word-search",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/news",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/article-engagement",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/article-likes",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/article-saves",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/avatar",
+      "methods": [
+        "POST",
+        "DELETE"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/connections-daily",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/game-completion",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/game-save",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/game-stats",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/user/preferences",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/user/profile",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    }
+  ]
+}

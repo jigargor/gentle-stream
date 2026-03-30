@@ -64,6 +64,8 @@ export async function POST(request: NextRequest) {
     locale?: unknown;
     timezone?: unknown;
     guidelinesAccepted?: unknown;
+    consentOptIn?: unknown;
+    consentProof?: unknown;
   };
 
   const penNameRaw = cleanNullableString(body.penName, 80);
@@ -82,15 +84,30 @@ export async function POST(request: NextRequest) {
   const locale = cleanNullableString(body.locale, 64);
   const timezone = cleanNullableString(body.timezone, 64);
   const guidelinesAccepted = body.guidelinesAccepted === true;
+  const consentOptIn = body.consentOptIn === true;
+  const consentProof = cleanNullableString(body.consentProof, 500);
   if (!guidelinesAccepted) {
     return NextResponse.json(
       { error: "You must acknowledge the creator content guidelines." },
       { status: 400 }
     );
   }
+  if (!consentOptIn) {
+    return NextResponse.json(
+      { error: "You must confirm consent opt-in is collected." },
+      { status: 400 }
+    );
+  }
+  if (!consentProof) {
+    return NextResponse.json(
+      { error: "Provide proof of consent (link, source, or policy reference)." },
+      { status: 400 }
+    );
+  }
 
   await getOrCreateUserProfile(user.id);
   await promoteUserToCreator(user.id);
+  const now = new Date().toISOString();
   const creatorProfile = await upsertCreatorProfile({
     userId: user.id,
     penName: penNameRaw,
@@ -99,8 +116,11 @@ export async function POST(request: NextRequest) {
     websiteUrl,
     locale,
     timezone,
-    guidelinesAcknowledgedAt: new Date().toISOString(),
-    onboardingCompletedAt: new Date().toISOString(),
+    guidelinesAcknowledgedAt: now,
+    consentOptIn: true,
+    consentProof,
+    consentOptInAt: now,
+    onboardingCompletedAt: now,
   });
 
   return NextResponse.json({ creatorProfile, userRole: "creator" as const });

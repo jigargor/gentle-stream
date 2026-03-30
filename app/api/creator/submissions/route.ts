@@ -8,6 +8,12 @@ import {
   getCreatorProfile,
   listSubmissionsByAuthor,
 } from "@/lib/db/creator";
+import {
+  buildRateLimitKey,
+  consumeRateLimit,
+  rateLimitExceededResponse,
+} from "@/lib/security/rateLimit";
+import { hasTrustedOrigin } from "@/lib/security/origin";
 
 const DAILY_SUBMISSION_LIMIT = 10;
 
@@ -36,10 +42,24 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!hasTrustedOrigin(request)) {
+    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  }
+
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const rateLimit = consumeRateLimit({
+    policy: { id: "creator-submission", windowMs: 60 * 60 * 1000, max: 25 },
+    key: buildRateLimitKey({
+      request,
+      userId,
+      routeId: "api-creator-submissions",
+    }),
+  });
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
 
   const profile = await getOrCreateUserProfile(userId);
   if (profile.userRole !== "creator") {

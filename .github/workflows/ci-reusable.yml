@@ -33,6 +33,10 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
+      - run: npm run security:inventory
+      - run: npm run security:rls-audit
+      - run: npm run security:audit
+        continue-on-error: true
       - run: npx tsc --noEmit
       - run: npm run build
         env:

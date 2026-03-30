@@ -7,7 +7,6 @@
  * immediately so the client never blocks on a multi-minute synchronous ingest.
  *
  * Query params:
- *   userId       string  — required for personalisation
  *   category     string  — optional; omit to let the ranker pick
  *   sectionIndex number  — position in the infinite scroll feed
  *   pageSize     number  — articles per section (default 3)
@@ -19,6 +18,12 @@ import type { Category } from "@/lib/constants";
 import { getRankedFeed } from "@/lib/agents/rankerAgent";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
 import { runTaggerAgent } from "@/lib/agents/taggerAgent";
+import { getSessionUserId } from "@/lib/api/sessionUser";
+import {
+  buildRateLimitKey,
+  consumeRateLimit,
+  rateLimitExceededResponse,
+} from "@/lib/security/rateLimit";
 
 const ANONYMOUS_USER_ID = "anonymous";
 
@@ -30,7 +35,25 @@ function isDevLight(): boolean {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
-  const userId = searchParams.get("userId") || ANONYMOUS_USER_ID;
+  const sessionUserId = process.env.AUTH_DISABLED === "1" ? null : await getSessionUserId();
+  const userId =
+    process.env.AUTH_DISABLED === "1"
+      ? process.env.DEV_USER_ID ?? "dev-local"
+      : sessionUserId || ANONYMOUS_USER_ID;
+
+  const rateLimit = consumeRateLimit({
+    policy:
+      userId === ANONYMOUS_USER_ID
+        ? { id: "feed-anon", windowMs: 60_000, max: 45 }
+        : { id: "feed-auth", windowMs: 60_000, max: 180 },
+    key: buildRateLimitKey({
+      request,
+      userId: userId === ANONYMOUS_USER_ID ? null : userId,
+      routeId: "api-feed",
+    }),
+  });
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+
   const categoryParam = searchParams.get("category");
   const sectionIndex = parseInt(searchParams.get("sectionIndex") || "0", 10);
   const pageSize = parseInt(searchParams.get("pageSize") || "3", 10);
@@ -103,7 +126,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error("[/api/feed] Error:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Could not load feed right now." },
+      { status: 500 }
+    );
   }
 }

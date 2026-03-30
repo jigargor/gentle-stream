@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchUpliftingNews } from "@/lib/fetchNews";
 import { CATEGORIES } from "@/lib/constants";
+import {
+  buildRateLimitKey,
+  consumeRateLimit,
+  rateLimitExceededResponse,
+} from "@/lib/security/rateLimit";
 
 export async function GET(request: NextRequest) {
+  const rateLimit = consumeRateLimit({
+    policy: { id: "news-public", windowMs: 60_000, max: 24 },
+    key: buildRateLimitKey({ request, routeId: "api-news" }),
+  });
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+
   const { searchParams } = new URL(request.url);
 
   const category = searchParams.get("category") || null;
@@ -20,8 +31,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ articles, category: resolvedCategory });
   } catch (error: unknown) {
     console.error("[/api/news] Error:", error);
-    const message =
-      error instanceof Error ? error.message : "Unknown error occurred";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Could not fetch news right now." },
+      { status: 500 }
+    );
   }
 }

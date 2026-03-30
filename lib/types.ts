@@ -79,6 +79,9 @@ export interface CreatorProfile {
   locale: string | null;
   timezone: string | null;
   guidelinesAcknowledgedAt: string | null;
+  consentOptIn: boolean;
+  consentProof: string | null;
+  consentOptInAt: string | null;
   onboardingCompletedAt: string | null;
   createdAt: string;
   updatedAt: string;

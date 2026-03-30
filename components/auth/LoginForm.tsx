@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
 import type { Provider } from "@supabase/supabase-js";
+import Script from "next/script";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -63,6 +64,11 @@ export function LoginForm({
   const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? "";
+  const turnstileEnabled =
+    process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "1" ||
+    process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "true";
+  const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
 
   /**
    * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
@@ -120,15 +126,22 @@ export function LoginForm({
         );
         return;
       }
-      const supabase = createClient();
-      await supabase.auth.signOut({ scope: "local" });
+      const formData = new FormData(e.currentTarget as HTMLFormElement);
+      const turnstileToken =
+        (formData.get("cf-turnstile-response") as string | null)?.trim() ?? "";
       const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: { emailRedirectTo: redirectTo },
+      const res = await fetch("/api/auth/email-link", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          redirectTo,
+          turnstileToken,
+        }),
       });
-      if (error) {
-        setMessage(error.message);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage(body.error ?? "Could not send sign-in link.");
         return;
       }
       setEmailSent(true);
@@ -363,6 +376,21 @@ export function LoginForm({
             >
               {emailBusy ? "Sending…" : "Email me a sign-in link"}
             </button>
+            {turnstileEnabled && turnstileSiteKey ? (
+              <>
+                <Script
+                  src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+                  async
+                  defer
+                />
+                <div
+                  className="cf-turnstile"
+                  data-sitekey={turnstileSiteKey}
+                  data-theme="light"
+                  style={{ marginTop: "0.85rem" }}
+                />
+              </>
+            ) : null}
           </form>
         )}
 
@@ -409,16 +437,22 @@ export function LoginForm({
               lineHeight: 1.55,
             }}
           >
-            <a
-              href={`/login?next=${encodeURIComponent("/creator/onboarding")}`}
+            <button
+              type="button"
+              onClick={() => setShowCreatorOnboardingNotice(true)}
               style={{
+                border: "none",
+                background: "transparent",
+                padding: 0,
                 color: "#1a472a",
                 textDecoration: "underline",
                 textUnderlineOffset: "3px",
+                cursor: "pointer",
+                font: "inherit",
               }}
             >
               Sign up & onboarding
-            </a>
+            </button>
             <span style={{ color: "#bbb", margin: "0 0.35rem" }} aria-hidden>
               ·
             </span>
@@ -468,6 +502,81 @@ export function LoginForm({
           </a>
         </p>
       </div>
+      {showCreatorOnboardingNotice && (
+        <div
+          role="presentation"
+          onClick={() => setShowCreatorOnboardingNotice(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+            zIndex: 60,
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="creator-onboarding-notice-title"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              background: "#faf8f3",
+              borderTop: "3px double #1a1a1a",
+              borderBottom: "2px solid #1a1a1a",
+              boxShadow: "0 18px 45px rgba(0,0,0,0.2)",
+              padding: "1.35rem 1.25rem",
+            }}
+          >
+            <h2
+              id="creator-onboarding-notice-title"
+              style={{
+                margin: 0,
+                color: "#1a1a1a",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "1.1rem",
+              }}
+            >
+              Log in first
+            </h2>
+            <p
+              style={{
+                margin: "0.7rem 0 0",
+                color: "#555",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.92rem",
+                lineHeight: 1.5,
+              }}
+            >
+              Please log into your regular account first using Google, Facebook, or an email
+              sign-in link. After login, continue to creator onboarding from your account.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowCreatorOnboardingNotice(false)}
+              style={{
+                marginTop: "1rem",
+                width: "100%",
+                padding: "0.58rem 1rem",
+                border: "none",
+                background: "#1a1a1a",
+                color: "#faf8f3",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.78rem",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

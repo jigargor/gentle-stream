@@ -17,6 +17,9 @@ interface CreatorProfileRow {
   locale: string | null;
   timezone: string | null;
   guidelines_acknowledged_at: string | null;
+  consent_opt_in: boolean | null;
+  consent_proof: string | null;
+  consent_opt_in_at: string | null;
   onboarding_completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -70,6 +73,9 @@ function rowToCreatorProfile(row: CreatorProfileRow): CreatorProfile {
     locale: row.locale,
     timezone: row.timezone,
     guidelinesAcknowledgedAt: row.guidelines_acknowledged_at,
+    consentOptIn: row.consent_opt_in === true,
+    consentProof: row.consent_proof,
+    consentOptInAt: row.consent_opt_in_at,
     onboardingCompletedAt: row.onboarding_completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -160,6 +166,9 @@ export async function upsertCreatorProfile(input: {
   locale: string | null;
   timezone: string | null;
   guidelinesAcknowledgedAt: string | null;
+  consentOptIn: boolean;
+  consentProof: string | null;
+  consentOptInAt: string | null;
   onboardingCompletedAt: string | null;
 }): Promise<CreatorProfile> {
   const row = {
@@ -171,6 +180,9 @@ export async function upsertCreatorProfile(input: {
     locale: input.locale,
     timezone: input.timezone,
     guidelines_acknowledged_at: input.guidelinesAcknowledgedAt,
+    consent_opt_in: input.consentOptIn,
+    consent_proof: input.consentProof,
+    consent_opt_in_at: input.consentOptInAt,
     onboarding_completed_at: input.onboardingCompletedAt,
   };
   const { data, error } = await db

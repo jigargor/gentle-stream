@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import NewsFeed from "@/components/NewsFeed";
 import { createClient } from "@/lib/supabase/server";
+import { isAdmin } from "@/lib/auth/admin";
 
 /** Session depends on cookies — do not statically prerender at build time. */
 export const dynamic = "force-dynamic";
@@ -22,5 +23,11 @@ export default async function Home() {
 
   if (!user) redirect("/login");
 
-  return <NewsFeed userId={user.id} userEmail={user.email} />;
+  return (
+    <NewsFeed
+      userId={user.id}
+      userEmail={user.email}
+      isAdmin={isAdmin({ userId: user.id, email: user.email ?? null })}
+    />
+  );
 }

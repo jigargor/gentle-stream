@@ -53,23 +53,32 @@ async function seedArticles() {
       ...base,
       headline: `TEST_RECO_E2E SCI TOP ${Date.now()}`,
       category: "Science & Discovery",
-      qualityScore: 0.7,
+      /** Engagement will be recorded on this row; boost must overcome Education below. */
+      qualityScore: 0.72,
     },
     {
       ...base,
       headline: `TEST_RECO_E2E EDU TOP ${Date.now()}`,
       category: "Education",
-      qualityScore: 0.92,
+      /** Higher base quality than Science before affinity; loses after Science affinity boost. */
+      qualityScore: 0.85,
     },
     {
       ...base,
       headline: `TEST_RECO_E2E SCI SECOND ${Date.now()}`,
       category: "Science & Discovery",
-      qualityScore: 0.68,
+      qualityScore: 0.65,
     },
   ]);
   insertedIds.push(...inserted.map((a) => a.id));
   assert(inserted.length === 3, "Inserted 3 fixture articles");
+
+  // insertArticles sets tagged=false (ingest default). Ranker only considers tagged rows.
+  const { error: tagErr } = await db
+    .from("articles")
+    .update({ tagged: true })
+    .in("id", insertedIds);
+  assert(!tagErr, "Tagged fixture articles for feed pool", tagErr?.message);
 }
 
 async function testBeforeAfterAffinityOrdering() {

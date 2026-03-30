@@ -104,6 +104,45 @@ export async function getOrCreateUserProfile(
   return rowToProfile(created as UserProfileRow);
 }
 
+export interface AuthorDisplayFields {
+  avatarUrl: string | null;
+  username: string | null;
+}
+
+/** Batch read avatar + @username for bylines (creator articles). */
+export async function getAuthorDisplayByUserIds(
+  userIds: string[]
+): Promise<Map<string, AuthorDisplayFields>> {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("user_id, avatar_url, username")
+    .in("user_id", unique);
+  if (error) throw new Error(`getAuthorDisplayByUserIds: ${error.message}`);
+  const map = new Map<string, AuthorDisplayFields>();
+  for (const row of data ?? []) {
+    const r = row as { user_id: string; avatar_url: string | null; username: string | null };
+    const u = r.username?.trim();
+    map.set(r.user_id, {
+      avatarUrl: r.avatar_url ?? null,
+      username: u ? u.toLowerCase() : null,
+    });
+  }
+  return map;
+}
+
+/** Read-only profile lookup (no insert). Used for public creator pages. */
+export async function getUserProfileById(userId: string): Promise<UserProfile | null> {
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToProfile(data as UserProfileRow);
+}
+
 /**
  * Mark article IDs as seen for a user.
  * Keeps the seen list capped at 500 (oldest dropped first).

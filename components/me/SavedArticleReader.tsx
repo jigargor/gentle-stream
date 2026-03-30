@@ -1,11 +1,14 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import type { StoredArticle } from "@/lib/types";
+import { CATEGORY_COLORS } from "@/lib/constants";
 import {
   sourceLinkLabel,
   toClickableSourceUrl,
   uniqueSourceUrls,
 } from "@/lib/source-links";
+import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 
 interface SavedArticleReaderProps {
   article: StoredArticle;
@@ -17,8 +20,9 @@ export function SavedArticleReader({
   article,
   savedOriginalUrl,
 }: SavedArticleReaderProps) {
-  const paragraphs = article.body?.split("\n\n").filter(Boolean) ?? [];
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
+  const bylineAccent =
+    CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ?? "#1a472a";
 
   const wrap: CSSProperties = {
     maxWidth: "42rem",
@@ -63,26 +67,27 @@ export function SavedArticleReader({
             letterSpacing: "0.04em",
           }}
         >
-          <span style={{ fontWeight: 600, color: "#444" }}>{article.byline}</span>
+          <CreatorBylineLink
+            byline={article.byline}
+            authorUserId={article.authorUserId}
+            authorPenName={article.authorPenName}
+            authorAvatarUrl={article.authorAvatarUrl}
+            authorUsername={article.authorUsername}
+            linkToProfile={
+              article.source === "creator" && Boolean(article.authorUserId)
+            }
+            accentColor={bylineAccent}
+            variant="reader"
+          />
           {article.location ? <span> · {article.location}</span> : null}
         </div>
       </header>
 
-      <div
-        style={{
-          fontFamily: "'IM Fell English', Georgia, serif",
-          fontSize: "1.02rem",
-          lineHeight: 1.65,
-          color: "#1a1a1a",
-          textAlign: "justify",
-        }}
-      >
-        {paragraphs.map((p, i) => (
-          <p key={i} style={{ margin: "0 0 1rem" }}>
-            {p}
-          </p>
-        ))}
-      </div>
+      <ArticleBodyMarkdown
+        markdown={article.body ?? ""}
+        variant="reader"
+        fontPreset="literary"
+      />
 
       {article.pullQuote?.trim() ? (
         <blockquote

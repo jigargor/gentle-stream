@@ -22,13 +22,16 @@ import {
   toClickableSourceUrl,
   uniqueSourceUrls,
 } from "@/lib/source-links";
+import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { trackArticleEngagement } from "@/lib/engagement/client";
+import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
+let userApiAllowed = true;
 
 function BookmarkOutlineIcon() {
   return (
@@ -140,7 +143,6 @@ export default function ArticleCard({
   const accentColor =
     CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
     "#1a1a1a";
-  const paragraphs = article.body?.split("\n\n").filter(Boolean) || [];
 
   const isHero = layout === "hero";
   const isWide = layout === "wide";
@@ -260,6 +262,7 @@ export default function ArticleCard({
 
   const emitEngagement = useCallback(
     (eventType: "impression" | "open" | "read_30s" | "read_75pct", eventValue?: number) => {
+      if (!userApiAllowed) return;
       if (!articleId) return;
       trackArticleEngagement({
         articleId,
@@ -287,6 +290,12 @@ export default function ArticleCard({
   }, [articleId]);
 
   useEffect(() => {
+    if (!userApiAllowed) {
+      setShowLikeButton(false);
+      setLikeStatusLoaded(true);
+      setLiked(false);
+      return;
+    }
     if (!articleId) {
       setShowLikeButton(false);
       setLikeStatusLoaded(false);
@@ -303,7 +312,9 @@ export default function ArticleCard({
         );
         if (cancelled) return;
         if (res.status === 401) {
+          userApiAllowed = false;
           setShowLikeButton(false);
+          setLikeStatusLoaded(true);
           setLiked(false);
           return;
         }
@@ -402,6 +413,12 @@ export default function ArticleCard({
   }, [articleId, emitEngagement]);
 
   useEffect(() => {
+    if (!userApiAllowed) {
+      setSaved(false);
+      setSaveRowId(null);
+      setSaveStatusLoaded(true);
+      return;
+    }
     if (!articleId) {
       setSaved(false);
       setSaveRowId(null);
@@ -417,6 +434,13 @@ export default function ArticleCard({
           { credentials: "include" }
         );
         if (cancelled) return;
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setSaved(false);
+          setSaveRowId(null);
+          setSaveStatusLoaded(true);
+          return;
+        }
         if (res.ok) {
           const j = (await res.json()) as {
             saved?: boolean;
@@ -443,7 +467,7 @@ export default function ArticleCard({
   }, [articleId]);
 
   const toggleLike = useCallback(async () => {
-    if (!articleId || likeBusy || !likeStatusLoaded) return;
+    if (!userApiAllowed || !articleId || likeBusy || !likeStatusLoaded) return;
     setLikeBusy(true);
     try {
       if (liked) {
@@ -451,6 +475,12 @@ export default function ArticleCard({
           `/api/user/article-likes?articleId=${encodeURIComponent(articleId)}`,
           { method: "DELETE", credentials: "include" }
         );
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowLikeButton(false);
+          setLiked(false);
+          return;
+        }
         if (res.ok) setLiked(false);
       } else {
         const res = await fetch("/api/user/article-likes", {
@@ -462,6 +492,12 @@ export default function ArticleCard({
             articleTitle: article.headline,
           }),
         });
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowLikeButton(false);
+          setLiked(false);
+          return;
+        }
         if (res.ok) setLiked(true);
       }
     } finally {
@@ -470,7 +506,14 @@ export default function ArticleCard({
   }, [articleId, article.headline, liked, likeBusy, likeStatusLoaded]);
 
   const toggleSave = useCallback(async () => {
-    if (!canSave || !("id" in article) || !article.id || saveBusy || !saveStatusLoaded) {
+    if (
+      !userApiAllowed ||
+      !canSave ||
+      !("id" in article) ||
+      !article.id ||
+      saveBusy ||
+      !saveStatusLoaded
+    ) {
       return;
     }
     setSaveBusy(true);
@@ -481,6 +524,13 @@ export default function ArticleCard({
           `/api/user/article-saves?id=${encodeURIComponent(saveRowId)}`,
           { method: "DELETE", credentials: "include" }
         );
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setSaved(false);
+          setSaveRowId(null);
+          setSaveMsg("Sign in to manage saved articles.");
+          return;
+        }
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as {
             error?: string;
@@ -515,6 +565,13 @@ export default function ArticleCard({
             undefined,
         }),
       });
+      if (res.status === 401) {
+        userApiAllowed = false;
+        setSaved(false);
+        setSaveRowId(null);
+        setSaveMsg("Sign in to save articles.");
+        return;
+      }
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as {
           error?: string;
@@ -652,7 +709,26 @@ export default function ArticleCard({
           letterSpacing: "0.04em",
         }}
       >
-        <span style={{ fontWeight: 600, color: "#555" }}>{article.byline}</span>
+        <CreatorBylineLink
+          byline={article.byline}
+          authorUserId={"authorUserId" in article ? article.authorUserId : null}
+          authorPenName={
+            "authorPenName" in article ? article.authorPenName : null
+          }
+          authorAvatarUrl={
+            "authorAvatarUrl" in article ? article.authorAvatarUrl : null
+          }
+          authorUsername={
+            "authorUsername" in article ? article.authorUsername : null
+          }
+          linkToProfile={
+            "source" in article &&
+            article.source === "creator" &&
+            Boolean("authorUserId" in article && article.authorUserId)
+          }
+          accentColor={accentColor}
+          variant="feed"
+        />
         {article.location && <span>&middot; {article.location}</span>}
       </div>
 
@@ -818,61 +894,29 @@ export default function ArticleCard({
           columnRule: "1px solid #d4cfc4",
         }}
       >
-        {paragraphs.map((para, i) => (
-          <div key={i}>
-            {/* Pull quote between paragraphs 1 and 2 */}
-            {article.pullQuote && i === 1 && (
-              <blockquote
-                style={{
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontStyle: "italic",
-                  fontSize: "1.02rem",
-                  fontWeight: 600,
-                  color: accentColor,
-                  borderTop: `2px solid ${accentColor}`,
-                  borderBottom: `2px solid ${accentColor}`,
-                  padding: "0.55rem 0.5rem",
-                  margin: "0.6rem 0",
-                  lineHeight: 1.42,
-                  breakInside: "avoid",
-                  columnSpan: isHero ? "all" : "none",
-                }}
-              >
-                &ldquo;{article.pullQuote}&rdquo;
-              </blockquote>
-            )}
-            <p
-              className="newspaper-body"
-              style={{
-                fontFamily: "Georgia, 'Times New Roman', serif",
-                fontSize: isHero ? "0.91rem" : "0.84rem",
-                lineHeight: 1.66,
-                color: "#222",
-                margin: "0 0 0.55rem 0",
-              }}
-            >
-              {/* Drop cap on first letter of first paragraph */}
-              {i === 0 && (
-                <span
-                  style={{
-                    float: "left",
-                    fontSize: "3.3em",
-                    lineHeight: 0.78,
-                    fontFamily: "'Playfair Display', Georgia, serif",
-                    fontWeight: 700,
-                    marginRight: "0.08em",
-                    marginTop: "0.08em",
-                    color: accentColor,
-                  }}
-                >
-                  {para[0]}
-                </span>
-              )}
-              {i === 0 ? para.slice(1) : para}
-            </p>
-          </div>
-        ))}
+        <ArticleBodyMarkdown markdown={article.body ?? ""} variant="feed" fontPreset="classic" />
       </div>
+
+      {article.pullQuote?.trim() ? (
+        <blockquote
+          style={{
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontStyle: "italic",
+            fontSize: "1.02rem",
+            fontWeight: 600,
+            color: accentColor,
+            borderTop: `2px solid ${accentColor}`,
+            borderBottom: `2px solid ${accentColor}`,
+            padding: "0.55rem 0.5rem",
+            margin: "0.6rem 0",
+            lineHeight: 1.42,
+            breakInside: "avoid",
+            columnSpan: isHero ? "all" : "none",
+          }}
+        >
+          &ldquo;{article.pullQuote}&rdquo;
+        </blockquote>
+      ) : null}
 
       {sourceUrls.length > 0 && (
         <footer

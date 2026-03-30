@@ -1,4 +1,6 @@
 import { db } from "./client";
+import { getCreatorPenNamesByUserIds } from "./creator";
+import { getAuthorDisplayByUserIds } from "./users";
 import type { StoredArticle } from "../types";
 import type { Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
@@ -28,6 +30,68 @@ interface ArticleRow {
   tagged: boolean;
   fingerprint: string;
   source_urls: string[];
+  source?: string;
+  author_user_id?: string | null;
+  submission_id?: string | null;
+  creator_explicit_tags?: string[];
+}
+
+function isGenericCreatorByline(byline: string): boolean {
+  const b = byline.trim().toLowerCase();
+  return b === "" || b === "by creator" || b === "creator";
+}
+
+function needsCreatorBylineHydration(article: StoredArticle): boolean {
+  if (article.source !== "creator" || !article.authorUserId) return false;
+  return isGenericCreatorByline(article.byline ?? "");
+}
+
+function penNameFromByline(byline: string): string {
+  const t = byline.trim();
+  const m = /^by\s+(.+)$/i.exec(t);
+  return (m ? m[1] : t).trim();
+}
+
+async function hydrateCreatorAuthorDisplay(
+  articles: StoredArticle[]
+): Promise<StoredArticle[]> {
+  const creatorIds = [
+    ...new Set(
+      articles
+        .filter((a) => a.source === "creator" && a.authorUserId)
+        .map((a) => a.authorUserId as string)
+    ),
+  ];
+  if (creatorIds.length === 0) return articles;
+
+  const [penNames, displayByUser] = await Promise.all([
+    getCreatorPenNamesByUserIds(creatorIds),
+    getAuthorDisplayByUserIds(creatorIds),
+  ]);
+
+  return articles.map((article) => {
+    if (article.source !== "creator" || !article.authorUserId) return article;
+
+    const uid = article.authorUserId;
+    const penFromProfile = penNames.get(uid)?.trim() ?? "";
+    const penFromLine = penNameFromByline(article.byline ?? "");
+    const pen = penFromProfile || penFromLine;
+    const display = displayByUser.get(uid);
+
+    let next: StoredArticle = {
+      ...article,
+      authorPenName: pen || null,
+      authorAvatarUrl: display?.avatarUrl ?? null,
+      authorUsername: display?.username ?? null,
+    };
+
+    if (needsCreatorBylineHydration(article)) {
+      if (penFromProfile) next = { ...next, byline: `By ${penFromProfile}` };
+      else if (pen) next = { ...next, byline: `By ${pen}` };
+    }
+
+    return next;
+  });
 }
 
 function rowToArticle(row: ArticleRow): StoredArticle {
@@ -52,7 +116,28 @@ function rowToArticle(row: ArticleRow): StoredArticle {
     usedCount: row.used_count ?? 0,
     tagged: row.tagged ?? false,
     sourceUrls: row.source_urls ?? [],
+    source: row.source === "creator" ? "creator" : "ingest",
+    authorUserId: row.author_user_id ?? null,
+    submissionId: row.submission_id ?? null,
+    creatorExplicitTags: row.creator_explicit_tags ?? [],
   };
+}
+
+function normaliseTag(input: string): string {
+  return input.trim().replace(/^#/, "").toLowerCase();
+}
+
+function mergeTags(explicitTags: string[], inferredTags: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of [...explicitTags, ...inferredTags]) {
+    const normalised = normaliseTag(tag);
+    if (!normalised || seen.has(normalised)) continue;
+    seen.add(normalised);
+    out.push(normalised);
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 // ─── Deduplication helpers ────────────────────────────────────────────────────
@@ -170,7 +255,7 @@ async function fetchExistingFingerprints(fps: string[]): Promise<Set<string>> {
 export async function insertArticles(
   articles: Omit<
     StoredArticle,
-    "id" | "fetchedAt" | "expiresAt" | "usedCount" | "tagged"
+    "id" | "fetchedAt" | "expiresAt" | "usedCount" | "tagged" | "source" | "authorUserId" | "submissionId" | "creatorExplicitTags"
   >[]
 ): Promise<StoredArticle[]> {
   if (articles.length === 0) return [];
@@ -245,6 +330,10 @@ export async function insertArticles(
     tagged: false,
     fingerprint: fp,
     source_urls: normUrls,
+    source: "ingest",
+    author_user_id: null,
+    submission_id: null,
+    creator_explicit_tags: [],
   }));
 
   const { data, error } = await db
@@ -322,7 +411,7 @@ export async function getArticlesForFeed(
 
   const { data, error } = await query;
   if (error) throw new Error(`getArticlesForFeed: ${error.message}`);
-  return (data as ArticleRow[]).map(rowToArticle);
+  return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
 }
 
 /**
@@ -348,7 +437,7 @@ export async function getUntaggedArticlesForFeed(
 
   const { data, error } = await query;
   if (error) throw new Error(`getUntaggedArticlesForFeed: ${error.message}`);
-  return (data as ArticleRow[]).map(rowToArticle);
+  return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
 }
 
 function shuffleInPlace<T>(items: T[]): void {
@@ -380,7 +469,7 @@ export async function getRandomAvailableArticles(
 
   const { data, error } = await query;
   if (error) throw new Error(`getRandomAvailableArticles: ${error.message}`);
-  const rows = (data as ArticleRow[]).map(rowToArticle);
+  const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
 }
@@ -396,7 +485,7 @@ export async function getRandomArticlesResurfacing(limit: number): Promise<Store
     .limit(cap);
 
   if (error) throw new Error(`getRandomArticlesResurfacing: ${error.message}`);
-  const rows = (data as ArticleRow[]).map(rowToArticle);
+  const rows = await hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
   shuffleInPlace(rows);
   return rows.slice(0, limit);
 }
@@ -492,10 +581,22 @@ export async function updateArticleTags(
     qualityScore: number;
   }
 ): Promise<void> {
+  const { data: existing, error: fetchError } = await db
+    .from("articles")
+    .select("creator_explicit_tags")
+    .eq("id", id)
+    .single();
+
+  if (fetchError) throw new Error(`updateArticleTags fetch existing: ${fetchError.message}`);
+  const explicit = ((existing as { creator_explicit_tags?: string[] } | null)?.creator_explicit_tags ?? [])
+    .map(normaliseTag)
+    .filter(Boolean);
+  const mergedTags = mergeTags(explicit, enrichment.tags ?? []);
+
   const { error } = await db
     .from("articles")
     .update({
-      tags: enrichment.tags,
+      tags: mergedTags,
       sentiment: enrichment.sentiment,
       emotions: enrichment.emotions,
       locale: enrichment.locale,
@@ -521,7 +622,64 @@ export async function getArticleById(
     .single();
 
   if (error || !data) return null;
-  return rowToArticle(data as ArticleRow);
+  const article = rowToArticle(data as ArticleRow);
+  const [hydrated] = await hydrateCreatorAuthorDisplay([article]);
+  return hydrated ?? article;
+}
+
+export interface CreatorPublishedArticleListItem {
+  id: string;
+  headline: string;
+  category: string;
+  fetchedAt: string;
+}
+
+export async function listCreatorPublishedArticles(
+  authorUserId: string
+): Promise<CreatorPublishedArticleListItem[]> {
+  const { data, error } = await db
+    .from("articles")
+    .select("id, headline, category, fetched_at")
+    .eq("author_user_id", authorUserId)
+    .eq("source", "creator")
+    .order("fetched_at", { ascending: false });
+  if (error) throw new Error(`listCreatorPublishedArticles: ${error.message}`);
+  return (data as { id: string; headline: string; category: string; fetched_at: string }[]).map(
+    (row) => ({
+      id: row.id,
+      headline: row.headline,
+      category: row.category,
+      fetchedAt: row.fetched_at,
+    })
+  );
+}
+
+export async function getCreatorArticleEngagementTotals(authorUserId: string): Promise<{
+  totalLikes: number;
+  totalSaves: number;
+}> {
+  const { data: rows, error } = await db
+    .from("articles")
+    .select("id")
+    .eq("author_user_id", authorUserId)
+    .eq("source", "creator");
+  if (error) throw new Error(`getCreatorArticleEngagementTotals articles: ${error.message}`);
+  const ids = (rows as { id: string }[] | null)?.map((r) => r.id) ?? [];
+  if (ids.length === 0) return { totalLikes: 0, totalSaves: 0 };
+
+  const { count: likeCount, error: likeErr } = await db
+    .from("article_likes")
+    .select("*", { count: "exact", head: true })
+    .in("article_id", ids);
+  if (likeErr) throw new Error(`getCreatorArticleEngagementTotals likes: ${likeErr.message}`);
+
+  const { count: saveCount, error: saveErr } = await db
+    .from("article_saves")
+    .select("*", { count: "exact", head: true })
+    .in("article_id", ids);
+  if (saveErr) throw new Error(`getCreatorArticleEngagementTotals saves: ${saveErr.message}`);
+
+  return { totalLikes: likeCount ?? 0, totalSaves: saveCount ?? 0 };
 }
 
 /**

@@ -57,9 +57,10 @@ export interface NewsFeedProps {
   /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
   userId: string;
   userEmail?: string | null;
+  isAdmin?: boolean;
 }
 
-export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
+export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFeedProps) {
   const [sections, setSections] = useState<FeedSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -427,6 +428,7 @@ export default function NewsFeed({ userId, userEmail }: NewsFeedProps) {
             <ProfileMenu
               userEmail={userEmail}
               onGameRatioSaved={handleGameRatioSaved}
+              isAdmin={isAdmin}
             />
           ) : undefined
         }

@@ -18,6 +18,14 @@ export interface StoredArticle extends RawArticle {
   id: string;
   fetchedAt: string;           // ISO timestamp
   expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
+  source?: ArticleSource;
+  authorUserId?: string | null;
+  /** Filled when loading creator articles: display name (may differ from @username). */
+  authorPenName?: string | null;
+  authorAvatarUrl?: string | null;
+  authorUsername?: string | null;
+  submissionId?: string | null;
+  creatorExplicitTags?: string[];
 
   // Written by tagger agent
   tags: string[];              // ["ocean", "coral", "australia"]
@@ -38,6 +46,8 @@ export type ArticleSentiment =
   | "heartwarming"
   | "triumphant";
 
+export type ArticleSource = "ingest" | "creator";
+
 // ─── User profile ─────────────────────────────────────────────────────────────
 
 /** Reader vs future publisher (Substack-style). Only `general` is assignable from the app API. */
@@ -56,6 +66,47 @@ export interface UserProfile {
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatorProfile {
+  userId: string;
+  penName: string;
+  bio: string;
+  interestCategories: Category[];
+  websiteUrl: string | null;
+  locale: string | null;
+  timezone: string | null;
+  guidelinesAcknowledgedAt: string | null;
+  onboardingCompletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ArticleSubmissionStatus =
+  | "pending"
+  | "changes_requested"
+  | "approved"
+  | "rejected"
+  | "withdrawn";
+
+export interface ArticleSubmission {
+  id: string;
+  authorUserId: string;
+  headline: string;
+  subheadline: string;
+  body: string;
+  pullQuote: string;
+  category: Category;
+  locale: string;
+  explicitHashtags: string[];
+  status: ArticleSubmissionStatus;
+  adminNote: string | null;
+  rejectionReason: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  publishedArticleId: string | null;
   createdAt: string;
   updatedAt: string;
 }

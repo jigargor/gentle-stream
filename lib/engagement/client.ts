@@ -8,6 +8,7 @@ const MAX_BATCH_SIZE = 50;
 let queue: ArticleEngagementEventInput[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionId: string | null = null;
+let engagementDisabled = false;
 
 function getSessionId(): string {
   if (sessionId) return sessionId;
@@ -19,18 +20,27 @@ function getSessionId(): string {
 }
 
 async function flushNow(): Promise<void> {
+  if (engagementDisabled) {
+    queue = [];
+    return;
+  }
   if (queue.length === 0) return;
   const batch = queue.slice(0, MAX_BATCH_SIZE);
   queue = queue.slice(MAX_BATCH_SIZE);
 
   try {
-    await fetch("/api/user/article-engagement", {
+    const response = await fetch("/api/user/article-engagement", {
       method: "POST",
       credentials: "include",
       keepalive: true,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events: batch }),
     });
+    if (response.status === 401) {
+      engagementDisabled = true;
+      queue = [];
+      return;
+    }
   } catch {
     // Ignore failures; this is best-effort telemetry.
   }
@@ -51,6 +61,7 @@ function scheduleFlush(): void {
 export function trackArticleEngagement(
   event: Omit<ArticleEngagementEventInput, "sessionId" | "occurredAt">
 ): void {
+  if (engagementDisabled) return;
   queue.push({
     ...event,
     sessionId: getSessionId(),

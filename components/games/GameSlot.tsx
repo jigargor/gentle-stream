@@ -254,7 +254,6 @@ export default function GameSlot({
         const url = puzzleEndpoint(
           gameType,
           difficulty,
-          category,
           buildExcludeSignatures(false),
           connectionsDaily
         );

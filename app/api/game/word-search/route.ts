@@ -35,7 +35,6 @@ function parseExcludeSignatures(raw: string | null): string[] {
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const rawDiff = searchParams.get("difficulty") ?? "medium";
-  const category = searchParams.get("category") ?? undefined;
   const excludeSignatures = parseExcludeSignatures(
     searchParams.get("excludeSignatures")
   );
@@ -44,6 +43,8 @@ export async function GET(request: NextRequest) {
     ? (rawDiff as Difficulty)
     : "medium";
 
+  const promptTheme = await getPromptThemeForGameType("word_search");
+
   try {
     const userId = await getSessionUserId();
 
@@ -51,18 +52,23 @@ export async function GET(request: NextRequest) {
       try {
         await seedGameWordPoolFromStaticIfEmpty();
         const avoid = new Set<string>(excludeSignatures);
-        let puzzle = generateWordSearch(difficulty, category);
+        let puzzle = generateWordSearch(difficulty, promptTheme);
         let picked: string[] | null = null;
 
         for (let i = 0; i < 4; i++) {
-          picked = await selectWordsForUserPuzzle(userId, difficulty, category, {
-            avoidSignatures: [...avoid],
-          });
+          picked = await selectWordsForUserPuzzle(
+            userId,
+            difficulty,
+            promptTheme,
+            {
+              avoidSignatures: [...avoid],
+            }
+          );
           if (!picked) break;
 
           const candidate = generateWordSearch(
             difficulty,
-            buildWordSearchOptions(category, picked)
+            buildWordSearchOptions(promptTheme, picked)
           );
           const sig = makeWordSearchSignature(
             candidate.words.map((p) => p.word)

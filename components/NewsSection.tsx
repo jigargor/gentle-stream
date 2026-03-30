@@ -1,29 +1,16 @@
 "use client";
 
 import ArticleCard from "./ArticleCard";
-import type { Article } from "@/lib/types";
+import type { Article, ArticleFeedSection } from "@/lib/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 import InlineModuleCard from "./feed/InlineModuleCard";
+
+type SectionLayoutPlan = NonNullable<ArticleFeedSection["newspaperLayout"]>;
 
 interface NewsSectionProps {
   articles: Article[];
   sectionIndex: number;
-  layoutPlan?: {
-    templateId:
-      | "single-hero"
-      | "two-columns"
-      | "hero-left"
-      | "middle-wide"
-      | "hero-sidebar";
-    layouts: ("hero" | "wide" | "standard")[];
-    inlineModule?: {
-      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
-      reason: "inline";
-      targetColumn: number;
-      data: import("@/lib/types").FeedModuleData;
-    } | null;
-    residualGapPx: number;
-  };
+  layoutPlan?: SectionLayoutPlan;
 }
 
 const borderStyles = {
@@ -37,7 +24,12 @@ export default function NewsSection({
   layoutPlan,
 }: NewsSectionProps) {
   if (!articles || articles.length === 0) return null;
-  const plan = layoutPlan ?? chooseNewspaperLayout(articles, sectionIndex);
+  const computedPlan = chooseNewspaperLayout(articles, sectionIndex);
+  const plan: SectionLayoutPlan = {
+    ...computedPlan,
+    ...(layoutPlan ?? {}),
+    inlineModule: layoutPlan?.inlineModule ?? null,
+  };
   const inlineModule = plan.inlineModule ?? null;
 
   // Fewer than 3: still render so infinite scroll can show partial pages

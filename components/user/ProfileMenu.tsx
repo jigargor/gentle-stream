@@ -302,7 +302,7 @@ export function ProfileMenu({
       });
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
-        data?: WeatherFillerData;
+        data?: WeatherModuleData;
       };
       if (!res.ok || !body.data) {
         setModuleError(body.error ?? "Could not fetch weather module data.");

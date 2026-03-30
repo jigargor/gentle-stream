@@ -113,6 +113,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const [liveGenerating, setLiveGenerating] = useState(false);
   /** True once game ratio is resolved for the current session/user bootstrap. */
   const [isFeedReady, setIsFeedReady] = useState(false);
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
   // Use refs for values that loadMore closes over — avoids stale closure bugs
   const loadingRef = useRef(false);
@@ -867,6 +868,19 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     };
   }, []);
 
+  useEffect(() => {
+    function updateScrollTopVisibility() {
+      setShowScrollTopButton(window.scrollY > 480);
+    }
+    updateScrollTopVisibility();
+    window.addEventListener("scroll", updateScrollTopVisibility, { passive: true });
+    return () => window.removeEventListener("scroll", updateScrollTopVisibility);
+  }, []);
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;
     setActiveCategory(next);
@@ -1140,6 +1154,34 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           &nbsp;&middot;&nbsp; Only the uplifting, only the inspiring
         </footer>
       </main>
+      {showScrollTopButton ? (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          aria-label="Scroll to top"
+          style={{
+            position: "fixed",
+            right: "1.1rem",
+            bottom: "1.1rem",
+            width: "2.45rem",
+            height: "2.45rem",
+            borderRadius: "999px",
+            border: "1px solid #1a1a1a",
+            background: "#faf8f3",
+            color: "#1a1a1a",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+            cursor: "pointer",
+            zIndex: 250,
+            fontSize: "1.1rem",
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ↑
+        </button>
+      ) : null}
     </div>
   );
 }

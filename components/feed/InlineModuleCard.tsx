@@ -1,6 +1,10 @@
 "use client";
 
-import type { FeedModuleData } from "@/lib/types";
+import type {
+  FeedModuleData,
+  SpotifyMoodTileData,
+  WeatherModuleData,
+} from "@/lib/types";
 
 interface InlineModuleCardProps {
   moduleType: "weather" | "spotify" | "generated_art" | "nasa";
@@ -11,7 +15,11 @@ export default function InlineModuleCard({
   moduleType,
   data,
 }: InlineModuleCardProps) {
-  if (moduleType === "spotify" && "tracks" in data) {
+  const spotifyData =
+    moduleType === "spotify" && "tracks" in data
+      ? (data as SpotifyMoodTileData)
+      : null;
+  if (spotifyData) {
     return (
       <aside
         style={{
@@ -28,7 +36,7 @@ export default function InlineModuleCard({
             marginBottom: "0.35rem",
           }}
         >
-          {data.title}
+          {spotifyData.title}
         </div>
         <div
           style={{
@@ -38,7 +46,7 @@ export default function InlineModuleCard({
             lineHeight: 1.4,
           }}
         >
-          {data.tracks.slice(0, 2).map((track) => (
+          {spotifyData.tracks.slice(0, 2).map((track) => (
             <div key={track.id}>
               {track.name} - {track.artist}
             </div>
@@ -48,7 +56,11 @@ export default function InlineModuleCard({
     );
   }
 
-  if ("temperatureC" in data || moduleType === "weather") {
+  const weatherData =
+    moduleType === "weather" && "mode" in data
+      ? (data as WeatherModuleData)
+      : null;
+  if (weatherData) {
     return (
       <aside
         style={{
@@ -65,7 +77,7 @@ export default function InlineModuleCard({
             marginBottom: "0.28rem",
           }}
         >
-          {data.title}
+          {weatherData.title}
         </div>
         <div
           style={{
@@ -76,12 +88,12 @@ export default function InlineModuleCard({
           }}
         >
           <div>
-            {typeof data.temperatureC === "number"
-              ? `${data.temperatureC}\u00b0C`
+            {typeof weatherData.temperatureC === "number"
+              ? `${weatherData.temperatureC}\u00b0C`
               : "Weather brief"}
-            {data.condition ? ` · ${data.condition}` : ""}
+            {weatherData.condition ? ` · ${weatherData.condition}` : ""}
           </div>
-          <div>{data.locationLabel ?? data.subtitle}</div>
+          <div>{weatherData.locationLabel ?? weatherData.subtitle}</div>
         </div>
       </aside>
     );

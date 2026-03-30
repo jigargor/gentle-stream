@@ -234,10 +234,20 @@ export async function getWeatherFillerData(input: {
       cache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });
       return data;
     }
-    const city = (input.location ?? "").trim() || defaultCityForCategory(input.category);
-    const geocoded = await resolveCoordinates(city, apiKey);
+    const requestedCity = (input.location ?? "").trim();
+    const defaultCity = defaultCityForCategory(input.category);
+    const city = requestedCity || defaultCity;
+    let geocoded = await resolveCoordinates(city, apiKey);
+    if (!geocoded && requestedCity) {
+      console.warn(
+        `[weather-module] Geocoding returned no results for location="${city}". Retrying with default city="${defaultCity}".`
+      );
+      geocoded = await resolveCoordinates(defaultCity, apiKey);
+    }
     if (!geocoded) {
-      console.warn(`[weather-module] Geocoding returned no results for location="${city}". Serving fallback.`);
+      console.warn(
+        `[weather-module] Geocoding returned no results for both location="${city}" and default city="${defaultCity}". Serving fallback.`
+      );
       const fallback = fallbackArtData(input);
       return fallback;
     }

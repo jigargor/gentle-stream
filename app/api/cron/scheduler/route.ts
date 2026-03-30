@@ -48,7 +48,8 @@ function isTruthy(value: string | undefined): boolean {
 }
 
 function resolveIngestPipeline(category: Category): "legacy" | "overhaul" {
-  const enabled = isTruthy(process.env.INGEST_OVERHAUL_ENABLED);
+  const enabledFlag = process.env.INGEST_OVERHAUL_ENABLED;
+  const enabled = enabledFlag == null ? true : isTruthy(enabledFlag);
   if (!enabled) return "legacy";
 
   const canaryRaw = process.env.INGEST_OVERHAUL_CANARY_CATEGORIES ?? "";

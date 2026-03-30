@@ -542,7 +542,8 @@ function resolvePipelineMode(
   override?: "legacy" | "overhaul"
 ): "legacy" | "overhaul" {
   if (override) return override;
-  const enabled = isTruthy(process.env.INGEST_OVERHAUL_ENABLED);
+  const enabledFlag = process.env.INGEST_OVERHAUL_ENABLED;
+  const enabled = enabledFlag == null ? true : isTruthy(enabledFlag);
   if (!enabled) return "legacy";
   const canaryRaw = process.env.INGEST_OVERHAUL_CANARY_CATEGORIES ?? "";
   const canary = canaryRaw

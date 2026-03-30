@@ -10,6 +10,7 @@ import {
   isAllowedAvatarMime,
   validateAvatarUrl,
 } from "@/lib/avatar";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 function storagePathsForUser(userId: string): string[] {
   return ["jpg", "png", "webp", "gif"].map((ext) => `${userId}/avatar.${ext}`);
@@ -22,7 +23,12 @@ function storagePathsForUser(userId: string): string[] {
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   await getOrCreateUserProfile(userId);
@@ -34,26 +40,40 @@ export async function POST(request: NextRequest) {
     try {
       form = await request.formData();
     } catch {
-      return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.INVALID_JSON,
+        message: "Invalid form data",
+      });
     }
 
     const file = form.get("file");
     if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "Missing file" }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "Missing file",
+      });
     }
 
     if (!isAllowedAvatarMime(file.type)) {
-      return NextResponse.json(
-        { error: "Use a JPEG, PNG, WebP, or GIF image." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Use a JPEG, PNG, WebP, or GIF image.",
+      });
     }
 
     if (file.size > AVATAR_MAX_BYTES) {
-      return NextResponse.json(
-        { error: `Image must be under ${Math.floor(AVATAR_MAX_BYTES / (1024 * 1024))} MB.` },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: `Image must be under ${Math.floor(AVATAR_MAX_BYTES / (1024 * 1024))} MB.`,
+      });
     }
 
     const ext = extFromAvatarMime(file.type);
@@ -73,10 +93,12 @@ export async function POST(request: NextRequest) {
         uploadError.message?.toLowerCase().includes("not found")
           ? ' Create a public bucket named "avatars" in Supabase Storage.'
           : "";
-      return NextResponse.json(
-        { error: `Upload failed: ${uploadError.message}.${hint}` },
-        { status: 500 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 500,
+        code: API_ERROR_CODES.INTERNAL,
+        message: `Upload failed: ${uploadError.message}.${hint}`,
+      });
     }
 
     const { data: pub } = db.storage.from(AVATAR_BUCKET).getPublicUrl(path);
@@ -91,16 +113,18 @@ export async function POST(request: NextRequest) {
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Unknown error";
-      return NextResponse.json(
-        {
-          error: message,
-          hint:
-            message.includes("avatar_url") || message.includes("schema cache")
-              ? "Run SQL migration 005 (or 006) in Supabase so user_profiles.avatar_url exists."
-              : undefined,
-        },
-        { status: 500 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 500,
+        code: API_ERROR_CODES.INTERNAL,
+        message,
+        details:
+          message.includes("avatar_url") || message.includes("schema cache")
+            ? {
+                hint: "Run SQL migration 005 (or 006) in Supabase so user_profiles.avatar_url exists.",
+              }
+            : undefined,
+      });
     }
   }
 
@@ -108,25 +132,42 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_JSON,
+      message: "Invalid JSON body",
+    });
   }
 
   if (typeof body.avatarUrl !== "string") {
-    return NextResponse.json({ error: "avatarUrl must be a string" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: "avatarUrl must be a string",
+    });
   }
 
   const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const validation = validateAvatarUrl(body.avatarUrl);
   if ("error" in validation) {
-    return NextResponse.json({ error: validation.error }, { status: 422 });
+    return apiErrorResponse({
+      request,
+      status: 422,
+      code: API_ERROR_CODES.VALIDATION,
+      message: validation.error,
+    });
   }
 
   const access = avatarsBucketAccessForUser(validation.url, projectUrl, userId);
   if (access === "foreign_user_file") {
-    return NextResponse.json(
-      { error: "That file is in another account’s avatar folder." },
-      { status: 403 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "That file is in another account’s avatar folder.",
+    });
   }
 
   try {
@@ -138,24 +179,31 @@ export async function POST(request: NextRequest) {
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json(
-      {
-        error: message,
-        hint:
-          message.includes("avatar_url") || message.includes("schema cache")
-            ? "Run SQL migration 005 (or 006) in Supabase so user_profiles.avatar_url exists."
-            : undefined,
-      },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+      details:
+        message.includes("avatar_url") || message.includes("schema cache")
+          ? {
+              hint: "Run SQL migration 005 (or 006) in Supabase so user_profiles.avatar_url exists.",
+            }
+          : undefined,
+    });
   }
 }
 
 /** Clear avatar in DB and remove uploaded files from Storage (best effort). */
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   await getOrCreateUserProfile(userId);
@@ -171,6 +219,11 @@ export async function DELETE() {
     return NextResponse.json({ profile });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

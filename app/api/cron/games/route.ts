@@ -27,6 +27,7 @@ import {
   getWordPoolTotalCount,
   MIN_WORD_POOL_TOTAL,
 } from "@/lib/db/gameWordPool";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 /**
  * Word-pool cap for demo: keep growth bounded while still ensuring freshness.
@@ -95,7 +96,12 @@ async function growWordPool(): Promise<{
 export async function GET(request: NextRequest) {
   const secret = request.headers.get("x-cron-secret");
   if (secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const results: Record<string, unknown> = {};

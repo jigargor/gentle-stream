@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/api/sessionUser";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { importRecipeFromUrl } from "@/lib/recipes/importer";
 import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 export const runtime = "nodejs";
 
@@ -21,19 +22,33 @@ const recipeImportBodySchema = z.object({
 
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!userId) {
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
+  }
 
   const profile = await getOrCreateUserProfile(userId);
   if (profile.userRole !== "creator") {
-    return NextResponse.json({ error: "Creator access required" }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Creator access required",
+    });
   }
 
   const allowlist = parseAllowlist();
   if (allowlist.length === 0) {
-    return NextResponse.json(
-      { error: "Recipe import is not configured. Missing RECIPE_IMPORT_ALLOWLIST." },
-      { status: 503 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 503,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "Recipe import is not configured. Missing RECIPE_IMPORT_ALLOWLIST.",
+    });
   }
 
   const parsedBody = await parseJsonBody({
@@ -64,7 +79,18 @@ export async function POST(request: NextRequest) {
         : message.toLowerCase().includes("could not confidently")
           ? 422
           : 500;
-    return NextResponse.json({ error: message }, { status });
+    const code =
+      status === 400
+        ? API_ERROR_CODES.VALIDATION
+        : status === 422
+          ? API_ERROR_CODES.INVALID_REQUEST
+          : API_ERROR_CODES.INTERNAL;
+    return apiErrorResponse({
+      request,
+      status,
+      code,
+      message,
+    });
   }
 }
 

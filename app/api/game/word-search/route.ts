@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/gameWordPool";
 import { generateWordSearch } from "@/lib/games/wordSearchGenerator";
 import type { Difficulty } from "@/lib/games/types";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const VALID_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 
@@ -82,10 +83,12 @@ export async function GET(request: NextRequest) {
 
         if (picked) {
           if (!puzzle.uniquenessSignature || avoid.has(puzzle.uniquenessSignature)) {
-            return NextResponse.json(
-              { error: "No unseen Word Search puzzle available right now." },
-              { status: 409 }
-            );
+            return apiErrorResponse({
+              request,
+              status: 409,
+              code: API_ERROR_CODES.NOT_FOUND,
+              message: "No unseen Word Search puzzle available right now.",
+            });
           }
           const placed = puzzle.words.map((p) => p.word);
           if (placed.length > 0) {
@@ -110,14 +113,21 @@ export async function GET(request: NextRequest) {
       puzzle = generateWordSearch(difficulty, promptTheme);
     }
     if (!puzzle.uniquenessSignature || avoid.has(puzzle.uniquenessSignature)) {
-      return NextResponse.json(
-        { error: "No unseen Word Search puzzle available right now." },
-        { status: 409 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 409,
+        code: API_ERROR_CODES.NOT_FOUND,
+        message: "No unseen Word Search puzzle available right now.",
+      });
     }
     return NextResponse.json(puzzle);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

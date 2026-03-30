@@ -32,6 +32,7 @@ import {
   crosswordCluesPreferAnthropic,
   fetchCrosswordCluesHeuristic,
 } from "@/lib/games/crosswordHeuristicClues";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -234,10 +235,12 @@ export async function GET(request: NextRequest) {
 
   const filled = fillCrosswordGrid(themeForGeneration);
   if (!filled) {
-    return NextResponse.json(
-      { error: "Grid generation failed" },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: "Grid generation failed",
+    });
   }
 
   const { grid, slots } = filled;
@@ -248,13 +251,13 @@ export async function GET(request: NextRequest) {
 
   if (crosswordCluesPreferAnthropic()) {
     if (!apiKey) {
-      return NextResponse.json(
-        {
-          error:
-            "CROSSWORD_CLUES_SOURCE=anthropic requires ANTHROPIC_API_KEY to be set.",
-        },
-        { status: 503 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 503,
+        code: API_ERROR_CODES.BAD_GATEWAY,
+        message:
+          "CROSSWORD_CLUES_SOURCE=anthropic requires ANTHROPIC_API_KEY to be set.",
+      });
     }
     try {
       clueMap = await fetchClueMapFromClaude(apiKey, themeForGeneration, slots);
@@ -276,25 +279,25 @@ export async function GET(request: NextRequest) {
       clueMap = await fetchCrosswordCluesHeuristic(slots, categoryLabel);
     } catch (e) {
       console.warn("[/api/game/crossword] Heuristic clues failed:", e);
-      return NextResponse.json(
-        {
-          error:
-            "Crossword clues could not be loaded — please try again in a moment.",
-        },
-        { status: 503 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 503,
+        code: API_ERROR_CODES.BAD_GATEWAY,
+        message:
+          "Crossword clues could not be loaded — please try again in a moment.",
+      });
     }
     merged = slotsWithClues(slots, clueMap);
   }
 
   if (!allCrosswordSlotsHaveRealClues(merged)) {
-    return NextResponse.json(
-      {
-        error:
-          "Crossword clues are not ready yet — please try again in a moment.",
-      },
-      { status: 503 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 503,
+      code: API_ERROR_CODES.BAD_GATEWAY,
+      message:
+        "Crossword clues are not ready yet — please try again in a moment.",
+    });
   }
 
   const hadAiClues =
@@ -309,10 +312,12 @@ export async function GET(request: NextRequest) {
   };
   puzzle.uniquenessSignature = makeCrosswordSignature(puzzle);
   if (excludeSignatures.includes(puzzle.uniquenessSignature)) {
-    return NextResponse.json(
-      { error: "No unseen Crossword puzzle available right now." },
-      { status: 409 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 409,
+      code: API_ERROR_CODES.NOT_FOUND,
+      message: "No unseen Crossword puzzle available right now.",
+    });
   }
 
   return NextResponse.json({

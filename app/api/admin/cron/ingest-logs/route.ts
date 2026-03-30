@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { db } from "@/lib/db/client";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 100;
@@ -182,7 +183,12 @@ function buildCanarySummary(
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const url = new URL(request.url);
@@ -208,10 +214,12 @@ export async function GET(request: NextRequest) {
   const { data: runs, error: runsError } = await runsQuery;
 
   if (runsError) {
-    return NextResponse.json(
-      { error: `Failed to load runs: ${runsError.message}` },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: `Failed to load runs: ${runsError.message}`,
+    });
   }
 
   const runIds = (runs ?? []).map((run) => run.id);
@@ -228,10 +236,12 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: true });
 
   if (rowsError) {
-    return NextResponse.json(
-      { error: `Failed to load category logs: ${rowsError.message}` },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: `Failed to load category logs: ${rowsError.message}`,
+    });
   }
 
   const grouped = new Map<string, unknown[]>();

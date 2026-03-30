@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateSudoku } from "../../../../lib/games/sudokuGenerator";
 import type { Difficulty } from "../../../../lib/games/types";
 import { makeSudokuSignature } from "@/lib/games/puzzleSignature";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -49,15 +50,21 @@ export async function GET(request: NextRequest) {
         );
       }
     }
-    return NextResponse.json(
-      { error: "No unseen Sudoku puzzle available right now." },
-      { status: 409, headers: NO_STORE_HEADERS }
-    );
+    return apiErrorResponse({
+      request,
+      status: 409,
+      code: API_ERROR_CODES.NOT_FOUND,
+      message: "No unseen Sudoku puzzle available right now.",
+      headers: { ...NO_STORE_HEADERS },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Generation failed";
-    return NextResponse.json(
-      { error: message },
-      { status: 500, headers: NO_STORE_HEADERS }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+      headers: { ...NO_STORE_HEADERS },
+    });
   }
 }

@@ -9,6 +9,7 @@ import {
   consumeRateLimit,
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const DEFAULT_LIMIT = 12;
 const MAX_LIMIT = 24;
@@ -69,10 +70,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const q = (searchParams.get("q") ?? "").trim();
     if (q.length < 2) {
-      return NextResponse.json(
-        { error: "Query must be at least 2 characters." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Query must be at least 2 characters.",
+      });
     }
 
     const sessionUserId = process.env.AUTH_DISABLED === "1" ? null : await getSessionUserId();
@@ -144,6 +147,11 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

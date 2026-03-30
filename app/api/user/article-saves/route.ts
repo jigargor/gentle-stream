@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { parseJsonBody, parseQuery } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -50,10 +51,16 @@ function saveErrorPayload(message: string): { error: string; hint?: string } {
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedQuery = parseQuery({
+    request,
     query: Object.fromEntries(request.nextUrl.searchParams.entries()),
     schema: getQuerySchema,
   });
@@ -61,7 +68,12 @@ export async function GET(request: NextRequest) {
   const articleId = parsedQuery.data.articleId ?? null;
   if (articleId !== null && articleId !== "") {
     if (!UUID_RE.test(articleId)) {
-      return NextResponse.json({ error: "Invalid articleId" }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Invalid articleId",
+      });
     }
 
     const { data, error } = await db
@@ -72,7 +84,15 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
 
     if (error) {
-      return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+      return apiErrorResponse({
+        request,
+        status: 500,
+        code: API_ERROR_CODES.INTERNAL,
+        message: error.message,
+        details: saveErrorPayload(error.message).hint
+          ? { hint: saveErrorPayload(error.message).hint }
+          : undefined,
+      });
     }
 
     return NextResponse.json({
@@ -89,7 +109,15 @@ export async function GET(request: NextRequest) {
     .limit(100);
 
   if (error) {
-    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+      details: saveErrorPayload(error.message).hint
+        ? { hint: saveErrorPayload(error.message).hint }
+        : undefined,
+    });
   }
 
   const items = (data ?? []).map((r) => ({
@@ -108,7 +136,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedBody = await parseJsonBody({
@@ -141,7 +174,15 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+      details: saveErrorPayload(error.message).hint
+        ? { hint: saveErrorPayload(error.message).hint }
+        : undefined,
+    });
   }
 
   await logSaveEvent(userId, body.articleId);
@@ -152,10 +193,16 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedDeleteQuery = parseQuery({
+    request,
     query: Object.fromEntries(request.nextUrl.searchParams.entries()),
     schema: deleteQuerySchema,
   });
@@ -169,7 +216,15 @@ export async function DELETE(request: NextRequest) {
     .eq("id", id);
 
   if (error) {
-    return NextResponse.json(saveErrorPayload(error.message), { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+      details: saveErrorPayload(error.message).hint
+        ? { hint: saveErrorPayload(error.message).hint }
+        : undefined,
+    });
   }
 
   return NextResponse.json({ ok: true });

@@ -11,10 +11,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { runTaggerAgent } from "@/lib/agents/taggerAgent";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCronRequest(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   try {
@@ -23,6 +29,11 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[/api/cron/tagger] Error:", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

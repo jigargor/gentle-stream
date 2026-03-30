@@ -6,6 +6,7 @@ import {
   consumeRateLimit,
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -51,7 +52,12 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await getSessionUserId();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiErrorResponse({
+        request,
+        status: 401,
+        code: API_ERROR_CODES.UNAUTHORIZED,
+        message: "Unauthorized",
+      });
     }
     const rateLimit = await consumeRateLimit({
       policy: { id: "creator-assist", windowMs: 60_000, max: 20 },
@@ -65,7 +71,13 @@ export async function POST(request: NextRequest) {
 
     const parsed = assistBodySchema.safeParse(await request.json());
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Invalid request body.",
+        details: parsed.error.flatten(),
+      });
     }
     const body = parsed.data;
     const mode = body.mode ?? "improve";
@@ -73,21 +85,30 @@ export async function POST(request: NextRequest) {
     const headline = (body.headline ?? "").trim();
     const draftBody = (body.body ?? "").trim();
     if (headline.length === 0 && mode === "headline") {
-      return NextResponse.json({ error: "Provide a headline to refine." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "Provide a headline to refine.",
+      });
     }
     if (draftBody.length < 40) {
-      return NextResponse.json(
-        { error: "Add at least a short draft before using AI assist." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Add at least a short draft before using AI assist.",
+      });
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "AI assist is not configured on the server." },
-        { status: 503 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 503,
+        code: API_ERROR_CODES.BAD_GATEWAY,
+        message: "AI assist is not configured on the server.",
+      });
     }
 
     const prompt = buildPrompt({
@@ -116,20 +137,32 @@ export async function POST(request: NextRequest) {
       error?: { message?: string };
     };
     if (!response.ok) {
-      return NextResponse.json(
-        { error: payload.error?.message ?? "AI assist failed." },
-        { status: response.status }
-      );
+      return apiErrorResponse({
+        request,
+        status: response.status,
+        code: API_ERROR_CODES.BAD_GATEWAY,
+        message: payload.error?.message ?? "AI assist failed.",
+      });
     }
 
     const text =
       payload.content?.find((entry) => entry.type === "text")?.text?.trim() ?? "";
     if (!text) {
-      return NextResponse.json({ error: "No assist output returned." }, { status: 502 });
+      return apiErrorResponse({
+        request,
+        status: 502,
+        code: API_ERROR_CODES.BAD_GATEWAY,
+        message: "No assist output returned.",
+      });
     }
     return NextResponse.json({ result: text });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

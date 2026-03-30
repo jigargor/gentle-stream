@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { parseJsonBody, parseQuery } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const GAME_TYPES = new Set([
   "sudoku",
@@ -36,10 +37,16 @@ const postBodySchema = z.object({
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedQuery = parseQuery({
+    request,
     query: Object.fromEntries(request.nextUrl.searchParams.entries()),
     schema: getQuerySchema,
   });
@@ -57,7 +64,12 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await query;
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   const seen = new Set<string>();
@@ -83,7 +95,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedBody = await parseJsonBody({
@@ -109,7 +126,12 @@ export async function POST(request: NextRequest) {
 
   if (insertError) {
     console.error("[game-completion] insert failed:", insertError.message, insertError);
-    return NextResponse.json({ error: insertError.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: insertError.message,
+    });
   }
 
   const { error: deleteError } = await db

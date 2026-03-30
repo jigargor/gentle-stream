@@ -4,6 +4,7 @@ import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody, parseQuery } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,10 +24,16 @@ function normalizeRating(value: unknown): number | null {
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedQuery = parseQuery({
+    request,
     query: Object.fromEntries(request.nextUrl.searchParams.entries()),
     schema: querySchema,
   });
@@ -41,7 +48,12 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json({
@@ -52,12 +64,22 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   if (!hasTrustedOrigin(request)) {
-    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN_ORIGIN,
+      message: "Invalid request origin.",
+    });
   }
 
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedBody = await parseJsonBody({
@@ -67,7 +89,12 @@ export async function PUT(request: NextRequest) {
   if (!parsedBody.ok) return parsedBody.response;
   const rating = normalizeRating(parsedBody.data.rating);
   if (rating === null) {
-    return NextResponse.json({ error: "rating must be an integer from 0 to 5" }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: "rating must be an integer from 0 to 5",
+    });
   }
 
   const { error } = await db.from("recipe_ratings").upsert(
@@ -81,7 +108,12 @@ export async function PUT(request: NextRequest) {
   );
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json({ ok: true, rating });

@@ -13,6 +13,7 @@ import {
   updateUserPreferences,
 } from "@/lib/db/users";
 import type { GameType } from "@/lib/games/types";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const preferencesBodySchema = z
   .object({
@@ -22,21 +23,31 @@ const preferencesBodySchema = z
   })
   .strict();
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiErrorResponse({
+        request,
+        status: 401,
+        code: API_ERROR_CODES.UNAUTHORIZED,
+        message: "Unauthorized",
+      });
     }
 
     const profile = await getOrCreateUserProfile(user.id);
     return NextResponse.json(profile);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }
 
@@ -47,12 +58,23 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiErrorResponse({
+        request,
+        status: 401,
+        code: API_ERROR_CODES.UNAUTHORIZED,
+        message: "Unauthorized",
+      });
     }
 
     const parsedBody = preferencesBodySchema.safeParse(await request.json());
     if (!parsedBody.success) {
-      return NextResponse.json({ error: "Invalid preferences payload." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Invalid preferences payload.",
+        details: parsedBody.error.flatten(),
+      });
     }
     const body = parsedBody.data;
 
@@ -60,10 +82,12 @@ export async function POST(request: NextRequest) {
     const wantsEnabledTypes = body.enabledGameTypes !== undefined;
     const wantsThemePreference = body.themePreference !== undefined;
     if (!wantsGameRatio && !wantsEnabledTypes && !wantsThemePreference) {
-      return NextResponse.json(
-        { error: "Provide gameRatio, enabledGameTypes, and/or themePreference" },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "Provide gameRatio, enabledGameTypes, and/or themePreference",
+      });
     }
 
     let gameRatio: number | undefined;
@@ -74,10 +98,12 @@ export async function POST(request: NextRequest) {
         body.gameRatio < 0 ||
         body.gameRatio > 1
       ) {
-        return NextResponse.json(
-          { error: "gameRatio must be a number from 0 to 1" },
-          { status: 400 }
-        );
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "gameRatio must be a number from 0 to 1",
+        });
       }
       gameRatio = body.gameRatio;
     }
@@ -85,19 +111,23 @@ export async function POST(request: NextRequest) {
     let enabledGameTypes: GameType[] | undefined;
     if (wantsEnabledTypes) {
       if (!Array.isArray(body.enabledGameTypes)) {
-        return NextResponse.json(
-          { error: "enabledGameTypes must be an array of game type strings" },
-          { status: 400 }
-        );
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "enabledGameTypes must be an array of game type strings",
+        });
       }
       enabledGameTypes = body.enabledGameTypes.filter(
         (v): v is GameType => typeof v === "string"
       ) as GameType[];
       if (enabledGameTypes.length === 0) {
-        return NextResponse.json(
-          { error: "Select at least one game type" },
-          { status: 400 }
-        );
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "Select at least one game type",
+        });
       }
     }
 
@@ -108,10 +138,12 @@ export async function POST(request: NextRequest) {
       } else if (body.themePreference === "light" || body.themePreference === "dark") {
         themePreference = body.themePreference;
       } else {
-        return NextResponse.json(
-          { error: "themePreference must be one of: light, dark, null" },
-          { status: 400 }
-        );
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "themePreference must be one of: light, dark, null",
+        });
       }
     }
 
@@ -123,6 +155,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(updated);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

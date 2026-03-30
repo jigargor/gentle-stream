@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db/client";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import { parseJsonBody, parseQuery } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const GAME_TYPES = new Set([
   "sudoku",
@@ -24,10 +25,16 @@ const putBodySchema = z.object({
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedQuery = parseQuery({
+    request,
     query: Object.fromEntries(request.nextUrl.searchParams.entries()),
     schema: gameTypeQuerySchema,
   });
@@ -42,7 +49,12 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json(data ?? null);
@@ -51,7 +63,12 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedBody = await parseJsonBody({
@@ -79,7 +96,12 @@ export async function PUT(request: NextRequest) {
   );
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json({ ok: true });
@@ -88,10 +110,16 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const parsedQuery = parseQuery({
+    request,
     query: Object.fromEntries(request.nextUrl.searchParams.entries()),
     schema: gameTypeQuerySchema,
   });
@@ -105,7 +133,12 @@ export async function DELETE(request: NextRequest) {
     .eq("game_type", gameType);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: error.message,
+    });
   }
 
   return NextResponse.json({ ok: true });

@@ -7,6 +7,7 @@ import {
   updateDailyTodoItem,
 } from "@/lib/db/dailyTodos";
 import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const todoActionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -43,7 +44,12 @@ export async function GET(request: NextRequest) {
   try {
     const userId = await getSessionUserId();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiErrorResponse({
+        request,
+        status: 401,
+        code: API_ERROR_CODES.UNAUTHORIZED,
+        message: "Unauthorized",
+      });
     }
     const timezone = resolveTimezone(
       new URL(request.url).searchParams.get("timezone")
@@ -61,7 +67,12 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }
 
@@ -69,7 +80,12 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await getSessionUserId();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiErrorResponse({
+        request,
+        status: 401,
+        code: API_ERROR_CODES.UNAUTHORIZED,
+        message: "Unauthorized",
+      });
     }
     const parsedBody = await parseJsonBody({
       request,
@@ -81,15 +97,22 @@ export async function POST(request: NextRequest) {
     if (body.action === "add") {
       const label = body.label?.trim();
       if (!label) {
-        return NextResponse.json({ error: "label is required" }, { status: 400 });
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.MISSING_FIELD,
+          message: "label is required",
+        });
       }
       await addDailyTodoItem({ userId, timezone, label });
     } else if (body.action === "toggle") {
       if (!body.todoId || typeof body.done !== "boolean") {
-        return NextResponse.json(
-          { error: "todoId and done are required for toggle" },
-          { status: 400 }
-        );
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.MISSING_FIELD,
+          message: "todoId and done are required for toggle",
+        });
       }
       await updateDailyTodoItem({
         userId,
@@ -98,10 +121,12 @@ export async function POST(request: NextRequest) {
       });
     } else if (body.action === "rename") {
       if (!body.todoId || !body.label?.trim()) {
-        return NextResponse.json(
-          { error: "todoId and label are required for rename" },
-          { status: 400 }
-        );
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.MISSING_FIELD,
+          message: "todoId and label are required for rename",
+        });
       }
       await updateDailyTodoItem({
         userId,
@@ -109,7 +134,12 @@ export async function POST(request: NextRequest) {
         label: body.label,
       });
     } else {
-      return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.INVALID_REQUEST,
+        message: "Unsupported action",
+      });
     }
 
     const daily = await getOrCreateDailyTodos(userId, timezone);
@@ -125,6 +155,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

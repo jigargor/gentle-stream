@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateNonogram } from "@/lib/games/nonogramGenerator";
 import type { Difficulty } from "@/lib/games/types";
 import { makeNonogramSignature } from "@/lib/games/puzzleSignature";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const VALID_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 
@@ -37,12 +38,19 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ ...puzzle, uniquenessSignature });
       }
     }
-    return NextResponse.json(
-      { error: "No unseen Nonogram puzzle available right now." },
-      { status: 409 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 409,
+      code: API_ERROR_CODES.NOT_FOUND,
+      message: "No unseen Nonogram puzzle available right now.",
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message,
+    });
   }
 }

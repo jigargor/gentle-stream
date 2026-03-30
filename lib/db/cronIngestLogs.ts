@@ -5,9 +5,16 @@ export interface CronIngestCategoryLogInput {
   beforeCount: number;
   requestedCount: number;
   insertedCount: number;
+  attemptedCount?: number;
+  skippedCount?: number;
+  failedCount?: number;
+  retryCount?: number;
+  durationMs?: number;
+  warningFlag?: boolean;
   reason: "threshold" | "freshness" | "none";
   newestFetchedAt: string | null;
   errorMessage?: string;
+  errorSummary?: string;
 }
 
 export async function createCronIngestRun(triggerSource = "vercel-cron"): Promise<string> {
@@ -33,9 +40,16 @@ export async function appendCronIngestCategoryLogs(
     before_count: entry.beforeCount,
     requested_count: entry.requestedCount,
     inserted_count: entry.insertedCount,
+    attempted_count: entry.attemptedCount ?? 0,
+    skipped_count: entry.skippedCount ?? 0,
+    failed_count: entry.failedCount ?? 0,
+    retry_count: entry.retryCount ?? 0,
+    duration_ms: entry.durationMs ?? 0,
+    warning_flag: entry.warningFlag ?? false,
     reason: entry.reason,
     newest_fetched_at: entry.newestFetchedAt,
     error_message: entry.errorMessage ?? null,
+    error_summary: entry.errorSummary ?? null,
   }));
 
   const { error } = await db.from("cron_ingest_category_runs").insert(rows);
@@ -47,6 +61,12 @@ export async function finishCronIngestRun(
   payload: {
     ok: boolean;
     totalInserted: number;
+    totalAttempted?: number;
+    totalSkipped?: number;
+    totalFailed?: number;
+    totalRetried?: number;
+    warningCount?: number;
+    errorSummary?: string;
     categoriesChecked: number;
     notes?: string;
   }
@@ -57,6 +77,12 @@ export async function finishCronIngestRun(
       finished_at: new Date().toISOString(),
       ok: payload.ok,
       total_inserted: payload.totalInserted,
+      total_attempted: payload.totalAttempted ?? 0,
+      total_skipped: payload.totalSkipped ?? 0,
+      total_failed: payload.totalFailed ?? 0,
+      total_retried: payload.totalRetried ?? 0,
+      warning_count: payload.warningCount ?? 0,
+      error_summary: payload.errorSummary ?? null,
       categories_checked: payload.categoriesChecked,
       notes: payload.notes ?? null,
     })

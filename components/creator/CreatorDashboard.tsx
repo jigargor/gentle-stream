@@ -17,8 +17,17 @@ interface FormState {
   body: string;
   pullQuote: string;
   category: string;
+  contentKind: "user_article" | "recipe";
   locale: string;
   explicitHashtags: string;
+
+  // Recipe fields (contentKind='recipe')
+  recipeServings: string;
+  recipeIngredientsText: string; // newline-separated
+  recipeInstructionsText: string; // separated by blank lines (preferred)
+  recipePrepTimeMinutes: string;
+  recipeCookTimeMinutes: string;
+  recipeImages: string[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -27,8 +36,15 @@ const EMPTY_FORM: FormState = {
   body: "",
   pullQuote: "",
   category: CATEGORIES[0],
+  contentKind: "user_article",
   locale: "global",
   explicitHashtags: "",
+  recipeServings: "",
+  recipeIngredientsText: "",
+  recipeInstructionsText: "",
+  recipePrepTimeMinutes: "",
+  recipeCookTimeMinutes: "",
+  recipeImages: [],
 };
 
 const MAX_SUBMISSION_BODY_CHARS = 15_000;
@@ -41,17 +57,53 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [bodyEditorTab, setBodyEditorTab] = useState<"write" | "preview">("write");
+  const [recipeImagesBusy, setRecipeImagesBusy] = useState(false);
+  const [recipeImagesError, setRecipeImagesError] = useState<string | null>(null);
+  const [recipeImageInputKey, setRecipeImageInputKey] = useState(0);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bodyCharacterCount = form.body.length;
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
 
-  const canSubmit = useMemo(
-    () =>
-      form.headline.trim().length > 0 &&
-      form.body.trim().length > 0 &&
-      !isBodyTooLong,
-    [form.body, form.headline, isBodyTooLong]
-  );
+  const canSubmit = useMemo(() => {
+    if (form.contentKind === "recipe") {
+      const servings = Math.trunc(Number(form.recipeServings));
+      const servingsOk = Number.isFinite(servings) && servings > 0;
+      const ingredients = form.recipeIngredientsText
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const instructions = form.recipeInstructionsText
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+
+      const prep = Math.trunc(Number(form.recipePrepTimeMinutes));
+      const cook = Math.trunc(Number(form.recipeCookTimeMinutes));
+      const prepOk = Number.isFinite(prep) && prep >= 0;
+      const cookOk = Number.isFinite(cook) && cook >= 0;
+
+      return (
+        form.headline.trim().length > 0 &&
+        servingsOk &&
+        ingredients.length > 0 &&
+        instructions.length > 0 &&
+        prepOk &&
+        cookOk
+      );
+    }
+
+    return form.headline.trim().length > 0 && form.body.trim().length > 0 && !isBodyTooLong;
+  }, [
+    form.contentKind,
+    form.headline,
+    form.body,
+    isBodyTooLong,
+    form.recipeServings,
+    form.recipeIngredientsText,
+    form.recipeInstructionsText,
+    form.recipePrepTimeMinutes,
+    form.recipeCookTimeMinutes,
+  ]);
 
   function insertMarkdown(before: string, after = "", placeholder = "text") {
     const textarea = bodyTextareaRef.current;
@@ -106,6 +158,36 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         .split(",")
         .map((part) => part.trim())
         .filter(Boolean);
+      const isRecipe = form.contentKind === "recipe";
+
+      const recipeServings = isRecipe ? Math.trunc(Number(form.recipeServings)) : null;
+      const recipeIngredients = isRecipe
+        ? form.recipeIngredientsText
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+        : [];
+      const recipeInstructions = isRecipe
+        ? form.recipeInstructionsText
+            .split(/\n\s*\n/)
+            .map((p) => p.trim())
+            .filter(Boolean)
+        : [];
+      const recipePrepTimeMinutes = isRecipe ? Math.trunc(Number(form.recipePrepTimeMinutes)) : null;
+      const recipeCookTimeMinutes = isRecipe ? Math.trunc(Number(form.recipeCookTimeMinutes)) : null;
+      const bodyToSend = isRecipe
+        ? [
+            recipeIngredients.length > 0
+              ? `Ingredients:\n${recipeIngredients.map((i) => `- ${i}`).join("\n")}`
+              : "",
+            recipeInstructions.length > 0
+              ? `Instructions:\n${recipeInstructions.join("\n\n")}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+        : form.body;
+
       const isEdit = editingId != null;
       const response = await fetch(
         isEdit ? `/api/creator/submissions/${editingId}` : "/api/creator/submissions",
@@ -115,9 +197,16 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           body: JSON.stringify({
             headline: form.headline,
             subheadline: form.subheadline,
-            body: form.body,
+            body: bodyToSend,
             pullQuote: form.pullQuote,
             category: form.category,
+            contentKind: form.contentKind,
+            recipeServings: isRecipe ? recipeServings : undefined,
+            recipeIngredients: isRecipe ? recipeIngredients : undefined,
+            recipeInstructions: isRecipe ? recipeInstructions : undefined,
+            recipePrepTimeMinutes: isRecipe ? recipePrepTimeMinutes : undefined,
+            recipeCookTimeMinutes: isRecipe ? recipeCookTimeMinutes : undefined,
+            recipeImages: isRecipe ? form.recipeImages : undefined,
             locale: form.locale,
             explicitHashtags,
           }),
@@ -148,8 +237,30 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       body: submission.body,
       pullQuote: submission.pullQuote,
       category: submission.category,
+      contentKind: submission.contentKind,
       locale: submission.locale,
       explicitHashtags: submission.explicitHashtags.join(", "),
+      recipeServings:
+        submission.contentKind === "recipe"
+          ? String(submission.recipeServings ?? "")
+          : "",
+      recipeIngredientsText:
+        submission.contentKind === "recipe"
+          ? (submission.recipeIngredients ?? []).join("\n")
+          : "",
+      recipeInstructionsText:
+        submission.contentKind === "recipe"
+          ? (submission.recipeInstructions ?? []).join("\n\n")
+          : "",
+      recipePrepTimeMinutes:
+        submission.contentKind === "recipe"
+          ? String(submission.recipePrepTimeMinutes ?? "")
+          : "",
+      recipeCookTimeMinutes:
+        submission.contentKind === "recipe"
+          ? String(submission.recipeCookTimeMinutes ?? "")
+          : "",
+      recipeImages: submission.contentKind === "recipe" ? submission.recipeImages ?? [] : [],
     });
   }
 
@@ -243,7 +354,32 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </option>
               ))}
             </select>
-            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.6rem" }}>
+            <select
+              value={form.contentKind}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  contentKind:
+                    e.target.value === "recipe" ? "recipe" : "user_article",
+                  body:
+                    e.target.value === "recipe"
+                      ? ""
+                      : f.body,
+                }))
+              }
+              style={{ padding: "0.45rem", border: "1px solid #bbb" }}
+            >
+              <option value="user_article">User article</option>
+              <option value="recipe">Recipe</option>
+            </select>
+            {form.contentKind === "user_article" ? (
+              <div
+                style={{
+                  border: "1px solid #d8d2c7",
+                  background: "#fff",
+                  padding: "0.6rem",
+                }}
+              >
               <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
                 <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>Article body (Markdown)</label>
                 <span style={{ fontSize: "0.78rem", color: isBodyTooLong ? "#8b4513" : "#666" }}>
@@ -336,7 +472,229 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
               <p style={{ margin: "0.45rem 0 0", fontSize: "0.76rem", color: "#666" }}>
                 Typography is handled with curated reading presets in the app for consistency and safety.
               </p>
-            </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  border: "1px solid #d8d2c7",
+                  background: "#fff",
+                  padding: "0.75rem",
+                }}
+              >
+                <h3
+                  style={{
+                    margin: 0,
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "1rem",
+                    marginBottom: "0.75rem",
+                  }}
+                >
+                  Recipe details
+                </h3>
+
+                <div style={{ display: "grid", gap: "0.55rem" }}>
+                  <div style={{ display: "flex", gap: "0.55rem", flexWrap: "wrap" }}>
+                    <div style={{ flex: "1 1 160px" }}>
+                      <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                        Servings
+                      </label>
+                      <input
+                        type="number"
+                        value={form.recipeServings}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, recipeServings: e.target.value }))
+                        }
+                        placeholder="e.g. 4"
+                        style={{ width: "100%", padding: "0.45rem", border: "1px solid #bbb", boxSizing: "border-box" }}
+                      />
+                    </div>
+                    <div style={{ flex: "1 1 160px" }}>
+                      <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                        Prep time (minutes)
+                      </label>
+                      <input
+                        type="number"
+                        value={form.recipePrepTimeMinutes}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, recipePrepTimeMinutes: e.target.value }))
+                        }
+                        placeholder="e.g. 15"
+                        style={{ width: "100%", padding: "0.45rem", border: "1px solid #bbb", boxSizing: "border-box" }}
+                      />
+                    </div>
+                    <div style={{ flex: "1 1 160px" }}>
+                      <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                        Cook time (minutes)
+                      </label>
+                      <input
+                        type="number"
+                        value={form.recipeCookTimeMinutes}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, recipeCookTimeMinutes: e.target.value }))
+                        }
+                        placeholder="e.g. 25"
+                        style={{ width: "100%", padding: "0.45rem", border: "1px solid #bbb", boxSizing: "border-box" }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                      Ingredients (one per line)
+                    </label>
+                    <textarea
+                      value={form.recipeIngredientsText}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, recipeIngredientsText: e.target.value }))
+                      }
+                      placeholder={"1 tbsp olive oil\n1 onion, diced\n2 cloves garlic"}
+                      style={{
+                        minHeight: "120px",
+                        width: "100%",
+                        padding: "0.55rem",
+                        border: "1px solid #bbb",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                      Instructions (separate steps with a blank line)
+                    </label>
+                    <textarea
+                      value={form.recipeInstructionsText}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          recipeInstructionsText: e.target.value,
+                        }))
+                      }
+                      placeholder={"Step one...\n\nStep two...\n\nStep three..."}
+                      style={{
+                        minHeight: "160px",
+                        width: "100%",
+                        padding: "0.55rem",
+                        border: "1px solid #bbb",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
+                      Recipe pictures (up to 3)
+                    </label>
+                    <input
+                      key={recipeImageInputKey}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      disabled={recipeImagesBusy}
+                      onChange={async (e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        if (files.length === 0) return;
+                        if (files.length > 3) {
+                          setRecipeImagesError("Please select up to 3 images.");
+                          return;
+                        }
+                        setRecipeImagesError(null);
+                        setRecipeImagesBusy(true);
+                        try {
+                          const fd = new FormData();
+                          for (const f of files) fd.append("files", f);
+                          const res = await fetch(
+                            "/api/user/recipe-images/upload",
+                            {
+                              method: "POST",
+                              body: fd,
+                              credentials: "include",
+                            }
+                          );
+                          const payload = await res.json().catch(() => ({}));
+                          if (!res.ok) {
+                            throw new Error(
+                              typeof payload.error === "string"
+                                ? payload.error
+                                : "Upload failed"
+                            );
+                          }
+                          const urls = Array.isArray(payload.urls)
+                            ? (payload.urls as string[])
+                            : [];
+                          setForm((f) => ({ ...f, recipeImages: urls }));
+                        } catch (err: unknown) {
+                          const msg =
+                            err instanceof Error ? err.message : "Upload failed";
+                          setRecipeImagesError(msg);
+                        } finally {
+                          setRecipeImagesBusy(false);
+                        }
+                      }}
+                      style={{ padding: "0.4rem", border: "1px solid #bbb", background: "#fff" }}
+                    />
+                    {recipeImagesError ? (
+                      <p style={{ margin: 0, color: "#8b4513", fontSize: "0.82rem" }}>
+                        {recipeImagesError}
+                      </p>
+                    ) : null}
+                    {form.recipeImages.length > 0 ? (
+                      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                        {form.recipeImages.map((url, idx) => (
+                          <div
+                            key={`${url}-${idx}`}
+                            style={{
+                              border: "1px solid #d8d2c7",
+                              background: "#faf8f3",
+                              padding: "0.35rem",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <img
+                              src={url}
+                              alt={`Recipe image ${idx + 1}`}
+                              width={90}
+                              height={90}
+                              style={{
+                                width: 90,
+                                height: 90,
+                                objectFit: "cover",
+                                display: "block",
+                                borderRadius: "4px",
+                              }}
+                            />
+                            <button
+                              type="button"
+                              style={{
+                                marginTop: "0.35rem",
+                                padding: "0.25rem 0.45rem",
+                                border: "1px solid #888",
+                                background: "#fff",
+                                cursor: "pointer",
+                                fontFamily: "'Playfair Display', Georgia, serif",
+                                fontSize: "0.72rem",
+                              }}
+                              onClick={() => {
+                                setForm((f) => ({
+                                  ...f,
+                                  recipeImages: f.recipeImages.filter((_, i) => i !== idx),
+                                }));
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ margin: 0, color: "#777", fontSize: "0.82rem" }}>
+                        Optional.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <input value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
             <input value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
             <input value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
@@ -373,7 +731,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
                   </div>
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
-                    {submission.category} • {new Date(submission.createdAt).toLocaleString()}
+                    {submission.category} • {submission.contentKind === "recipe" ? "Recipe" : "Article"} • {new Date(submission.createdAt).toLocaleString()}
                   </p>
                   {submission.adminNote ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>

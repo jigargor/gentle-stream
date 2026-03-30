@@ -98,11 +98,19 @@ function buildTaggerPrompt(article: StoredArticle): string {
     explicitTags.length > 0
       ? `Author-supplied tags (must all appear in "tags"): ${explicitTags.join(", ")}`
       : "Author-supplied tags: none";
+  const contentKind = article.contentKind ?? (article.source === "creator" ? "user_article" : "news");
+  const classifyLabel =
+    contentKind === "recipe"
+      ? "recipe"
+      : contentKind === "user_article"
+        ? "user-written article"
+        : "news article";
 
-  return `Classify this news article. Return raw JSON only, no markdown.
+  return `Classify this ${classifyLabel}. Return raw JSON only, no markdown.
 
 Headline: ${article.headline}
 Category: ${article.category}
+Content kind: ${contentKind}
 Body: ${article.body.slice(0, 800)}
 ${explicitTagLine}
 

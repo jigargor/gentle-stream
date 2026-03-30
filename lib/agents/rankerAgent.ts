@@ -22,6 +22,7 @@ import {
 import { getOrCreateUserProfile, markArticlesSeen } from "../db/users";
 import { getUserAffinityRows } from "../db/engagement";
 import type {
+  ArticleContentKind,
   FeedSelectionMode,
   StoredArticle,
   UserProfile,
@@ -47,6 +48,7 @@ interface RankOptions {
   pageSize?: number;             // articles per section (default 3)
   markSeen?: boolean;            // default true
   excludeArticleIds?: string[];  // force uniqueness against already-rendered feed items
+  contentKinds?: ArticleContentKind[] | null;
 }
 
 /**
@@ -72,7 +74,8 @@ async function collectCandidatesAcrossCategories(
   profile: UserProfile,
   sectionIndex: number,
   poolSize: number,
-  excludeIds: string[]
+  excludeIds: string[],
+  contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
   const collected: StoredArticle[] = [];
@@ -84,7 +87,8 @@ async function collectCandidatesAcrossCategories(
     const batch = await getArticlesForFeed(
       cat,
       remaining + 8,
-      excludeIds
+      excludeIds,
+      contentKinds
     );
     for (const article of batch) {
       if (collectedIds.has(article.id)) continue;
@@ -101,7 +105,8 @@ async function collectUntaggedAcrossCategories(
   profile: UserProfile,
   sectionIndex: number,
   poolSize: number,
-  excludeIds: string[]
+  excludeIds: string[],
+  contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
   const collected: StoredArticle[] = [];
@@ -113,7 +118,8 @@ async function collectUntaggedAcrossCategories(
     const batch = await getUntaggedArticlesForFeed(
       cat,
       remaining + 8,
-      excludeIds
+      excludeIds,
+      contentKinds
     );
     for (const article of batch) {
       if (collectedIds.has(article.id)) continue;
@@ -168,6 +174,7 @@ export async function getRankedFeed(
     pageSize = 3,
     markSeen = true,
     excludeArticleIds = [],
+    contentKinds = null,
   } = options;
 
   const profile = await getOrCreateUserProfile(userId);
@@ -189,12 +196,13 @@ export async function getRankedFeed(
   // Fetch a candidate pool (fetch more than needed so we can rank and trim)
   const poolSize = pageSize * 5;
   let candidates = category
-    ? await getArticlesForFeed(category, poolSize, effectiveExcludeIds)
+    ? await getArticlesForFeed(category, poolSize, effectiveExcludeIds, contentKinds ?? undefined)
     : await collectCandidatesAcrossCategories(
         profile,
         sectionIndex,
         poolSize,
-        effectiveExcludeIds
+        effectiveExcludeIds,
+        contentKinds ?? undefined
       );
 
   // If nothing is tagged yet (tagger backlog / 429), still show fresh ingested rows
@@ -203,13 +211,15 @@ export async function getRankedFeed(
       ? await getUntaggedArticlesForFeed(
           category,
           poolSize,
-          effectiveExcludeIds
+          effectiveExcludeIds,
+          contentKinds ?? undefined
         )
       : await collectUntaggedAcrossCategories(
           profile,
           sectionIndex,
           poolSize,
-          effectiveExcludeIds
+          effectiveExcludeIds,
+          contentKinds ?? undefined
         );
   }
 
@@ -222,7 +232,8 @@ export async function getRankedFeed(
   if (candidates.length === 0) {
     candidates = await getRandomAvailableArticles(
       poolSize,
-      effectiveExcludeIds
+      effectiveExcludeIds,
+      contentKinds ?? undefined
     );
     if (candidates.length > 0) {
       selectionMode = "random_pool";
@@ -233,7 +244,7 @@ export async function getRankedFeed(
 
   // Still empty (e.g. user has seen everything in the sampled pool) — allow repeats
   if (candidates.length === 0) {
-    candidates = await getRandomArticlesResurfacing(poolSize);
+    candidates = await getRandomArticlesResurfacing(poolSize, contentKinds ?? undefined);
     if (candidates.length > 0) {
       selectionMode = "random_resurface";
       sectionCategoryLabel = MIXED_SECTION_LABEL;

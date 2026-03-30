@@ -3,6 +3,7 @@ export const ARTICLE_ENGAGEMENT_EVENT_TYPES = [
   "open",
   "read_30s",
   "read_75pct",
+  "read_dwell",
   "like",
   "save",
   "share",

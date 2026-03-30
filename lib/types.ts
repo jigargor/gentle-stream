@@ -19,6 +19,7 @@ export interface StoredArticle extends RawArticle {
   fetchedAt: string;           // ISO timestamp
   expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
   source?: ArticleSource;
+  contentKind?: ArticleContentKind;
   authorUserId?: string | null;
   /** Filled when loading creator articles: display name (may differ from @username). */
   authorPenName?: string | null;
@@ -38,6 +39,14 @@ export interface StoredArticle extends RawArticle {
   // Feed mechanics
   usedCount: number;           // how many feed responses included this article
   tagged: boolean;             // false until tagger agent has run
+
+  // Recipe-specific fields (contentKind='recipe')
+  recipeServings?: number | null;
+  recipeIngredients?: string[];
+  recipeInstructions?: string[];
+  recipePrepTimeMinutes?: number | null;
+  recipeCookTimeMinutes?: number | null;
+  recipeImages?: string[];
 }
 
 export type ArticleSentiment =
@@ -47,6 +56,8 @@ export type ArticleSentiment =
   | "triumphant";
 
 export type ArticleSource = "ingest" | "creator";
+export type ArticleContentKind = "news" | "user_article" | "recipe";
+export type SubmissionContentKind = "user_article" | "recipe";
 
 // ─── User profile ─────────────────────────────────────────────────────────────
 
@@ -102,6 +113,7 @@ export interface ArticleSubmission {
   body: string;
   pullQuote: string;
   category: Category;
+  contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
   status: ArticleSubmissionStatus;
@@ -112,6 +124,14 @@ export interface ArticleSubmission {
   publishedArticleId: string | null;
   createdAt: string;
   updatedAt: string;
+
+  // Recipe-specific draft fields (contentKind='recipe')
+  recipeServings?: number | null;
+  recipeIngredients?: string[];
+  recipeInstructions?: string[];
+  recipePrepTimeMinutes?: number | null;
+  recipeCookTimeMinutes?: number | null;
+  recipeImages?: string[];
 }
 
 /** Row from `article_saves` for library UI */
@@ -154,6 +174,7 @@ export interface UserGameStats {
 export interface FeedRequest {
   userId: string;
   category?: Category | null;
+  contentKinds?: ArticleContentKind[] | null;
   sectionIndex: number;
   pageSize?: number;           // default 3 (one newspaper section = 3 articles)
 }

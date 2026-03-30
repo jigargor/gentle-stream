@@ -25,6 +25,7 @@ import {
 import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { trackArticleEngagement } from "@/lib/engagement/client";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { ShareMenu } from "@/components/articles/ShareMenu";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
@@ -163,10 +164,15 @@ export default function ArticleCard({
   /** 401 → hide like (not signed in). */
   const [showLikeButton, setShowLikeButton] = useState(false);
   const [likeStatusLoaded, setLikeStatusLoaded] = useState(false);
+  const [showRecipeRating, setShowRecipeRating] = useState(false);
+  const [recipeRatingLoaded, setRecipeRatingLoaded] = useState(false);
+  const [recipeRatingBusy, setRecipeRatingBusy] = useState(false);
+  const [recipeRating, setRecipeRating] = useState<number | null>(null);
   const impressionLoggedRef = useRef(false);
   const openLoggedRef = useRef(false);
   const read30LoggedRef = useRef(false);
   const read75LoggedRef = useRef(false);
+  const dwellLoggedRef = useRef(false);
   const visibleSinceRef = useRef<number | null>(null);
   const visibleAccumMsRef = useRef(0);
 
@@ -250,6 +256,8 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
+  const isRecipeCard =
+    "contentKind" in article && article.contentKind === "recipe";
   const engagementContext = useMemo(
     () => ({
       source: "feed" as const,
@@ -261,7 +269,10 @@ export default function ArticleCard({
   );
 
   const emitEngagement = useCallback(
-    (eventType: "impression" | "open" | "read_30s" | "read_75pct", eventValue?: number) => {
+    (
+      eventType: "impression" | "open" | "read_30s" | "read_75pct" | "read_dwell",
+      eventValue?: number
+    ) => {
       if (!userApiAllowed) return;
       if (!articleId) return;
       trackArticleEngagement({
@@ -285,9 +296,75 @@ export default function ArticleCard({
     openLoggedRef.current = false;
     read30LoggedRef.current = false;
     read75LoggedRef.current = false;
+    dwellLoggedRef.current = false;
     visibleSinceRef.current = null;
     visibleAccumMsRef.current = 0;
   }, [articleId]);
+
+  useEffect(() => {
+    if (!isRecipeCard) {
+      setShowRecipeRating(false);
+      setRecipeRating(null);
+      setRecipeRatingLoaded(false);
+      return;
+    }
+    if (!userApiAllowed) {
+      setShowRecipeRating(false);
+      setRecipeRating(null);
+      setRecipeRatingLoaded(true);
+      return;
+    }
+    if (!articleId) {
+      setShowRecipeRating(false);
+      setRecipeRating(null);
+      setRecipeRatingLoaded(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRecipeRatingLoaded(false);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/user/recipe-ratings?articleId=${encodeURIComponent(articleId)}`,
+          { credentials: "include" }
+        );
+        if (cancelled) return;
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+          setRecipeRatingLoaded(true);
+          return;
+        }
+        if (!res.ok) {
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+          return;
+        }
+        const body = (await res.json().catch(() => ({}))) as {
+          rating?: number | null;
+        };
+        setShowRecipeRating(true);
+        setRecipeRating(
+          typeof body.rating === "number" && body.rating >= 0 && body.rating <= 5
+            ? Math.round(body.rating)
+            : null
+        );
+      } catch {
+        if (!cancelled) {
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+        }
+      } finally {
+        if (!cancelled) setRecipeRatingLoaded(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [articleId, isRecipeCard]);
 
   useEffect(() => {
     if (!userApiAllowed) {
@@ -408,6 +485,11 @@ export default function ArticleCard({
       if (visibleSinceRef.current != null) {
         visibleAccumMsRef.current += Date.now() - visibleSinceRef.current;
         visibleSinceRef.current = null;
+      }
+      const totalVisibleSec = Math.round(visibleAccumMsRef.current / 1000);
+      if (!dwellLoggedRef.current && totalVisibleSec >= 5) {
+        dwellLoggedRef.current = true;
+        emitEngagement("read_dwell", totalVisibleSec);
       }
     };
   }, [articleId, emitEngagement]);
@@ -601,6 +683,37 @@ export default function ArticleCard({
     sourceUrls,
   ]);
 
+  const rateRecipe = useCallback(
+    async (nextRating: number) => {
+      if (!userApiAllowed || !isRecipeCard || !articleId || recipeRatingBusy) return;
+      setRecipeRatingBusy(true);
+      const previousRating = recipeRating;
+      setRecipeRating(nextRating);
+      try {
+        const res = await fetch("/api/user/recipe-ratings", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ articleId, rating: nextRating }),
+        });
+        if (res.status === 401) {
+          userApiAllowed = false;
+          setShowRecipeRating(false);
+          setRecipeRating(null);
+          return;
+        }
+        if (!res.ok) {
+          setRecipeRating(previousRating);
+        }
+      } catch {
+        setRecipeRating(previousRating);
+      } finally {
+        setRecipeRatingBusy(false);
+      }
+    },
+    [articleId, isRecipeCard, recipeRating, recipeRatingBusy]
+  );
+
   const headlineStyle = {
     fontFamily: "'Playfair Display', Georgia, serif",
     fontSize: headlineSizePx,
@@ -732,7 +845,7 @@ export default function ArticleCard({
         {article.location && <span>&middot; {article.location}</span>}
       </div>
 
-      {canSave && (
+      {(canSave || articleId) && (
         <div
           style={{
             display: "flex",
@@ -741,29 +854,31 @@ export default function ArticleCard({
             flexWrap: "wrap",
           }}
         >
-          <button
-            type="button"
-            disabled={saveBusy || !saveStatusLoaded}
-            onClick={() => void toggleSave()}
-            aria-label={
-              saveBusy
-                ? "Updating library"
-                : saved
-                  ? "Remove from library"
-                  : "Save to library"
-            }
-            aria-pressed={saved}
-            style={{
-              ...iconActionStyle,
-              opacity: saveBusy || !saveStatusLoaded ? 0.5 : 1,
-              cursor:
-                saveBusy || !saveStatusLoaded ? "wait" : "pointer",
-              color: "#1a1a1a",
-            }}
-          >
-            {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
-          </button>
-          {showLikeButton && (
+          {canSave ? (
+            <button
+              type="button"
+              disabled={saveBusy || !saveStatusLoaded}
+              onClick={() => void toggleSave()}
+              aria-label={
+                saveBusy
+                  ? "Updating library"
+                  : saved
+                    ? "Remove from library"
+                    : "Save to library"
+              }
+              aria-pressed={saved}
+              style={{
+                ...iconActionStyle,
+                opacity: saveBusy || !saveStatusLoaded ? 0.5 : 1,
+                cursor:
+                  saveBusy || !saveStatusLoaded ? "wait" : "pointer",
+                color: "#1a1a1a",
+              }}
+            >
+              {saved ? <BookmarkFilledIcon /> : <BookmarkOutlineIcon />}
+            </button>
+          ) : null}
+          {showLikeButton && canSave ? (
             <button
               type="button"
               disabled={likeBusy || !likeStatusLoaded}
@@ -780,7 +895,15 @@ export default function ArticleCard({
             >
               {liked ? <HeartFilledIcon /> : <HeartOutlineIcon />}
             </button>
-          )}
+          ) : null}
+          {articleId ? (
+            <ShareMenu
+              articleId={articleId}
+              headline={article.headline}
+              byline={article.byline}
+              body={article.body ?? ""}
+            />
+          ) : null}
           {saveMsg && (
             <span
               style={{
@@ -797,6 +920,62 @@ export default function ArticleCard({
               {saveMsg}
             </span>
           )}
+        </div>
+      )}
+
+      {isRecipeCard && showRecipeRating && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.45rem",
+            flexWrap: "wrap",
+            marginTop: "0.1rem",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.72rem",
+              color: "#555",
+            }}
+          >
+            Rate recipe:
+          </span>
+          {[0, 1, 2, 3, 4, 5].map((value) => {
+            const active = (recipeRating ?? -1) >= value && value > 0;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => void rateRecipe(value)}
+                disabled={recipeRatingBusy || !recipeRatingLoaded}
+                style={{
+                  border: "1px solid #d8d2c7",
+                  background: value === 0 ? "#fff" : active ? "#f7d26a" : "#fff",
+                  color: "#1a1a1a",
+                  padding: "0.2rem 0.42rem",
+                  lineHeight: 1,
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: value === 0 ? "0.72rem" : "0.82rem",
+                  cursor:
+                    recipeRatingBusy || !recipeRatingLoaded ? "wait" : "pointer",
+                }}
+                aria-label={`Rate recipe ${value} star${value === 1 ? "" : "s"}`}
+              >
+                {value === 0 ? "0" : "★"}
+              </button>
+            );
+          })}
+          <span
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontSize: "0.68rem",
+              color: "#666",
+            }}
+          >
+            {recipeRating == null ? "Not rated" : `${recipeRating}/5`}
+          </span>
         </div>
       )}
 
@@ -889,12 +1068,90 @@ export default function ArticleCard({
       {/* Body copy */}
       <div
         style={{
-          columns: isHero ? 2 : 1,
+          columns: isRecipeCard ? 1 : isHero ? 2 : 1,
           columnGap: "1.5rem",
           columnRule: "1px solid #d4cfc4",
         }}
       >
-        <ArticleBodyMarkdown markdown={article.body ?? ""} variant="feed" fontPreset="classic" />
+        {isRecipeCard ? (
+          <div style={{ display: "grid", gap: "0.65rem", breakInside: "avoid-column" }}>
+            {("recipeImages" in article && (article.recipeImages?.length ?? 0) > 0) ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "0.35rem" }}>
+                {(article.recipeImages ?? []).slice(0, 3).map((src, i) => (
+                  <img
+                    key={`${src}-${i}`}
+                    src={src}
+                    alt={`Recipe image ${i + 1}`}
+                    loading="lazy"
+                    decoding="async"
+                    width={210}
+                    height={140}
+                    style={{
+                      width: "100%",
+                      aspectRatio: "3 / 2",
+                      objectFit: "cover",
+                      borderRadius: 6,
+                      border: "1px solid #ddd",
+                      background: "#fff",
+                      display: "block",
+                    }}
+                    onError={(e) => {
+                      // Best-effort: hide broken thumbnails.
+                      const el = e.currentTarget;
+                      el.style.display = "none";
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap" }}>
+              {("recipeServings" in article && article.recipeServings != null) ? (
+                <span style={{ fontFamily: "'Playfair Display', Georgia, serif", color: "#1a472a", fontWeight: 700 }}>
+                  Serves {article.recipeServings}
+                </span>
+              ) : null}
+              {("recipePrepTimeMinutes" in article && article.recipePrepTimeMinutes != null) ? (
+                <span style={{ color: "#555" }}>Prep {article.recipePrepTimeMinutes} min</span>
+              ) : null}
+              {("recipeCookTimeMinutes" in article && article.recipeCookTimeMinutes != null) ? (
+                <span style={{ color: "#555" }}>Cook {article.recipeCookTimeMinutes} min</span>
+              ) : null}
+            </div>
+
+            {("recipeIngredients" in article && (article.recipeIngredients?.length ?? 0) > 0) ? (
+              <div style={{ breakInside: "avoid" }}>
+                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "#333", marginBottom: "0.25rem" }}>
+                  Ingredients
+                </div>
+                <ul style={{ margin: 0, paddingLeft: "1.15rem", color: "#1a1a1a", lineHeight: 1.6 }}>
+                  {(article.recipeIngredients ?? []).map((ing, i) => (
+                    <li key={`${ing}-${i}`}>{ing}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {("recipeInstructions" in article && (article.recipeInstructions?.length ?? 0) > 0) ? (
+              <div style={{ breakInside: "avoid-column" }}>
+                <div style={{ fontFamily: "'IM Fell English', Georgia, serif", fontWeight: 700, color: "#333", marginBottom: "0.25rem" }}>
+                  Instructions
+                </div>
+                <ol style={{ margin: 0, paddingLeft: "1.15rem", color: "#1a1a1a", lineHeight: 1.6 }}>
+                  {(article.recipeInstructions ?? []).map((step, i) => (
+                    <li key={`${step}-${i}`}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <ArticleBodyMarkdown
+            markdown={article.body ?? ""}
+            variant="feed"
+            fontPreset="classic"
+          />
+        )}
       </div>
 
       {article.pullQuote?.trim() ? (

@@ -10,7 +10,13 @@ import GameSlot from "./games/GameSlot";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
-import type { Article, FeedSection, ArticleFeedSection, GameFeedSection } from "@/lib/types";
+import type {
+  Article,
+  ArticleContentKind,
+  FeedSection,
+  ArticleFeedSection,
+  GameFeedSection,
+} from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 
@@ -56,6 +62,7 @@ const FEED_FETCH_TIMEOUT_MS = 90_000;
 const SENTINEL_PREFETCH_PX = 900;
 const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
+type FeedKindFilter = "all" | ArticleContentKind;
 
 export interface NewsFeedProps {
   /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
@@ -70,6 +77,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
+  const [activeKindFilter, setActiveKindFilter] = useState<FeedKindFilter>("all");
   const [liveGenerating, setLiveGenerating] = useState(false);
   /** True once game ratio is resolved for the current session/user bootstrap. */
   const [isFeedReady, setIsFeedReady] = useState(false);
@@ -83,6 +91,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const connectionsCompletedTodayRef = useRef(false);
   const connectionsShownInSessionRef = useRef(false);
   const activeCategoryRef = useRef<Category | null>(null);
+  const activeKindFilterRef = useRef<FeedKindFilter>("all");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
@@ -125,6 +134,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       overrideCategory !== undefined
         ? overrideCategory
         : activeCategoryRef.current;
+      const kindFilter = activeKindFilterRef.current;
 
     const currentIndex = sectionCountRef.current;
 
@@ -166,6 +176,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       const params = new URLSearchParams();
       params.set("sectionIndex", String(currentIndex));
       if (category) params.set("category", category);
+      if (kindFilter !== "all") params.set("contentKind", kindFilter);
       const excludeIds = Array.from(renderedDbArticleIdsRef.current).slice(-400);
       if (excludeIds.length > 0) params.set("excludeIds", excludeIds.join(","));
 
@@ -425,6 +436,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     activeCategoryRef.current = activeCategory;
   }, [activeCategory]);
 
+  useEffect(() => {
+    activeKindFilterRef.current = activeKindFilter;
+  }, [activeKindFilter]);
+
   // Re-attach when sections change so layout updates don't leave the sentinel unobserved
   useEffect(() => {
     if (!isFeedReady) return;
@@ -503,6 +518,32 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     [loadMore]
   );
 
+  const handleKindFilterSelect = useCallback(
+    (next: FeedKindFilter) => {
+      if (next === activeKindFilterRef.current) return;
+      setActiveKindFilter(next);
+      activeKindFilterRef.current = next;
+      reachedEndRef.current = false;
+      if (reachedEndTimeoutIdRef.current) {
+        window.clearTimeout(reachedEndTimeoutIdRef.current);
+        reachedEndTimeoutIdRef.current = null;
+      }
+      pendingLoadRef.current = false;
+      setSections([]);
+      sectionCountRef.current = 0;
+      gameSlotOrdinalRef.current = 0;
+      connectionsShownInSessionRef.current = false;
+      loadingRef.current = false;
+      setLoading(false);
+      setError(null);
+      lastArticleCategoryRef.current = undefined;
+      renderedArticleKeysRef.current = new Set();
+      renderedDbArticleIdsRef.current = new Set();
+      void loadMore();
+    },
+    [loadMore]
+  );
+
   if (!mfaPassed) {
     return <MfaChallengeGate onPassed={() => setMfaPassed(true)} />;
   }
@@ -525,6 +566,50 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         onSelect={handleCategorySelect}
         topOffsetPx={MASTHEAD_TOP_BAR_HEIGHT_PX}
       />
+
+      <div
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          padding: "0.55rem 0.85rem 0",
+          display: "flex",
+          gap: "0.4rem",
+          flexWrap: "wrap",
+          alignItems: "center",
+          background: "#faf8f3",
+        }}
+      >
+        {(
+          [
+            { value: "all", label: "All" },
+            { value: "news", label: "News" },
+            { value: "user_article", label: "User articles" },
+            { value: "recipe", label: "Recipes" },
+          ] as const
+        ).map((option) => {
+          const active = activeKindFilter === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => handleKindFilterSelect(option.value)}
+              style={{
+                border: active ? "2px solid #1a1a1a" : "1px solid #d8d2c7",
+                background: active ? "#c8a84b" : "#fff",
+                color: "#1a1a1a",
+                padding: "0.35rem 0.55rem",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.7rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
 
       {liveGenerating && (
         <div

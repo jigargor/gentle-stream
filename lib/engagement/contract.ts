@@ -31,6 +31,25 @@ function normalizeOccurredAt(raw: unknown): string {
   return d.toISOString();
 }
 
+function normalizeEventValue(
+  eventType: (typeof ARTICLE_ENGAGEMENT_EVENT_TYPES)[number],
+  raw: unknown
+): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+
+  const n = raw;
+  if (eventType === "impression" || eventType === "read_75pct")
+    return Math.max(0, Math.min(1, n));
+
+  if (eventType === "read_30s" || eventType === "read_dwell")
+    return Math.max(0, Math.min(1800, n));
+
+  if (eventType === "like" || eventType === "save" || eventType === "share")
+    return Math.max(0, Math.min(1, n));
+
+  return n;
+}
+
 export interface NormalizedEngagementRow {
   user_id: string;
   article_id: string;
@@ -86,10 +105,7 @@ function normalizeOneEvent(
     user_id: userId,
     article_id: event.articleId,
     event_type: event.eventType,
-    event_value:
-      typeof event.eventValue === "number" && Number.isFinite(event.eventValue)
-        ? event.eventValue
-        : null,
+    event_value: normalizeEventValue(event.eventType, event.eventValue),
     session_id:
       typeof event.sessionId === "string" && event.sessionId.trim().length > 0
         ? event.sessionId.trim()

@@ -7,6 +7,7 @@ import {
   HOUSE_AVATAR_URLS,
 } from "@/lib/avatar";
 import type { UserProfile } from "@/lib/types";
+import { AvatarCropModal } from "@/components/user/AvatarCropModal";
 
 interface AvatarInputProps {
   userEmail: string;
@@ -39,6 +40,8 @@ export function AvatarInput({
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [previewBust, setPreviewBust] = useState(0);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const displaySrc = currentAvatarUrl
     ? `${currentAvatarUrl.split("?")[0]}?t=${previewBust}`
@@ -61,11 +64,21 @@ export function AvatarInput({
         return;
       }
 
+      setPendingFile(file);
+      setCropOpen(true);
+      onError("");
+    },
+    [onError, onProfileUpdate]
+  );
+
+  const uploadCropped = useCallback(
+    async (result: { blob: Blob; mime: "image/png"; filename: string }) => {
       setBusy(true);
       onError("");
       try {
         const fd = new FormData();
-        fd.set("file", file);
+        const croppedFile = new File([result.blob], result.filename, { type: result.mime });
+        fd.set("file", croppedFile);
         const res = await fetch("/api/user/avatar", {
           method: "POST",
           body: fd,
@@ -77,9 +90,7 @@ export function AvatarInput({
           profile?: UserProfile;
         };
         if (!res.ok) {
-          onError(
-            [data.error, data.hint].filter(Boolean).join(" ") || "Upload failed."
-          );
+          onError([data.error, data.hint].filter(Boolean).join(" ") || "Upload failed.");
           return;
         }
         if (data.profile) {
@@ -90,6 +101,8 @@ export function AvatarInput({
         onError("Upload failed — check your connection.");
       } finally {
         setBusy(false);
+        setCropOpen(false);
+        setPendingFile(null);
       }
     },
     [onError, onProfileUpdate]
@@ -159,6 +172,18 @@ export function AvatarInput({
 
   return (
     <div style={{ marginBottom: "0.55rem" }}>
+      {pendingFile ? (
+        <AvatarCropModal
+          file={pendingFile}
+          open={cropOpen}
+          onClose={() => {
+            if (busy) return;
+            setCropOpen(false);
+            setPendingFile(null);
+          }}
+          onConfirm={(result) => void uploadCropped(result)}
+        />
+      ) : null}
       <span
         style={{
           fontSize: "0.65rem",

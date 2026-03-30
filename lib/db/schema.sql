@@ -39,9 +39,18 @@ CREATE TABLE IF NOT EXISTS articles (
   -- Source metadata
   source          TEXT    NOT NULL DEFAULT 'ingest'
                     CHECK (source IN ('ingest', 'creator')),
+  content_kind    TEXT    NOT NULL DEFAULT 'news'
+                    CHECK (content_kind IN ('news', 'user_article', 'recipe')),
   author_user_id  TEXT,
   submission_id   UUID,
-  creator_explicit_tags TEXT[] NOT NULL DEFAULT '{}'
+  creator_explicit_tags TEXT[] NOT NULL DEFAULT '{}',
+  -- Recipe fields (used when content_kind='recipe')
+  recipe_servings INT,
+  recipe_ingredients TEXT[] NOT NULL DEFAULT '{}',
+  recipe_instructions TEXT[] NOT NULL DEFAULT '{}',
+  recipe_prep_time_minutes INT,
+  recipe_cook_time_minutes INT,
+  recipe_images TEXT[] NOT NULL DEFAULT '{}'
 );
 
 -- Index for fast per-category feed queries
@@ -54,6 +63,9 @@ CREATE INDEX IF NOT EXISTS idx_articles_category_expires
 
 CREATE INDEX IF NOT EXISTS idx_articles_source_tagged
   ON articles (source, tagged);
+
+CREATE INDEX IF NOT EXISTS idx_articles_content_kind_category_tagged
+  ON articles (content_kind, category, tagged);
 
 -- ─── User profiles ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -109,6 +121,8 @@ CREATE TABLE IF NOT EXISTS article_submissions (
   body                TEXT NOT NULL,
   pull_quote          TEXT NOT NULL DEFAULT '',
   category            TEXT NOT NULL,
+  content_kind        TEXT NOT NULL DEFAULT 'user_article'
+                      CHECK (content_kind IN ('user_article', 'recipe')),
   locale              TEXT NOT NULL DEFAULT 'global',
   explicit_hashtags   TEXT[] NOT NULL DEFAULT '{}',
   status              TEXT NOT NULL DEFAULT 'pending'
@@ -119,7 +133,14 @@ CREATE TABLE IF NOT EXISTS article_submissions (
   reviewed_at         TIMESTAMPTZ,
   published_article_id UUID REFERENCES articles (id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Recipe fields (used when content_kind='recipe')
+  recipe_servings INT,
+  recipe_ingredients TEXT[] NOT NULL DEFAULT '{}',
+  recipe_instructions TEXT[] NOT NULL DEFAULT '{}',
+  recipe_prep_time_minutes INT,
+  recipe_cook_time_minutes INT,
+  recipe_images TEXT[] NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_article_submissions_status_created_at
@@ -178,6 +199,15 @@ CREATE TABLE IF NOT EXISTS article_saves (
   summary        TEXT,
   saved_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   is_read        BOOLEAN NOT NULL DEFAULT FALSE,
+  UNIQUE (user_id, article_id)
+);
+
+CREATE TABLE IF NOT EXISTS recipe_ratings (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        TEXT NOT NULL,
+  article_id     UUID NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+  rating         SMALLINT NOT NULL CHECK (rating >= 0 AND rating <= 5),
+  rated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, article_id)
 );
 

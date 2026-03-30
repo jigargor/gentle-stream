@@ -17,7 +17,7 @@ export default async function PublicCreatorArticlePage({
   if (!UUID_RE.test(articleId)) notFound();
 
   const article = await getArticleById(articleId);
-  if (!article || article.source !== "creator") notFound();
+  if (!article) notFound();
 
   return (
     <div style={{ minHeight: "100vh", background: "#faf8f3", padding: "1.5rem 1rem 3rem" }}>

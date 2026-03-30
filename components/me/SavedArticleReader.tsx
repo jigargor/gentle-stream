@@ -9,6 +9,7 @@ import {
 } from "@/lib/source-links";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
+import { ShareMenu } from "@/components/articles/ShareMenu";
 
 interface SavedArticleReaderProps {
   article: StoredArticle;
@@ -80,6 +81,14 @@ export function SavedArticleReader({
             variant="reader"
           />
           {article.location ? <span> · {article.location}</span> : null}
+        </div>
+        <div style={{ marginTop: "0.65rem" }}>
+          <ShareMenu
+            articleId={article.id}
+            headline={article.headline}
+            byline={article.byline}
+            body={article.body ?? ""}
+          />
         </div>
       </header>
 

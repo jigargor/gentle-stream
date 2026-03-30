@@ -33,10 +33,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const snapshot = await getAvailableStockSnapshotByCategory();
   const runStartedAt = Date.now();
   const triggerSource = request.headers.get("x-vercel-cron") ? "vercel-cron" : "manual";
-  const runId = await createCronIngestRun(triggerSource);
+  let runId: string;
+  try {
+    runId = await createCronIngestRun(triggerSource);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json(
+      { error: `Could not create ingest run: ${message}` },
+      { status: 500 }
+    );
+  }
 
   const report: Record<
     string,
@@ -50,96 +58,183 @@ export async function GET(request: NextRequest) {
     }
   > = {};
   const categoryLogs: CronIngestCategoryLogInput[] = [];
-  const nowMs = Date.now();
   let hadErrors = false;
+  let warningCount = 0;
+  let totalInserted = 0;
+  let totalAttempted = 0;
+  let totalSkipped = 0;
+  let totalFailed = 0;
+  let totalRetried = 0;
+  const errorSummaryParts: string[] = [];
 
-  for (const cat of CATEGORIES) {
-    const row = snapshot[cat];
-    const available = row?.count ?? 0;
-    const newestFetchedAt = row?.newestFetchedAt ?? null;
-    report[cat] = {
-      before: available,
-      requested: 0,
-      ingested: 0,
-      newestFetchedAt,
-      reason: "none",
-    };
+  try {
+    const snapshot = await getAvailableStockSnapshotByCategory();
+    const nowMs = Date.now();
 
-    const freshnessStale =
-      newestFetchedAt == null ||
-      nowMs - Date.parse(newestFetchedAt) >
-        FRESHNESS_INGEST_HOURS * 60 * 60 * 1000;
+    for (const cat of CATEGORIES) {
+      const row = snapshot[cat];
+      const available = row?.count ?? 0;
+      const newestFetchedAt = row?.newestFetchedAt ?? null;
+      report[cat] = {
+        before: available,
+        requested: 0,
+        ingested: 0,
+        newestFetchedAt,
+        reason: "none",
+      };
 
-    if (available < STOCK_THRESHOLD) {
-      const deficitToTarget = Math.max(INGEST_BATCH_SIZE, STOCK_TARGET - available);
-      const ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, deficitToTarget);
+      const freshnessStale =
+        newestFetchedAt == null ||
+        nowMs - Date.parse(newestFetchedAt) >
+          FRESHNESS_INGEST_HOURS * 60 * 60 * 1000;
+
+      let ingestCount = 0;
+      let reason: "threshold" | "freshness" | "none" = "none";
+      if (available < STOCK_THRESHOLD) {
+        const deficitToTarget = Math.max(INGEST_BATCH_SIZE, STOCK_TARGET - available);
+        ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, deficitToTarget);
+        reason = "threshold";
+      } else if (freshnessStale) {
+        ingestCount = 2;
+        reason = "freshness";
+      }
+
       report[cat].requested = ingestCount;
+      report[cat].reason = reason;
+
+      if (ingestCount === 0) {
+        categoryLogs.push({
+          category: cat,
+          beforeCount: available,
+          requestedCount: 0,
+          insertedCount: 0,
+          attemptedCount: 0,
+          skippedCount: 0,
+          failedCount: 0,
+          retryCount: 0,
+          durationMs: 0,
+          warningFlag: false,
+          reason,
+          newestFetchedAt,
+        });
+        continue;
+      }
+
       console.log(
-        `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${ingestCount}`
+        reason === "threshold"
+          ? `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${ingestCount}`
+          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${ingestCount})`
       );
+
+      const categoryStartedAt = Date.now();
       try {
         const result = await runIngestAgent(cat as Category, ingestCount);
-        report[cat].ingested = result.inserted.length;
-        report[cat].reason = "threshold";
+        const insertedCount = result.inserted.length;
+        const warningFlag =
+          result.failedCount > 0 || (ingestCount > 0 && insertedCount === 0);
+        if (warningFlag) warningCount += 1;
+
+        report[cat].ingested = insertedCount;
+        if (result.errorSummary) report[cat].error = result.errorSummary;
+
+        totalInserted += insertedCount;
+        totalAttempted += result.attemptedCount;
+        totalSkipped += result.skippedCount;
+        totalFailed += result.failedCount;
+        totalRetried += result.retryCount;
+
+        if (result.errorSummary) {
+          errorSummaryParts.push(`${cat}: ${result.errorSummary}`);
+        }
+
+        categoryLogs.push({
+          category: cat,
+          beforeCount: available,
+          requestedCount: ingestCount,
+          insertedCount,
+          attemptedCount: result.attemptedCount,
+          skippedCount: result.skippedCount,
+          failedCount: result.failedCount,
+          retryCount: result.retryCount,
+          durationMs: result.durationMs || Date.now() - categoryStartedAt,
+          warningFlag,
+          reason,
+          newestFetchedAt,
+          errorMessage: report[cat].error,
+          errorSummary: result.errorSummary ?? undefined,
+        });
       } catch (e) {
         console.error(`[Scheduler] Ingest failed for "${cat}":`, e);
         hadErrors = true;
-        report[cat].error = e instanceof Error ? e.message : "Unknown ingest error";
-      }
-      categoryLogs.push({
-        category: cat,
-        beforeCount: available,
-        requestedCount: ingestCount,
-        insertedCount: report[cat].ingested,
-        reason: report[cat].reason,
-        newestFetchedAt,
-        errorMessage: report[cat].error,
-      });
-      continue;
-    }
+        const message = e instanceof Error ? e.message : "Unknown ingest error";
+        report[cat].error = message;
+        errorSummaryParts.push(`${cat}: ${message}`);
+        totalFailed += ingestCount;
+        warningCount += 1;
 
-    if (freshnessStale) {
-      const ingestCount = 2;
-      report[cat].requested = ingestCount;
-      console.log(
-        `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${ingestCount})`
+        categoryLogs.push({
+          category: cat,
+          beforeCount: available,
+          requestedCount: ingestCount,
+          insertedCount: 0,
+          attemptedCount: ingestCount,
+          skippedCount: 0,
+          failedCount: ingestCount,
+          retryCount: 0,
+          durationMs: Date.now() - categoryStartedAt,
+          warningFlag: true,
+          reason,
+          newestFetchedAt,
+          errorMessage: message,
+          errorSummary: message,
+        });
+      }
+    }
+  } catch (e) {
+    hadErrors = true;
+    errorSummaryParts.push(
+      e instanceof Error ? e.message : "Scheduler loop failed"
+    );
+  } finally {
+    try {
+      await appendCronIngestCategoryLogs(runId, categoryLogs);
+    } catch (e) {
+      hadErrors = true;
+      errorSummaryParts.push(
+        e instanceof Error ? e.message : "Could not append category logs"
       );
-      try {
-        const result = await runIngestAgent(cat as Category, ingestCount);
-        report[cat].ingested = result.inserted.length;
-        report[cat].reason = "freshness";
-      } catch (e) {
-        console.error(`[Scheduler] Freshness ingest failed for "${cat}":`, e);
-        hadErrors = true;
-        report[cat].error = e instanceof Error ? e.message : "Unknown freshness ingest error";
-      }
     }
 
-    categoryLogs.push({
-      category: cat,
-      beforeCount: available,
-      requestedCount: report[cat].requested,
-      insertedCount: report[cat].ingested,
-      reason: report[cat].reason,
-      newestFetchedAt,
-      errorMessage: report[cat].error,
-    });
+    const notes = `durationMs=${Date.now() - runStartedAt}; categories=${CATEGORIES.length}`;
+    try {
+      await finishCronIngestRun(runId, {
+        ok: !hadErrors,
+        totalInserted,
+        totalAttempted,
+        totalSkipped,
+        totalFailed,
+        totalRetried,
+        warningCount,
+        errorSummary: errorSummaryParts.join(" | ").slice(0, 1200),
+        categoriesChecked: CATEGORIES.length,
+        notes,
+      });
+    } catch (e) {
+      console.error("[Scheduler] Could not finish ingest run:", e);
+    }
   }
-
-  const totalInserted = Object.values(report).reduce((sum, row) => sum + row.ingested, 0);
-  const notes = `durationMs=${Date.now() - runStartedAt}; categories=${CATEGORIES.length}`;
-  await appendCronIngestCategoryLogs(runId, categoryLogs);
-  await finishCronIngestRun(runId, {
-    ok: !hadErrors,
-    totalInserted,
-    categoriesChecked: CATEGORIES.length,
-    notes,
-  });
 
   return NextResponse.json({
     ok: !hadErrors,
     runId,
     totalInserted,
+    totals: {
+      attempted: totalAttempted,
+      skipped: totalSkipped,
+      failed: totalFailed,
+      retried: totalRetried,
+      warnings: warningCount,
+    },
     report,
     checkedAt: new Date().toISOString(),
   });

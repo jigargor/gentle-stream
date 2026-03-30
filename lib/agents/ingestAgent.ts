@@ -57,6 +57,12 @@ async function recordUsageAndWaitIfNeeded(inputTokens: number): Promise<void> {
 interface IngestResult {
   category: Category;
   inserted: StoredArticle[];
+  attemptedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  retryCount: number;
+  durationMs: number;
+  errorSummary: string | null;
   error?: string;
 }
 
@@ -68,6 +74,7 @@ interface ClaudeUsage {
 interface FetchResult {
   article: RawArticle;
   usage: ClaudeUsage;
+  retryCount: number;
 }
 
 // ─── Content block types from the raw Claude response ─────────────────────────
@@ -101,6 +108,12 @@ export async function runIngestAgent(
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const allInserted: StoredArticle[] = [];
+  const errors: string[] = [];
+  let attemptedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+  let retryCount = 0;
+  const startedAt = Date.now();
 
   // Seed both avoid-lists from the DB so re-runs don't repeat stored content
   const [seenHeadlines, seenUrls] = await Promise.all([
@@ -115,9 +128,11 @@ export async function runIngestAgent(
   console.log(`[IngestAgent] Starting ingest for "${category}", target: ${total}`);
 
   for (let i = 0; i < total; i++) {
+    attemptedCount += 1;
     try {
       const result = await fetchOneArticle(apiKey, category, seenHeadlines, seenUrls);
       const { article, usage } = result;
+      retryCount += result.retryCount;
 
       const toInsert = {
         ...article,
@@ -140,6 +155,7 @@ export async function runIngestAgent(
           `[IngestAgent] "${category}" ${i + 1}/${total} inserted: "${article.headline.slice(0, 50)}"`
         );
       } else {
+        skippedCount += 1;
         console.log(
           `[IngestAgent] "${category}" ${i + 1}/${total} skipped (duplicate): "${article.headline.slice(0, 50)}"`
         );
@@ -148,12 +164,25 @@ export async function runIngestAgent(
       await recordUsageAndWaitIfNeeded(usage.input_tokens);
     } catch (e) {
       console.error(`[IngestAgent] Error on article ${i + 1} for "${category}":`, e);
+      failedCount += 1;
+      const message =
+        e instanceof Error ? e.message : "Unknown ingest error";
+      if (errors.length < 8) errors.push(message);
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
 
   console.log(`[IngestAgent] "${category}" complete: ${allInserted.length}/${total} inserted`);
-  return { category, inserted: allInserted };
+  return {
+    category,
+    inserted: allInserted,
+    attemptedCount,
+    skippedCount,
+    failedCount,
+    retryCount,
+    durationMs: Date.now() - startedAt,
+    errorSummary: errors.length > 0 ? errors.join(" | ").slice(0, 800) : null,
+  };
 }
 
 export async function runFullIngest(): Promise<IngestResult[]> {
@@ -186,7 +215,9 @@ async function fetchOneArticle(
     `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country",` +
     `"category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string"}`;
 
-  const makeRequest = async (attempt: number): Promise<Response> => {
+  const makeRequest = async (
+    attempt: number
+  ): Promise<{ response: Response; retryCount: number }> => {
     const res = await fetch(ANTHROPIC_API_URL, {
       method: "POST",
       headers: {
@@ -207,12 +238,14 @@ async function fetchOneArticle(
       const wait = (attempt + 1) * 12_000;
       console.log(`[IngestAgent] 429 — retrying in ${wait / 1000}s`);
       await new Promise((r) => setTimeout(r, wait));
-      return makeRequest(attempt + 1);
+      const next = await makeRequest(attempt + 1);
+      return { response: next.response, retryCount: next.retryCount + 1 };
     }
-    return res;
+    return { response: res, retryCount: 0 };
   };
 
-  const response = await makeRequest(0);
+  const requestResult = await makeRequest(0);
+  const response = requestResult.response;
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`Claude API ${response.status}: ${err}`);
@@ -242,7 +275,7 @@ async function fetchOneArticle(
   }
 
   const article = parseArticleFromText(combinedText, category, sourceUrls);
-  return { article, usage };
+  return { article, usage, retryCount: requestResult.retryCount };
 }
 
 // ─── URL extraction ───────────────────────────────────────────────────────────

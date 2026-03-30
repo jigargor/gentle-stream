@@ -5,6 +5,19 @@ import { getSessionUserId } from "@/lib/api/sessionUser";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+async function logLikeEvent(userId: string, articleId: string): Promise<void> {
+  const { error } = await db.from("article_engagement_events").insert({
+    user_id: userId,
+    article_id: articleId,
+    event_type: "like",
+    event_value: 1,
+    context: { source: "direct" },
+  });
+  if (error) {
+    console.warn("[article-likes] Could not log engagement event:", error.message);
+  }
+}
+
 /** Whether the signed-in user has liked this article (for UI + future ranking). */
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -62,6 +75,8 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await logLikeEvent(userId, body.articleId);
 
   return NextResponse.json({ ok: true, liked: true });
 }

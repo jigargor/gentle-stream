@@ -171,7 +171,7 @@ export function AdminSubmissionsPanel() {
                     <span style={{ textTransform: "uppercase", color: "#555", fontSize: "0.73rem" }}>{submission.status}</span>
                   </div>
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.84rem" }}>
-                    Author: {submission.authorUserId} • {submission.category}
+                    Author: {submission.authorUserId} • {submission.category} • {submission.contentKind === "recipe" ? "Recipe" : "Article"}
                   </p>
                   {submission.explicitHashtags.length > 0 ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.82rem" }}>

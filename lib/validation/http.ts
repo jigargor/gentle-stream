@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
-export function badRequest(message: string, details?: unknown) {
-  return NextResponse.json(
-    details === undefined ? { error: message } : { error: message, details },
-    { status: 400 }
-  );
+export function badRequest(
+  message: string,
+  details?: unknown,
+  request?: Request
+) {
+  return apiErrorResponse({
+    request,
+    status: 400,
+    code: API_ERROR_CODES.VALIDATION,
+    message,
+    details,
+  });
 }
 
 export async function parseJsonBody<T extends z.ZodTypeAny>(input: {
@@ -22,7 +30,12 @@ export async function parseJsonBody<T extends z.ZodTypeAny>(input: {
   } catch {
     return {
       ok: false,
-      response: badRequest(input.errorMessage ?? "Invalid JSON body."),
+      response: apiErrorResponse({
+        request: input.request,
+        status: 400,
+        code: API_ERROR_CODES.INVALID_JSON,
+        message: input.errorMessage ?? "Invalid JSON body.",
+      }),
     };
   }
   const parsed = input.schema.safeParse(raw);
@@ -31,7 +44,8 @@ export async function parseJsonBody<T extends z.ZodTypeAny>(input: {
       ok: false,
       response: badRequest(
         input.errorMessage ?? "Invalid request body.",
-        parsed.error.flatten()
+        parsed.error.flatten(),
+        input.request
       ),
     };
   }
@@ -39,6 +53,7 @@ export async function parseJsonBody<T extends z.ZodTypeAny>(input: {
 }
 
 export function parseQuery<T extends z.ZodTypeAny>(input: {
+  request?: Request;
   query: Record<string, unknown>;
   schema: T;
   errorMessage?: string;
@@ -49,7 +64,8 @@ export function parseQuery<T extends z.ZodTypeAny>(input: {
       ok: false,
       response: badRequest(
         input.errorMessage ?? "Invalid query params.",
-        parsed.error.flatten()
+        parsed.error.flatten(),
+        input.request
       ),
     };
   }

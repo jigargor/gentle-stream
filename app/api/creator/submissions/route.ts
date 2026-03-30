@@ -17,6 +17,7 @@ import {
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const DAILY_SUBMISSION_LIMIT = 10;
 
@@ -50,15 +51,25 @@ function toSafeText(value: unknown, maxLen: number): string {
   return value.trim().slice(0, maxLen);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const profile = await getOrCreateUserProfile(userId);
   if (profile.userRole !== "creator") {
-    return NextResponse.json({ error: "Creator access required" }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Creator access required",
+    });
   }
 
   const submissions = await listSubmissionsByAuthor(userId);
@@ -67,12 +78,22 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   if (!hasTrustedOrigin(request)) {
-    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN_ORIGIN,
+      message: "Invalid request origin.",
+    });
   }
 
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const rateLimit = await consumeRateLimit({
@@ -83,19 +104,26 @@ export async function POST(request: NextRequest) {
       routeId: "api-creator-submissions",
     }),
   });
-  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const profile = await getOrCreateUserProfile(userId);
   if (profile.userRole !== "creator") {
-    return NextResponse.json({ error: "Creator access required" }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Creator access required",
+    });
   }
 
   const creatorProfile = await getCreatorProfile(userId);
   if (!creatorProfile?.onboardingCompletedAt) {
-    return NextResponse.json(
-      { error: "Complete creator onboarding before submitting articles." },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.INVALID_REQUEST,
+      message: "Complete creator onboarding before submitting articles.",
+    });
   }
 
   const now = new Date();
@@ -105,10 +133,12 @@ export async function POST(request: NextRequest) {
     createdAfterIso: dayStart.toISOString(),
   });
   if (submissionsToday >= DAILY_SUBMISSION_LIMIT) {
-    return NextResponse.json(
-      { error: `Daily submission limit reached (${DAILY_SUBMISSION_LIMIT}).` },
-      { status: 429 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 429,
+      code: API_ERROR_CODES.RATE_LIMITED,
+      message: `Daily submission limit reached (${DAILY_SUBMISSION_LIMIT}).`,
+    });
   }
 
   const parsedBody = await parseJsonBody({
@@ -131,7 +161,6 @@ export async function POST(request: NextRequest) {
       : "user_article";
 
   const isRecipe = contentKind === "recipe";
-  const fallbackRecipeCategory = CATEGORIES[0];
 
   const parseNumberOrNull = (v: unknown): number | null => {
     if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
@@ -189,32 +218,42 @@ export async function POST(request: NextRequest) {
     : [];
 
   if (!headline || (!isRecipe && !category)) {
-    return NextResponse.json(
-      { error: isRecipe ? "headline is required." : "headline and valid category are required." },
-      { status: 400 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.MISSING_FIELD,
+      message: isRecipe
+        ? "headline is required."
+        : "headline and valid category are required.",
+    });
   }
 
   let articleBody = "";
 
   if (isRecipe) {
     if (recipeServings == null || recipeServings <= 0) {
-      return NextResponse.json(
-        { error: "recipeServings must be a positive integer." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "recipeServings must be a positive integer.",
+      });
     }
     if (recipeIngredients.length === 0) {
-      return NextResponse.json(
-        { error: "recipeIngredients is required." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "recipeIngredients is required.",
+      });
     }
     if (recipeInstructions.length === 0) {
-      return NextResponse.json(
-        { error: "recipeInstructions is required." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "recipeInstructions is required.",
+      });
     }
     if (
       recipePrepTimeMinutes == null ||
@@ -222,10 +261,12 @@ export async function POST(request: NextRequest) {
       recipePrepTimeMinutes < 0 ||
       recipeCookTimeMinutes < 0
     ) {
-      return NextResponse.json(
-        { error: "prep/cook times are required and must be integers >= 0." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "prep/cook times are required and must be integers >= 0.",
+      });
     }
 
     // Keep `body` useful for tagger + any legacy display.
@@ -236,13 +277,20 @@ export async function POST(request: NextRequest) {
   } else {
     const rawArticleBody = typeof body.body === "string" ? body.body.trim() : "";
     if (rawArticleBody.length > 15_000) {
-      return NextResponse.json(
-        { error: "body must be 15,000 characters or fewer." },
-        { status: 400 }
-      );
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "body must be 15,000 characters or fewer.",
+      });
     }
     if (!rawArticleBody) {
-      return NextResponse.json({ error: "body is required." }, { status: 400 });
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.MISSING_FIELD,
+        message: "body is required.",
+      });
     }
     articleBody = rawArticleBody;
   }

@@ -32,6 +32,7 @@ import {
   consumeRateLimit,
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const ANONYMOUS_USER_ID = "anonymous";
 const COLD_START_DEDUPE_MS = 45_000;
@@ -196,7 +197,7 @@ export async function GET(request: NextRequest) {
       routeId: "api-feed",
     }),
   });
-  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const categoryParam = searchParams.get("category");
   const contentKinds = parseContentKinds(searchParams);
@@ -267,9 +268,11 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     console.error("[/api/feed] Error:", error);
-    return NextResponse.json(
-      { error: "Could not load feed right now." },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: "Could not load feed right now.",
+    });
   }
 }

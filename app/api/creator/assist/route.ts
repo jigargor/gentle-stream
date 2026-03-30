@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
         routeId: "api-creator-assist",
       }),
     });
-    if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+    if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
     const parsed = assistBodySchema.safeParse(await request.json());
     if (!parsed.success) {

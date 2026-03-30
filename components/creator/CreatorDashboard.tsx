@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
 import type { ArticleSubmission } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import {
+  formatApiClientError,
+  parseApiClientError,
+} from "@/lib/api/client-errors";
 
 interface CreatorDashboardProps {
   /** Public creator profile URL (same for author byline links). */
@@ -145,14 +149,14 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     setLoading(true);
     try {
       const response = await fetch("/api/creator/submissions");
-      const payload = (await response.json()) as {
-        submissions?: ArticleSubmission[];
-        error?: string;
-      };
       if (!response.ok) {
-        setMessage(payload.error ?? "Failed to load submissions");
+        const apiError = await parseApiClientError(response);
+        setMessage(formatApiClientError(apiError));
         return;
       }
+      const payload = (await response.json()) as {
+        submissions?: ArticleSubmission[];
+      };
       setSubmissions(payload.submissions ?? []);
     } finally {
       setLoading(false);
@@ -225,11 +229,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           }),
         }
       );
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
       if (!response.ok) {
-        setMessage(payload.error ?? "Save failed");
+        const apiError = await parseApiClientError(response);
+        setMessage(formatApiClientError(apiError));
         return;
       }
       setForm(EMPTY_FORM);
@@ -285,11 +287,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ withdraw: true }),
       });
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
       if (!response.ok) {
-        setMessage(payload.error ?? "Could not withdraw.");
+        const apiError = await parseApiClientError(response);
+        setMessage(formatApiClientError(apiError));
         return;
       }
       await loadSubmissions();
@@ -315,8 +315,15 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         credentials: "include",
         body: JSON.stringify({ url }),
       });
+      if (!response.ok) {
+        const apiError = await parseApiClientError(response);
+        setRecipeImportMessage(
+          `Import failed (${response.status}): ${formatApiClientError(apiError)}`
+        );
+        setRecipeImportIsError(true);
+        return;
+      }
       const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
         recipe?: {
           headline?: string;
           recipeServings?: number | null;
@@ -329,10 +336,8 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           warnings?: string[];
         };
       };
-      if (!response.ok || !payload.recipe) {
-        setRecipeImportMessage(
-          `Import failed (${response.status}): ${payload.error ?? "Could not import this recipe link."}`
-        );
+      if (!payload.recipe) {
+        setRecipeImportMessage("Import failed: Could not import this recipe link.");
         setRecipeImportIsError(true);
         return;
       }
@@ -401,12 +406,16 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           body: form.body,
         }),
       });
+      if (!response.ok) {
+        const apiError = await parseApiClientError(response);
+        setAssistError(formatApiClientError(apiError));
+        return;
+      }
       const payload = (await response.json().catch(() => ({}))) as {
         result?: string;
-        error?: string;
       };
-      if (!response.ok || !payload.result) {
-        setAssistError(payload.error ?? "AI assist is unavailable right now.");
+      if (!payload.result) {
+        setAssistError("AI assist is unavailable right now.");
         return;
       }
       setAssistSuggestion(payload.result);

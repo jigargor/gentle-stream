@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { getEnv } from "@/lib/env";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 interface RateLimitPolicy {
   id: string;
@@ -133,13 +133,20 @@ export async function consumeRateLimit(
   }
 }
 
-export function rateLimitExceededResponse(result: RateLimitResult): NextResponse {
-  const response = NextResponse.json(
-    { error: "Too many requests. Please retry shortly." },
-    { status: 429 }
-  );
-  response.headers.set("Retry-After", String(result.retryAfterSec));
-  response.headers.set("X-RateLimit-Remaining", String(result.remaining));
-  response.headers.set("X-RateLimit-Reset", String(result.resetAt));
-  return response;
+export function rateLimitExceededResponse(
+  result: RateLimitResult,
+  request?: Request
+) {
+  return apiErrorResponse({
+    request,
+    status: 429,
+    code: API_ERROR_CODES.RATE_LIMITED,
+    message: "Too many requests. Please retry shortly.",
+    retryAfterSec: result.retryAfterSec,
+    headers: {
+      "Retry-After": String(result.retryAfterSec),
+      "X-RateLimit-Remaining": String(result.remaining),
+      "X-RateLimit-Reset": String(result.resetAt),
+    },
+  });
 }

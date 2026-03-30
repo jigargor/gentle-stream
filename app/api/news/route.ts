@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     policy: { id: "news-public", windowMs: 60_000, max: 24 },
     key: buildRateLimitKey({ request, routeId: "api-news" }),
   });
-  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const { searchParams } = new URL(request.url);
 

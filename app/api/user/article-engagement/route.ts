@@ -14,18 +14,29 @@ import {
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
+import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 /**
  * Engagement tracking is now rolled out to 100% of authenticated users.
  */
 export async function POST(request: NextRequest) {
   if (!hasTrustedOrigin(request)) {
-    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN_ORIGIN,
+      message: "Invalid request origin.",
+    });
   }
 
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Unauthorized",
+    });
   }
 
   const rateLimit = await consumeRateLimit({
@@ -36,7 +47,7 @@ export async function POST(request: NextRequest) {
       routeId: "api-user-article-engagement",
     }),
   });
-  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+  if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const parsedBody = await parseJsonBody({
     request,
@@ -52,15 +63,22 @@ export async function POST(request: NextRequest) {
 
   const parsed = parseEngagementBatch(body, userId);
   if (parsed.error) {
-    return NextResponse.json({ error: parsed.error }, { status: 400 });
+    return apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: parsed.error,
+    });
   }
 
   const { error } = await db.from("article_engagement_events").insert(parsed.rows);
   if (error) {
-    return NextResponse.json(
-      { error: "Could not record engagement right now." },
-      { status: 500 }
-    );
+    return apiErrorResponse({
+      request,
+      status: 500,
+      code: API_ERROR_CODES.INTERNAL,
+      message: "Could not record engagement right now.",
+    });
   }
 
   return NextResponse.json({ ok: true, accepted: parsed.rows.length });

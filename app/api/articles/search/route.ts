@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
         routeId: "api-articles-search",
       }),
     });
-    if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
+    if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
     const categoryParam = searchParams.get("category");
     const category =

@@ -167,7 +167,11 @@ export default function GameSlot({
           excludeSignatures,
           connectionsDaily
         );
-        const res = await fetchWithTimeout(url, undefined, PUZZLE_FETCH_TIMEOUT_MS);
+        const res = await fetchWithTimeout(
+          url,
+          { cache: "no-store" },
+          PUZZLE_FETCH_TIMEOUT_MS
+        );
         if (res.status === 409 && !allowReplay) {
           setHasNoUniqueAvailable(true);
           setPuzzle(null);
@@ -260,7 +264,11 @@ export default function GameSlot({
           buildExcludeSignatures(false),
           connectionsDaily
         );
-        const res = await fetchWithTimeout(url, undefined, PUZZLE_FETCH_TIMEOUT_MS);
+        const res = await fetchWithTimeout(
+          url,
+          { cache: "no-store" },
+          PUZZLE_FETCH_TIMEOUT_MS
+        );
         if (res.status === 409) {
           if (!cancelled) {
             setHasNoUniqueAvailable(true);

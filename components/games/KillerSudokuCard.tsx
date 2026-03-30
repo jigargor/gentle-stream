@@ -221,7 +221,17 @@ function clearDigitNotesFromCagePeers(
   }
 }
 
-function KillerCellNotes({ mask }: { mask: NoteMask }) {
+/** Inset from cell edge (px) so dashed cage lines read clearly inside the solid grid. */
+const CAGE_LINE_INSET = 3;
+
+function KillerCellNotes({
+  mask,
+  hasCageSumLabel,
+}: {
+  mask: NoteMask;
+  /** Top-left of cage shows sum — keep pencil marks out of that corner. */
+  hasCageSumLabel: boolean;
+}) {
   if (mask === 0) return null;
   const noteStyle: React.CSSProperties = {
     fontSize: "clamp(4px, 1.5vw, 7px)",
@@ -233,11 +243,16 @@ function KillerCellNotes({ mask }: { mask: NoteMask }) {
     justifyContent: "center",
     fontFamily: "'Playfair Display', Georgia, serif",
   };
+  // Shift notes down/right so digit 1 (top-left of the 3×3) does not sit under cage sums.
+  const inset = hasCageSumLabel
+    ? { top: 12, right: 3, bottom: 3, left: 16 }
+    : { top: 5, right: 3, bottom: 3, left: 8 };
   return (
     <div
       style={{
         position: "absolute",
-        inset: "2px",
+        ...inset,
+        zIndex: 1,
         display: "grid",
         gridTemplateColumns: "repeat(3, 1fr)",
         gridTemplateRows: "repeat(3, 1fr)",
@@ -766,11 +781,16 @@ export default function KillerSudokuCard({
             else if (isPeer) bg = "#ede9e1";
             if (wrongSolution && !celebrating) bg = "#fce8e6";
 
-            // Box borders
+            // Box borders (outer grid — solid)
             const boxTop = r % 3 === 0 && r > 0;
             const boxLeft = c % 3 === 0 && c > 0;
             const boxRight = (c + 1) % 3 === 0 && c < 8;
             const boxBottom = (r + 1) % 3 === 0 && r < 8;
+            // Cage dashed lines sit *inside* the cell so they don’t sit on the shared grid line.
+            const innerCageTop = borders.top && !boxTop && r > 0;
+            const innerCageBottom = borders.bottom && !boxBottom && r < 8;
+            const innerCageLeft = borders.left && !boxLeft && c > 0;
+            const innerCageRight = borders.right && !boxRight && c < 8;
 
             return (
               <div
@@ -799,46 +819,56 @@ export default function KillerSudokuCard({
                   color: badDigit ? "#c0392b" : "#2c5282",
                   transition: "background 0.08s ease",
                   transformOrigin: "center center",
-                  // Explicitly render all edges so cage outlines stay visible.
-                  borderTop: boxTop
-                    ? "2px solid #1a1a1a"
-                    : borders.top
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
-                  borderLeft: boxLeft
-                    ? "2px solid #1a1a1a"
-                    : borders.left
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
-                  borderRight: boxRight
-                    ? "2px solid #1a1a1a"
-                    : borders.right
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
-                  borderBottom: boxBottom
-                    ? "2px solid #1a1a1a"
-                    : borders.bottom
-                    ? "1.5px dashed #888"
-                    : "0.5px solid #ddd",
+                  borderTop: boxTop ? "2px solid #1a1a1a" : "0.5px solid #ddd",
+                  borderLeft: boxLeft ? "2px solid #1a1a1a" : "0.5px solid #ddd",
+                  borderRight: boxRight ? "2px solid #1a1a1a" : "0.5px solid #ddd",
+                  borderBottom: boxBottom ? "2px solid #1a1a1a" : "0.5px solid #ddd",
                 }}
               >
+                {/* Inset cage outline — dashed, inside the cell margin */}
+                <div
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    left: CAGE_LINE_INSET,
+                    top: CAGE_LINE_INSET,
+                    right: CAGE_LINE_INSET,
+                    bottom: CAGE_LINE_INSET,
+                    zIndex: 0,
+                    pointerEvents: "none",
+                    borderTop: innerCageTop ? "1.5px dashed #666" : "none",
+                    borderLeft: innerCageLeft ? "1.5px dashed #666" : "none",
+                    borderRight: innerCageRight ? "1.5px dashed #666" : "none",
+                    borderBottom: innerCageBottom ? "1.5px dashed #666" : "none",
+                  }}
+                />
                 {/* Cage sum label — top-left corner of each cage */}
                 {cageSum !== undefined && (
-                  <span style={{
-                    position: "absolute",
-                    top: 2,
-                    left: 3,
-                    fontSize: "0.55rem",
-                    fontWeight: 700,
-                    color: "#1a472a",
-                    fontFamily: "Georgia, serif",
-                    lineHeight: 1,
-                    pointerEvents: "none",
-                  }}>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 3,
+                      left: 4,
+                      zIndex: 2,
+                      fontSize: "0.55rem",
+                      fontWeight: 700,
+                      color: "#1a472a",
+                      fontFamily: "Georgia, serif",
+                      lineHeight: 1,
+                      pointerEvents: "none",
+                    }}
+                  >
                     {cageSum}
                   </span>
                 )}
-                {val !== 0 ? val : <KillerCellNotes mask={state.notes[r][c]} />}
+                {val !== 0 ? (
+                  val
+                ) : (
+                  <KillerCellNotes
+                    mask={state.notes[r][c]}
+                    hasCageSumLabel={cageSum !== undefined}
+                  />
+                )}
               </div>
             );
           })

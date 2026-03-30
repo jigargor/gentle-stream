@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
       : "user_article";
 
   const isRecipe = contentKind === "recipe";
+  const fallbackRecipeCategory = CATEGORIES[0];
 
   const parseNumberOrNull = (v: unknown): number | null => {
     if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
@@ -179,9 +180,9 @@ export async function POST(request: NextRequest) {
     ? body.explicitHashtags.filter((v): v is string => typeof v === "string")
     : [];
 
-  if (!headline || !category) {
+  if (!headline || (!isRecipe && !category)) {
     return NextResponse.json(
-      { error: "headline and valid category are required." },
+      { error: isRecipe ? "headline is required." : "headline and valid category are required." },
       { status: 400 }
     );
   }
@@ -244,7 +245,7 @@ export async function POST(request: NextRequest) {
     subheadline,
     body: articleBody,
     pullQuote,
-    category,
+    category: isRecipe ? fallbackRecipeCategory : (category as Category),
     contentKind,
     locale,
     explicitHashtags,

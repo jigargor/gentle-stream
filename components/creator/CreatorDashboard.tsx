@@ -13,7 +13,6 @@ interface CreatorDashboardProps {
 
 interface FormState {
   headline: string;
-  subheadline: string;
   body: string;
   pullQuote: string;
   category: string;
@@ -32,7 +31,6 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   headline: "",
-  subheadline: "",
   body: "",
   pullQuote: "",
   category: CATEGORIES[0],
@@ -200,10 +198,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             headline: form.headline,
-            subheadline: form.subheadline,
             body: bodyToSend,
             pullQuote: form.pullQuote,
-            category: form.category,
+            category: form.contentKind === "user_article" ? form.category : undefined,
             contentKind: form.contentKind,
             recipeServings: isRecipe ? recipeServings : undefined,
             recipeIngredients: isRecipe ? recipeIngredients : undefined,
@@ -237,7 +234,6 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     setBodyEditorTab("write");
     setForm({
       headline: submission.headline,
-      subheadline: submission.subheadline,
       body: submission.body,
       pullQuote: submission.pullQuote,
       category: submission.category,
@@ -311,7 +307,6 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         error?: string;
         recipe?: {
           headline?: string;
-          subheadline?: string;
           recipeServings?: number | null;
           recipeIngredients?: string[];
           recipeInstructions?: string[];
@@ -335,7 +330,6 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         ...prev,
         contentKind: "recipe",
         headline: typeof recipe.headline === "string" && recipe.headline.trim().length > 0 ? recipe.headline : prev.headline,
-        subheadline: typeof recipe.subheadline === "string" ? recipe.subheadline : prev.subheadline,
         recipeServings:
           typeof recipe.recipeServings === "number" && Number.isFinite(recipe.recipeServings)
             ? String(Math.trunc(recipe.recipeServings))
@@ -437,34 +431,61 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           <h2 style={{ marginTop: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.1rem" }}>
             {editingId ? "Edit pending submission" : "New submission"}
           </h2>
-          <div style={{ display: "grid", gap: "0.55rem" }}>
-            <input value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input value={form.subheadline} onChange={(e) => setForm((f) => ({ ...f, subheadline: e.target.value }))} placeholder="Subheadline (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
-              {CATEGORIES.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-            <select
-              value={form.contentKind}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  contentKind:
-                    e.target.value === "recipe" ? "recipe" : "user_article",
-                  body:
-                    e.target.value === "recipe"
-                      ? ""
-                      : f.body,
-                }))
-              }
-              style={{ padding: "0.45rem", border: "1px solid #bbb" }}
-            >
-              <option value="user_article">User article</option>
-              <option value="recipe">Recipe</option>
-            </select>
+          <div style={{ display: "grid", gap: "0.75rem" }}>
+            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem" }}>
+              <p
+                style={{
+                  margin: 0,
+                  marginBottom: "0.5rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.9rem",
+                  color: "#222",
+                }}
+              >
+                Compose type
+              </p>
+              <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.42rem", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="content-kind"
+                    checked={form.contentKind === "user_article"}
+                    onChange={() =>
+                      setForm((f) => ({ ...f, contentKind: "user_article" }))
+                    }
+                  />
+                  <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontSize: "0.9rem" }}>
+                    Article
+                  </span>
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.42rem", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="content-kind"
+                    checked={form.contentKind === "recipe"}
+                    onChange={() =>
+                      setForm((f) => ({ ...f, contentKind: "recipe" }))
+                    }
+                  />
+                  <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontSize: "0.9rem" }}>
+                    Recipe
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
+              <input value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+              {form.contentKind === "user_article" ? (
+                <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
             {form.contentKind === "user_article" ? (
               <div
                 style={{

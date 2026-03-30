@@ -1,4 +1,4 @@
-import type { Category } from "./constants";
+import type { ArticleStorageCategory, Category } from "./constants";
 import type { GameType } from "./games/types";
 
 // ─── Raw shape returned by the ingest agent (LLM output) ─────────────────────
@@ -15,7 +15,9 @@ export interface RawArticle {
 }
 
 // ─── Fully enriched article as stored in the database ────────────────────────
-export interface StoredArticle extends RawArticle {
+export interface StoredArticle extends Omit<RawArticle, "category"> {
+  /** News topics use `Category`; recipes use the `recipe` storage bucket only. */
+  category: ArticleStorageCategory;
   id: string;
   fetchedAt: string;           // ISO timestamp
   expiresAt: string;           // ISO timestamp (fetchedAt + 7 days)
@@ -116,7 +118,7 @@ export interface ArticleSubmission {
   subheadline: string;
   body: string;
   pullQuote: string;
-  category: Category;
+  category: ArticleStorageCategory;
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];

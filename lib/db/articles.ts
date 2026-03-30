@@ -2,7 +2,7 @@ import { db } from "./client";
 import { getCreatorPenNamesByUserIds } from "./creator";
 import { getAuthorDisplayByUserIds } from "./users";
 import type { ArticleContentKind, StoredArticle } from "../types";
-import type { Category } from "../constants";
+import { RECIPE_CATEGORY, type ArticleStorageCategory, type Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
 
 const NON_EXPIRING_EXPIRES_AT = "2100-01-01T00:00:00.000Z";
@@ -516,7 +516,7 @@ export async function getRecentSourceUrls(
  * Ordered by quality_score desc.
  */
 export async function getArticlesForFeed(
-  category: Category,
+  category: Category | typeof RECIPE_CATEGORY,
   limit: number,
   excludeIds: string[] = [],
   contentKinds?: ArticleContentKind[]
@@ -528,6 +528,10 @@ export async function getArticlesForFeed(
     .eq("tagged", true)
     .order("quality_score", { ascending: false })
     .limit(limit);
+
+  if (category === RECIPE_CATEGORY) {
+    query = query.eq("content_kind", "recipe");
+  }
 
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);
@@ -546,7 +550,7 @@ export async function getArticlesForFeed(
  * Used when the feed would otherwise be empty (e.g. tagger rate-limited / backlog).
  */
 export async function getUntaggedArticlesForFeed(
-  category: Category,
+  category: Category | typeof RECIPE_CATEGORY,
   limit: number,
   excludeIds: string[] = [],
   contentKinds?: ArticleContentKind[]
@@ -558,6 +562,10 @@ export async function getUntaggedArticlesForFeed(
     .eq("tagged", false)
     .order("fetched_at", { ascending: false })
     .limit(limit);
+
+  if (category === RECIPE_CATEGORY) {
+    query = query.eq("content_kind", "recipe");
+  }
 
   if (excludeIds.length > 0) {
     query = query.notIn("id", excludeIds);

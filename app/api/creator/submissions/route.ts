@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
-import { CATEGORIES, type Category } from "@/lib/constants";
+import { CATEGORIES, RECIPE_CATEGORY, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import {
@@ -253,7 +253,7 @@ export async function POST(request: NextRequest) {
     subheadline,
     body: articleBody,
     pullQuote,
-    category: isRecipe ? fallbackRecipeCategory : (category as Category),
+    category: isRecipe ? RECIPE_CATEGORY : (category as Category),
     contentKind,
     locale,
     explicitHashtags,

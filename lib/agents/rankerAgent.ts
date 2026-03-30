@@ -28,7 +28,7 @@ import type {
   UserProfile,
 } from "../types";
 import type { Category } from "../constants";
-import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS } from "../constants";
+import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS, RECIPE_CATEGORY } from "../constants";
 import { buildAffinityIndex, scoreArticleWithEngagement } from "../feed/recommendationScore";
 
 /** Section label when articles come from multiple categories (random backfill). */
@@ -70,6 +70,36 @@ function orderedCategoriesForMixedFeed(
   return [primary, ...rotated];
 }
 
+/**
+ * Editorial categories for news + user articles, plus the `recipe` storage bucket when needed.
+ */
+function feedBucketsForTraversal(
+  profile: UserProfile,
+  sectionIndex: number,
+  contentKinds?: ArticleContentKind[]
+): (Category | typeof RECIPE_CATEGORY)[] {
+  const onlyRecipe =
+    contentKinds != null &&
+    contentKinds.length === 1 &&
+    contentKinds[0] === "recipe";
+  if (onlyRecipe) return [RECIPE_CATEGORY];
+
+  const base = orderedCategoriesForMixedFeed(profile, sectionIndex);
+  const includeRecipe =
+    contentKinds == null ||
+    contentKinds.length === 0 ||
+    contentKinds.includes("recipe");
+  const includeNonRecipeKinds =
+    contentKinds == null ||
+    contentKinds.length === 0 ||
+    contentKinds.some((k) => k !== "recipe");
+
+  if (includeNonRecipeKinds && includeRecipe) return [...base, RECIPE_CATEGORY];
+  if (includeNonRecipeKinds) return base;
+  if (includeRecipe) return [RECIPE_CATEGORY];
+  return base;
+}
+
 async function collectCandidatesAcrossCategories(
   profile: UserProfile,
   sectionIndex: number,
@@ -77,7 +107,7 @@ async function collectCandidatesAcrossCategories(
   excludeIds: string[],
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
-  const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
+  const order = feedBucketsForTraversal(profile, sectionIndex, contentKinds);
   const collected: StoredArticle[] = [];
   const collectedIds = new Set<string>();
 
@@ -108,7 +138,7 @@ async function collectUntaggedAcrossCategories(
   excludeIds: string[],
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
-  const order = orderedCategoriesForMixedFeed(profile, sectionIndex);
+  const order = feedBucketsForTraversal(profile, sectionIndex, contentKinds);
   const collected: StoredArticle[] = [];
   const collectedIds = new Set<string>();
 

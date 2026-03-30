@@ -142,9 +142,12 @@ export default function ArticleCard({
   index = 0,
   sectionIndex = 0,
 }: ArticleCardProps) {
-  const accentColor =
-    CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
-    "#1a1a1a";
+  const isRecipeCard =
+    "contentKind" in article && article.contentKind === "recipe";
+  const accentColor = isRecipeCard
+    ? "#1a472a"
+    : CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ||
+      "#1a1a1a";
 
   const isHero = layout === "hero";
   const isWide = layout === "wide";
@@ -277,8 +280,6 @@ export default function ArticleCard({
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
-  const isRecipeCard =
-    "contentKind" in article && article.contentKind === "recipe";
   const engagementContext = useMemo(
     () => ({
       source: "feed" as const,
@@ -768,24 +769,25 @@ export default function ArticleCard({
       }}
     >
       <div ref={contentWrapRef} style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-      {/* Category tag */}
-      <div
-        style={{
-          display: "inline-block",
-          background: accentColor,
-          color: "#fff",
-          fontSize: "0.6rem",
-          fontFamily: "'Playfair Display', Georgia, serif",
-          letterSpacing: "0.13em",
-          textTransform: "uppercase",
-          padding: "0.18rem 0.5rem",
-          marginBottom: "0.2rem",
-          fontWeight: 700,
-          alignSelf: "flex-start",
-        }}
-      >
-        {article.category}
-      </div>
+      {!isRecipeCard ? (
+        <div
+          style={{
+            display: "inline-block",
+            background: accentColor,
+            color: "#fff",
+            fontSize: "0.6rem",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            letterSpacing: "0.13em",
+            textTransform: "uppercase",
+            padding: "0.18rem 0.5rem",
+            marginBottom: "0.2rem",
+            fontWeight: 700,
+            alignSelf: "flex-start",
+          }}
+        >
+          {article.category}
+        </div>
+      ) : null}
 
       {/* Headline — links to primary source when we have URLs from ingest */}
       <h2 style={headlineStyle}>

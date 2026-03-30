@@ -11,6 +11,14 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
+/**
+ * Storage-only feed bucket for `content_kind = recipe` rows — not a news topic label.
+ * Recipes are not assigned editorial categories (Science & Discovery, etc.).
+ */
+export const RECIPE_CATEGORY = "recipe" as const;
+
+export type ArticleStorageCategory = Category | typeof RECIPE_CATEGORY;
+
 export const CATEGORY_COLORS: Record<Category, string> = {
   "Science & Discovery": "#1a472a",
   "Community Heroes": "#7b2d00",

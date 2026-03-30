@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS articles (
   subheadline     TEXT NOT NULL DEFAULT '',
   byline          TEXT NOT NULL DEFAULT '',
   location        TEXT NOT NULL DEFAULT '',
+  -- Editorial topic for news; `recipe` is the storage bucket for content_kind='recipe' (not a news category).
   category        TEXT NOT NULL,
   body            TEXT NOT NULL,
   pull_quote      TEXT NOT NULL DEFAULT '',

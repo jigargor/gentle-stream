@@ -998,7 +998,9 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
                   </div>
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
-                    {submission.category} • {submission.contentKind === "recipe" ? "Recipe" : "Article"} • {new Date(submission.createdAt).toLocaleString()}
+                    {submission.contentKind === "recipe"
+                      ? `Recipe • ${new Date(submission.createdAt).toLocaleString()}`
+                      : `${submission.category} • Article • ${new Date(submission.createdAt).toLocaleString()}`}
                   </p>
                   {submission.adminNote ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUserId } from "@/lib/api/sessionUser";
-import { CATEGORIES, type Category } from "@/lib/constants";
+import { CATEGORIES, RECIPE_CATEGORY, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { updateSubmissionForAuthor } from "@/lib/db/creator";
@@ -136,10 +136,13 @@ export async function PATCH(
   if (pullQuote !== undefined) updates.pullQuote = pullQuote;
   if (locale !== undefined) updates.locale = locale || "global";
   if (categoryRaw !== undefined) {
-    if (!categoryRaw || !isCategory(categoryRaw)) {
+    if (contentKindRaw === "recipe") {
+      updates.category = RECIPE_CATEGORY;
+    } else if (!categoryRaw || !isCategory(categoryRaw)) {
       return NextResponse.json({ error: "Invalid category" }, { status: 400 });
+    } else {
+      updates.category = categoryRaw;
     }
-    updates.category = categoryRaw;
   }
   if (contentKindRaw !== undefined) {
     if (!contentKindRaw || !isSubmissionContentKind(contentKindRaw)) {

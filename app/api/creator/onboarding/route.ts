@@ -100,7 +100,10 @@ export async function POST(request: NextRequest) {
   }
   if (!consentProof) {
     return NextResponse.json(
-      { error: "Provide proof of consent (link, source, or policy reference)." },
+      {
+        error:
+          "Provide proof of consent (URL to the SMS consent screenshot evidence).",
+      },
       { status: 400 }
     );
   }

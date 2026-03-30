@@ -520,7 +520,7 @@ export function CreatorOnboardingForm({
             <textarea
               value={consentProof}
               onChange={(e) => setConsentProof(e.target.value)}
-              placeholder="Proof of consent (required): URL, form/version id, or internal audit reference"
+              placeholder="Proof of consent (required): paste the SMS consent screenshot URL, e.g. https://<<hostname>>/sms-consent-screen.png"
               style={{ minHeight: "70px", padding: "0.45rem", border: "1px solid #bbb" }}
             />
           </div>

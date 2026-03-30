@@ -22,12 +22,13 @@ interface FeedGamePick {
  * Games in the rotating feed (Connections is NYT-style: one daily puzzle, handled
  * separately in NewsFeed — not part of this rotation).
  */
-const ALL_FEED_GAME_TYPES: GameType[] = [
+export const FEED_GAME_TYPES: GameType[] = [
   "sudoku",
   "word_search",
   "crossword",
   "killer_sudoku",
   "nonogram",
+  "connections",
 ];
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
@@ -50,8 +51,8 @@ function mulberry32(seed: number): () => number {
 }
 
 /** One permutation of game types per cycle index — fair counts, varied order. */
-function shuffledGameTypesForCycle(cycle: number): GameType[] {
-  const arr = [...ALL_FEED_GAME_TYPES];
+function shuffledGameTypesForCycle(cycle: number, enabled: GameType[]): GameType[] {
+  const arr = [...enabled];
   const rand = mulberry32((cycle + 1) * 1_000_003);
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
@@ -60,25 +61,46 @@ function shuffledGameTypesForCycle(cycle: number): GameType[] {
   return arr;
 }
 
+function normalizeEnabledFeedGameTypes(enabledGameTypes?: GameType[]): GameType[] {
+  if (!enabledGameTypes || enabledGameTypes.length === 0) return [...FEED_GAME_TYPES];
+  const allow = new Set(FEED_GAME_TYPES);
+  const out: GameType[] = [];
+  const seen = new Set<GameType>();
+  for (const t of enabledGameTypes) {
+    if (!allow.has(t) || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out.length > 0 ? out : [...FEED_GAME_TYPES];
+}
+
 /**
  * Pick for the n-th game section in the feed (0-based).
  * Each full cycle hits every game type exactly once; difficulty steps with the ordinal.
  */
-export function feedGamePickForOrdinal(ordinal: number): FeedGamePick {
-  const n = ALL_FEED_GAME_TYPES.length;
+export function feedGamePickForOrdinal(
+  ordinal: number,
+  enabledGameTypes?: GameType[]
+): FeedGamePick {
+  const enabled = normalizeEnabledFeedGameTypes(enabledGameTypes);
+  const n = enabled.length;
   const cycle = Math.floor(ordinal / n);
   const pos = ordinal % n;
-  const gameType = shuffledGameTypesForCycle(cycle)[pos];
+  const gameType = shuffledGameTypesForCycle(cycle, enabled)[pos];
   const difficulty = DIFFICULTIES[ordinal % DIFFICULTIES.length];
   return { gameType, difficulty };
 }
 
 /** Deterministic pick so the same article always shows the same embedded game. */
-export function embeddedGamePickFromSeed(seed: string): FeedGamePick {
+export function embeddedGamePickFromSeed(
+  seed: string,
+  enabledGameTypes?: GameType[]
+): FeedGamePick {
   const h1 = hashStringToUint32(seed);
   const h2 = hashStringToUint32(`${seed}|diff`);
+  const enabled = normalizeEnabledFeedGameTypes(enabledGameTypes);
   return {
-    gameType: ALL_FEED_GAME_TYPES[h1 % ALL_FEED_GAME_TYPES.length],
+    gameType: enabled[h1 % enabled.length],
     difficulty: DIFFICULTIES[h2 % DIFFICULTIES.length],
   };
 }
@@ -86,9 +108,7 @@ export function embeddedGamePickFromSeed(seed: string): FeedGamePick {
 /** Uniform random type and difficulty (no feed history). */
 export function randomFeedGamePick(): FeedGamePick {
   const gameType =
-    ALL_FEED_GAME_TYPES[
-      Math.floor(Math.random() * ALL_FEED_GAME_TYPES.length)
-    ];
+    FEED_GAME_TYPES[Math.floor(Math.random() * FEED_GAME_TYPES.length)];
   const difficulty =
     DIFFICULTIES[Math.floor(Math.random() * DIFFICULTIES.length)];
   return { gameType, difficulty };

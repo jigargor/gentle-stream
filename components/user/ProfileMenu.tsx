@@ -7,13 +7,22 @@ import {
   GAME_RATIO_PRESETS,
   nearestPresetValue,
 } from "@/lib/user/feed-settings";
+import { FEED_GAME_TYPES } from "@/lib/games/feedPick";
+import type { GameType } from "@/lib/games/types";
 import { isCreator } from "@/lib/user/creator";
 import {
   isUsernameChangeLocked,
   usernameChangeUnlocksAtIso,
   USERNAME_CHANGE_COOLDOWN_HOURS,
 } from "@/lib/user/username-policy";
-import type { UserProfile, UserGameStats } from "@/lib/types";
+import type {
+  UserProfile,
+  UserGameStats,
+  WeatherModuleData,
+  SpotifyMoodTileData,
+} from "@/lib/types";
+import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
+import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
@@ -49,6 +58,8 @@ export function ProfileMenu({
   isAdmin = false,
 }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
+  const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
+  const [additionalGoodiesOpen, setAdditionalGoodiesOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserGameStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -57,16 +68,28 @@ export function ProfileMenu({
   const [profileForm, setProfileForm] = useState({
     displayName: "",
     username: "",
+    weatherLocation: "",
   });
   /** Masthead avatar/name: false until initial GET /api/user/profile finishes */
   const [headerLoading, setHeaderLoading] = useState(true);
   /** After profile loads, hide shimmer once the image has painted (or failed). */
   const [avatarPainted, setAvatarPainted] = useState(false);
+  const [avatarBust, setAvatarBust] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [enabledGameTypes, setEnabledGameTypes] = useState<GameType[] | null>(null);
+  const [moduleLoading, setModuleLoading] = useState(false);
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const [moduleError, setModuleError] = useState<string | null>(null);
+  const [weatherModuleData, setWeatherModuleData] = useState<WeatherModuleData | null>(null);
+  const [spotifyModuleData, setSpotifyModuleData] = useState<SpotifyMoodTileData | null>(null);
 
   useEffect(() => {
-    if (!profile?.avatarUrl) setAvatarPainted(true);
-    else setAvatarPainted(false);
+    if (!profile?.avatarUrl) {
+      setAvatarPainted(true);
+      return;
+    }
+    setAvatarPainted(false);
+    setAvatarBust(Date.now());
   }, [profile?.avatarUrl]);
 
   useEffect(() => {
@@ -81,6 +104,7 @@ export function ProfileMenu({
           setProfileForm({
             displayName: data.displayName ?? "",
             username: data.username ?? "",
+            weatherLocation: data.weatherLocation ?? "",
           });
         }
       } finally {
@@ -106,6 +130,7 @@ export function ProfileMenu({
         setProfileForm({
           displayName: data.displayName ?? "",
           username: data.username ?? "",
+          weatherLocation: data.weatherLocation ?? "",
         });
       } else {
         setLoadError("Could not load profile.");
@@ -122,6 +147,20 @@ export function ProfileMenu({
   useEffect(() => {
     if (open) void loadAll();
   }, [open, loadAll]);
+
+  useEffect(() => {
+    if (open) return;
+    setGameSettingsOpen(false);
+    setAdditionalGoodiesOpen(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (!profile) return;
+    if (enabledGameTypes != null) return;
+    if (Array.isArray((profile as unknown as { enabledGameTypes?: unknown }).enabledGameTypes)) {
+      setEnabledGameTypes((profile as unknown as { enabledGameTypes: GameType[] }).enabledGameTypes);
+    }
+  }, [profile, enabledGameTypes]);
 
   useEffect(() => {
     if (!open) return;
@@ -166,6 +205,245 @@ export function ProfileMenu({
     }
   }
 
+  async function saveEnabledGameTypes(next: GameType[]) {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/user/preferences", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabledGameTypes: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(typeof data.error === "string" ? data.error : "Could not save.");
+        return;
+      }
+      setProfile(data as UserProfile);
+      setEnabledGameTypes(next);
+      window.dispatchEvent(
+        new CustomEvent("gentle-stream-enabled-game-types", {
+          detail: { enabledGameTypes: next },
+        })
+      );
+    } catch {
+      setSaveError("Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleGameType(gameType: GameType) {
+    const current = enabledGameTypes ?? (["connections", ...FEED_GAME_TYPES] as GameType[]);
+    const has = current.includes(gameType);
+    const next = has ? current.filter((t) => t !== gameType) : [...current, gameType];
+    if (next.length === 0) return; // keep at least one enabled
+    setEnabledGameTypes(next);
+    void saveEnabledGameTypes(next);
+  }
+
+  async function getBrowserCoordinates(): Promise<{ lat: number; lon: number } | null> {
+    try {
+      const stored = localStorage.getItem("gentle_stream_browser_geo");
+      if (stored) {
+        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
+        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
+          return { lat: parsed.lat, lon: parsed.lon };
+        }
+      }
+    } catch {
+      /* ignore malformed cache */
+    }
+
+    if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+    return await new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          };
+          try {
+            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
+          } catch {
+            /* ignore storage issues */
+          }
+          resolve(coords);
+        },
+        () => resolve(null),
+        {
+          enableHighAccuracy: false,
+          timeout: 5_000,
+          maximumAge: 15 * 60 * 1000,
+        }
+      );
+    });
+  }
+
+  async function fetchAdditionalWeatherModule() {
+    setModuleError(null);
+    setModuleLoading(true);
+    try {
+      const params = new URLSearchParams();
+      const preferredLocation = profileForm.weatherLocation.trim();
+      if (preferredLocation) {
+        params.set("location", preferredLocation);
+      } else {
+        const coords = await getBrowserCoordinates();
+        if (coords) {
+          params.set("lat", String(coords.lat));
+          params.set("lon", String(coords.lon));
+        }
+      }
+      const res = await fetch(`/api/feed/modules/weather?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        data?: WeatherModuleData;
+      };
+      if (!res.ok || !body.data) {
+        setModuleError(body.error ?? "Could not fetch weather module data.");
+        return;
+      }
+      setWeatherModuleData(body.data);
+    } catch {
+      setModuleError("Could not fetch weather module data.");
+    } finally {
+      setModuleLoading(false);
+    }
+  }
+
+  async function fetchAdditionalSpotifyModule() {
+    setModuleError(null);
+    setSpotifyLoading(true);
+    try {
+      const params = new URLSearchParams();
+      const res = await fetch(`/api/feed/modules/spotify?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        data?: SpotifyMoodTileData;
+      };
+      if (!res.ok || !body.data) {
+        setModuleError(body.error ?? "Could not fetch Spotify mood tile.");
+        return;
+      }
+      setSpotifyModuleData(body.data);
+    } catch {
+      setModuleError("Could not fetch Spotify mood tile.");
+    } finally {
+      setSpotifyLoading(false);
+    }
+  }
+
+  const displayGameTypes: Array<{ value: GameType; label: string; description: string }> = [
+    { value: "connections", label: "Connections (daily)", description: "One daily puzzle per session." },
+    { value: "crossword", label: "Crossword", description: "Mini word-square crossword." },
+    { value: "sudoku", label: "Sudoku", description: "Classic 9×9 logic grid." },
+    { value: "killer_sudoku", label: "Killer Sudoku", description: "Cage-sum variant." },
+    { value: "word_search", label: "Word search", description: "Find themed words in a grid." },
+    { value: "nonogram", label: "Nonogram", description: "Picross-style picture logic." },
+  ];
+
+  function SwitchRow({
+    label,
+    description,
+    checked,
+    disabled,
+    onToggle,
+  }: {
+    label: string;
+    description: string;
+    checked: boolean;
+    disabled: boolean;
+    onToggle: () => void;
+  }) {
+    const trackOn = "#0ea5a4";
+    const trackOff = "#d1d5db";
+    const track = checked ? trackOn : trackOff;
+    return (
+      <button
+        type="button"
+        onClick={() => (!disabled ? onToggle() : null)}
+        disabled={disabled}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+          width: "100%",
+          textAlign: "left",
+          padding: "0.75rem 0.85rem",
+          border: "1px solid #e3dfd5",
+          background: "#fff",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.7 : 1,
+        }}
+      >
+        <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <span
+            style={{
+              fontFamily: "'Playfair Display', Georgia, serif",
+              fontSize: "0.82rem",
+              fontWeight: 700,
+              color: "#1a1a1a",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </span>
+          <span
+            style={{
+              fontFamily: "'IM Fell English', Georgia, serif",
+              fontStyle: "italic",
+              fontSize: "0.72rem",
+              color: "#7b7b7b",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {description}
+          </span>
+        </span>
+
+        <span
+          aria-hidden
+          style={{
+            position: "relative",
+            width: 56,
+            height: 32,
+            background: track,
+            borderRadius: 999,
+            transition: "background 180ms ease",
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 3,
+              left: checked ? 28 : 3,
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              background: "#fff",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+              transition: "left 180ms ease",
+            }}
+          />
+        </span>
+      </button>
+    );
+  }
+
   async function saveProfileFields() {
     setSaveError(null);
     setSaving(true);
@@ -180,6 +458,7 @@ export function ProfileMenu({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName: profileForm.displayName.trim() || null,
+          weatherLocation: profileForm.weatherLocation.trim() || null,
           ...(usernameLocked
             ? {}
             : { username: profileForm.username.trim().toLowerCase() || null }),
@@ -208,6 +487,16 @@ export function ProfileMenu({
         return;
       }
       setProfile(data as UserProfile);
+      try {
+        const nextLocation = (data as UserProfile).weatherLocation;
+        if (typeof nextLocation === "string" && nextLocation.trim()) {
+          localStorage.setItem("gentle_stream_weather_location", nextLocation.trim());
+        } else {
+          localStorage.removeItem("gentle_stream_weather_location");
+        }
+      } catch {
+        /* ignore */
+      }
     } catch {
       setSaveError("Could not save profile.");
     } finally {
@@ -232,6 +521,10 @@ export function ProfileMenu({
   const usernameLocked =
     profile != null &&
     isUsernameChangeLocked(profile.username, profile.usernameSetAt);
+
+  const headerAvatarSrc = profile?.avatarUrl
+    ? `${profile.avatarUrl.split("?")[0]}?t=${avatarBust}`
+    : null;
 
   return (
     <div
@@ -268,7 +561,7 @@ export function ProfileMenu({
             className="profile-header-shimmer profile-header-skeleton-avatar"
             aria-hidden
           />
-        ) : profile?.avatarUrl ? (
+        ) : headerAvatarSrc ? (
           <div
             style={{
               position: "relative",
@@ -285,7 +578,7 @@ export function ProfileMenu({
               />
             )}
             <img
-              src={profile.avatarUrl}
+              src={headerAvatarSrc}
               alt=""
               width={36}
               height={36}
@@ -502,6 +795,49 @@ export function ProfileMenu({
             </ul>
           </section>
 
+          <div style={{ margin: "0.2rem 0 1rem" }}>
+            <button
+              type="button"
+              onClick={() => setGameSettingsOpen(true)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              Game settings
+            </button>
+          </div>
+          <div style={{ margin: "0.2rem 0 1rem" }}>
+            <button
+              type="button"
+              onClick={() => setAdditionalGoodiesOpen(true)}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                color: "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "3px",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              Additional goodies
+            </button>
+          </div>
+
           <section style={{ marginBottom: "1rem" }}>
             <h3
               style={{
@@ -636,6 +972,31 @@ export function ProfileMenu({
                 fontSize: "0.85rem",
                 background: usernameLocked ? "#f0ede6" : undefined,
                 cursor: usernameLocked ? "not-allowed" : undefined,
+              }}
+            />
+            <label
+              style={{
+                fontSize: "0.65rem",
+                color: "#888",
+                display: "block",
+                marginBottom: "0.2rem",
+              }}
+            >
+              Weather location
+            </label>
+            <input
+              value={profileForm.weatherLocation}
+              onChange={(e) =>
+                setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
+              }
+              placeholder="City or region (e.g. New York)"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                marginBottom: "0.45rem",
+                padding: "0.35rem 0.45rem",
+                border: "1px solid #ccc",
+                fontSize: "0.85rem",
               }}
             />
             {profile && (
@@ -858,6 +1219,288 @@ export function ProfileMenu({
           {saveError && (
             <p style={{ color: "#8b4513", fontSize: "0.75rem" }}>{saveError}</p>
           )}
+        </div>
+      )}
+
+      {open && gameSettingsOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Game settings"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setGameSettingsOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.42)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.2rem",
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 96vw)",
+              background: "#faf8f3",
+              border: "1.5px solid #1a1a1a",
+              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              padding: "1rem 1rem 0.9rem",
+              maxHeight: "min(82vh, 720px)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.75rem",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "1rem",
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "#1a1a1a",
+                  }}
+                >
+                  Game settings
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.1rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    fontSize: "0.78rem",
+                    color: "#777",
+                  }}
+                >
+                  Toggle which puzzle types can appear in your stream.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGameSettingsOpen(false)}
+                style={{
+                  border: "1px solid #1a1a1a",
+                  background: "transparent",
+                  padding: "0.35rem 0.6rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+              {displayGameTypes.map((g) => {
+                const current = enabledGameTypes ?? (["connections", ...FEED_GAME_TYPES] as GameType[]);
+                const checked = current.includes(g.value);
+                const disableUncheck = checked && current.length <= 1;
+                return (
+                  <SwitchRow
+                    key={g.value}
+                    label={g.label}
+                    description={g.description}
+                    checked={checked}
+                    disabled={saving || disableUncheck}
+                    onToggle={() => toggleGameType(g.value)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {open && additionalGoodiesOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Additional goodies"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setAdditionalGoodiesOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.42)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.2rem",
+          }}
+        >
+          <div
+            style={{
+              width: "min(620px, 96vw)",
+              background: "#faf8f3",
+              border: "1.5px solid #1a1a1a",
+              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              padding: "1rem 1rem 0.9rem",
+              maxHeight: "min(86vh, 760px)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.75rem",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "1rem",
+                    fontWeight: 800,
+                    letterSpacing: "0.02em",
+                    color: "#1a1a1a",
+                  }}
+                >
+                  Additional goodies
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.1rem",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    fontSize: "0.78rem",
+                    color: "#777",
+                  }}
+                >
+                  Manually summon little extras from live APIs.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdditionalGoodiesOpen(false)}
+                style={{
+                  border: "1px solid #1a1a1a",
+                  background: "transparent",
+                  padding: "0.35rem 0.6rem",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.72rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: "0.6rem", marginBottom: "0.75rem" }}>
+              <button
+                type="button"
+                onClick={() => void fetchAdditionalWeatherModule()}
+                disabled={moduleLoading}
+                style={{
+                  textAlign: "left",
+                  padding: "0.55rem 0.65rem",
+                  border: "1px solid #d8d2c7",
+                  background: "#fff",
+                  cursor: moduleLoading ? "wait" : "pointer",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                }}
+              >
+                {moduleLoading ? "Fetching weather..." : "Weather"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchAdditionalSpotifyModule()}
+                disabled={spotifyLoading}
+                style={{
+                  textAlign: "left",
+                  padding: "0.55rem 0.65rem",
+                  border: "1px solid #d8d2c7",
+                  background: "#fff",
+                  cursor: spotifyLoading ? "wait" : "pointer",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                }}
+              >
+                {spotifyLoading
+                  ? "Fetching Spotify mood tile..."
+                  : "Spotify Mood Tile"}
+              </button>
+              <div
+                style={{
+                  padding: "0.45rem 0.55rem",
+                  border: "1px dashed #d6cfbf",
+                  background: "#f8f4ea",
+                  fontSize: "0.7rem",
+                  color: "#5e5547",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                Upcoming: Marvel comic summon, NASA highlights, Spotify mood tile.
+              </div>
+            </div>
+
+            {moduleError && (
+              <p
+                style={{
+                  margin: "0.25rem 0 0.6rem",
+                  color: "#8b4513",
+                  fontSize: "0.74rem",
+                }}
+              >
+                {moduleError}
+              </p>
+            )}
+
+            <div style={{ display: "grid", gap: "0.75rem" }}>
+              {weatherModuleData ? (
+                <WeatherFillerCard data={weatherModuleData} reason="interval" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.15rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    color: "#888",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  Fetch weather data to preview the module.
+                </p>
+              )}
+              {spotifyModuleData ? (
+                <SpotifyMoodTile data={spotifyModuleData} reason="interval" />
+              ) : (
+                <p
+                  style={{
+                    margin: "0.15rem 0 0",
+                    fontFamily: "'IM Fell English', Georgia, serif",
+                    fontStyle: "italic",
+                    color: "#888",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  Fetch Spotify data to preview the mood tile.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -6,6 +6,7 @@
 
 import { scoreArticleWithEngagement } from "../lib/feed/recommendationScore";
 import type { StoredArticle, UserProfile } from "../lib/types";
+import { FEED_GAME_TYPES } from "../lib/games/feedPick";
 
 let passed = 0;
 let failed = 0;
@@ -35,6 +36,7 @@ function makeProfile(): UserProfile {
       Education: 0.125,
     },
     gameRatio: 0.2,
+    enabledGameTypes: ["connections", ...FEED_GAME_TYPES],
     userRole: "general",
     displayName: null,
     username: null,

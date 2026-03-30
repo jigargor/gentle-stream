@@ -33,6 +33,7 @@ export async function PATCH(request: NextRequest) {
     displayName?: unknown;
     username?: unknown;
     avatarUrl?: unknown;
+    weatherLocation?: unknown;
   };
 
   await getOrCreateUserProfile(userId);
@@ -40,6 +41,7 @@ export async function PATCH(request: NextRequest) {
   let displayName: string | null | undefined;
   let username: string | null | undefined;
   let avatarUrl: string | null | undefined;
+  let weatherLocation: string | null | undefined;
 
   if (body.displayName !== undefined) {
     if (body.displayName === null) displayName = null;
@@ -83,10 +85,24 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  if (body.weatherLocation !== undefined) {
+    if (body.weatherLocation === null || body.weatherLocation === "") weatherLocation = null;
+    else if (typeof body.weatherLocation === "string") {
+      const t = body.weatherLocation.trim();
+      if (t.length > 120) {
+        return NextResponse.json({ error: "weatherLocation too long" }, { status: 400 });
+      }
+      weatherLocation = t.length ? t : null;
+    } else {
+      return NextResponse.json({ error: "Invalid weatherLocation" }, { status: 400 });
+    }
+  }
+
   if (
     displayName === undefined &&
     username === undefined &&
-    avatarUrl === undefined
+    avatarUrl === undefined &&
+    weatherLocation === undefined
   ) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
@@ -96,6 +112,7 @@ export async function PATCH(request: NextRequest) {
       ...(displayName !== undefined ? { displayName } : {}),
       ...(username !== undefined ? { username } : {}),
       ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+      ...(weatherLocation !== undefined ? { weatherLocation } : {}),
     });
     return NextResponse.json(profile);
   } catch (e: unknown) {

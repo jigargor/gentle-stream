@@ -36,6 +36,8 @@ type PuzzleWithUniqueness = AnyPuzzle & {
 };
 
 const RECENT_SIGNATURE_LIMIT = 12;
+const RENDERED_SIGNATURE_LIMIT = 600;
+const renderedPuzzleSignaturesByType = new Map<GameType, string[]>();
 
 /** Preload must not block on user APIs — slow/hanging auth or DB would leave "Setting the grid…" forever. */
 const USER_PREFS_FETCH_TIMEOUT_MS = 8_000;
@@ -85,6 +87,22 @@ function writeRecentSignature(
   } catch {
     // ignore quota / private mode issues
   }
+}
+
+function readRenderedSignatures(gameType: GameType): string[] {
+  return renderedPuzzleSignaturesByType.get(gameType) ?? [];
+}
+
+function hasRenderedSignature(gameType: GameType, token?: string): boolean {
+  if (!token) return false;
+  return readRenderedSignatures(gameType).includes(token);
+}
+
+function rememberRenderedSignature(gameType: GameType, token?: string): void {
+  if (!token) return;
+  const prev = readRenderedSignatures(gameType).filter((s) => s !== token);
+  const next = [...prev, token].slice(-RENDERED_SIGNATURE_LIMIT);
+  renderedPuzzleSignaturesByType.set(gameType, next);
 }
 
 function puzzleEndpoint(
@@ -154,7 +172,12 @@ export default function GameSlot({
       setSudokuCloud(null);
       setWordCloud(null);
       try {
-        const excludeSignatures = buildExcludeSignatures(allowReplay);
+        const excludeSignatures = Array.from(
+          new Set([
+            ...buildExcludeSignatures(allowReplay),
+            ...readRenderedSignatures(gameType),
+          ])
+        );
         const url = puzzleEndpoint(
           gameType,
           diff,
@@ -174,7 +197,38 @@ export default function GameSlot({
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
+        const token =
+          (typeof data.uniquenessSignature === "string" && data.uniquenessSignature.trim()) ||
+          (typeof data.puzzleId === "string" && data.puzzleId.trim()) ||
+          undefined;
+        if (hasRenderedSignature(gameType, token) && !allowReplay) {
+          // Hard guard: never render the same puzzle twice in the same feed session view.
+          const retryExcludes = Array.from(
+            new Set([...excludeSignatures, ...(token ? [token] : [])])
+          );
+          const retryUrl = puzzleEndpoint(gameType, diff, retryExcludes, connectionsDaily);
+          const retryRes = await fetchWithTimeout(
+            retryUrl,
+            { cache: "no-store" },
+            PUZZLE_FETCH_TIMEOUT_MS
+          );
+          if (!retryRes.ok) throw new Error(`HTTP ${retryRes.status}`);
+          const retryData = (await retryRes.json()) as PuzzleWithUniqueness;
+          const retryToken =
+            (typeof retryData.uniquenessSignature === "string" && retryData.uniquenessSignature.trim()) ||
+            (typeof retryData.puzzleId === "string" && retryData.puzzleId.trim()) ||
+            undefined;
+          if (hasRenderedSignature(gameType, retryToken)) {
+            throw new Error("Duplicate puzzle prevented");
+          }
+          setPuzzle(retryData);
+          rememberRenderedSignature(gameType, retryToken);
+          writeRecentSignature(gameType, retryData.uniquenessSignature, retryData.puzzleId);
+          setCurrentDifficulty(diff);
+          return;
+        }
         setPuzzle(data);
+        rememberRenderedSignature(gameType, token);
         writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
         setCurrentDifficulty(diff);
       } catch {
@@ -280,8 +334,20 @@ export default function GameSlot({
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PuzzleWithUniqueness;
+        const token =
+          (typeof data.uniquenessSignature === "string" && data.uniquenessSignature.trim()) ||
+          (typeof data.puzzleId === "string" && data.puzzleId.trim()) ||
+          undefined;
+        if (hasRenderedSignature(gameType, token)) {
+          if (!cancelled) {
+            setHasNoUniqueAvailable(true);
+            setError("0 unique games available right now.");
+          }
+          return;
+        }
         if (!cancelled) {
           setPuzzle(data);
+          rememberRenderedSignature(gameType, token);
           writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
           setSudokuCloud(null);
           setWordCloud(null);
@@ -340,6 +406,8 @@ export default function GameSlot({
       </div>
     );
   }
+
+  if (hasNoUniqueAvailable) return null;
 
   if (error || !puzzle) {
     return (

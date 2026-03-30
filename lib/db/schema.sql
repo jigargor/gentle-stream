@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   -- Arrays stored as JSON for simplicity
   preferred_emotions TEXT[] NOT NULL DEFAULT '{}',
   preferred_locales  TEXT[] NOT NULL DEFAULT '{global}',
+  enabled_game_types TEXT[] NOT NULL DEFAULT '{sudoku,word_search,crossword,killer_sudoku,nonogram,connections}',
 
   -- Seen article IDs (prevent repeats in the feed)
   seen_article_ids   UUID[] NOT NULL DEFAULT '{}',
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   display_name       TEXT,
   username           TEXT,
   avatar_url         TEXT,
+  weather_location   TEXT,
   username_set_at    TIMESTAMPTZ,
 
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -180,6 +182,15 @@ CREATE TABLE IF NOT EXISTS game_saves (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, game_type)
 );
+
+-- ─── Game generation rate limits ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS game_generation_rate_limits (
+  game_type TEXT PRIMARY KEY,
+  last_generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_generation_rate_limits_last_generated
+  ON game_generation_rate_limits (last_generated_at DESC);
 
 CREATE TABLE IF NOT EXISTS article_likes (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),

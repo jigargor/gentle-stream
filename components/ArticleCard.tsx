@@ -13,6 +13,7 @@ import { CATEGORY_COLORS } from "@/lib/constants";
 import GameSlot from "./games/GameSlot";
 import { embeddedGamePickFromSeed } from "@/lib/games/feedPick";
 import type { Article, LayoutVariant } from "@/lib/types";
+import type { GameType } from "@/lib/games/types";
 import {
   picsumFallbackUrl,
   pollinationsImageUrl,
@@ -154,6 +155,9 @@ export default function ArticleCard({
   const articleRef = useRef<HTMLElement>(null);
   const contentWrapRef = useRef<HTMLDivElement>(null);
   const [showHeroGapGame, setShowHeroGapGame] = useState(false);
+  const [enabledEmbeddedGameTypes, setEnabledEmbeddedGameTypes] = useState<
+    GameType[] | null
+  >(null);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -224,9 +228,22 @@ export default function ArticleCard({
     };
   }, [isHero, articleSeed]);
 
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("gentle_stream_enabled_game_types");
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed)) return;
+      const enabled = parsed.filter((entry): entry is GameType => typeof entry === "string");
+      if (enabled.length > 0) setEnabledEmbeddedGameTypes(enabled);
+    } catch {
+      /* ignore malformed local cache */
+    }
+  }, []);
+
   const embeddedGame = useMemo(
-    () => embeddedGamePickFromSeed(articleSeed),
-    [articleSeed]
+    () => embeddedGamePickFromSeed(articleSeed, enabledEmbeddedGameTypes ?? undefined),
+    [articleSeed, enabledEmbeddedGameTypes]
   );
 
   const heroImageSrc = useMemo(() => {

@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db/client";
 import {
   getGameFromPool,
   getDailyConnectionsGameRow,
@@ -21,6 +22,45 @@ import { ensureConnectionsIdentity } from "@/lib/games/connectionsUniqueness";
 import type { Category } from "@/lib/constants";
 
 export const maxDuration = 60; // Vercel max for hobby plan
+
+const CONNECTIONS_GENERATION_MIN_INTERVAL_MS = 20 * 60 * 1000;
+
+async function canTriggerConnectionsGeneration(): Promise<{
+  allowed: boolean;
+  retryAfterSeconds: number | null;
+}> {
+  const { data, error } = await db
+    .from("game_generation_rate_limits")
+    .select("last_generated_at")
+    .eq("game_type", "connections")
+    .maybeSingle();
+
+  if (error) {
+    // If rate-limit table isn't available yet, fail open to preserve gameplay.
+    return { allowed: true, retryAfterSeconds: null };
+  }
+
+  const lastIso = (data as { last_generated_at?: string } | null)?.last_generated_at ?? null;
+  if (!lastIso) return { allowed: true, retryAfterSeconds: null };
+
+  const ageMs = Date.now() - Date.parse(lastIso);
+  if (Number.isFinite(ageMs) && ageMs < CONNECTIONS_GENERATION_MIN_INTERVAL_MS) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((CONNECTIONS_GENERATION_MIN_INTERVAL_MS - ageMs) / 1000)
+    );
+    return { allowed: false, retryAfterSeconds };
+  }
+
+  return { allowed: true, retryAfterSeconds: null };
+}
+
+async function recordConnectionsGenerationTriggered(): Promise<void> {
+  const nowIso = new Date().toISOString();
+  await db
+    .from("game_generation_rate_limits")
+    .upsert({ game_type: "connections", last_generated_at: nowIso }, { onConflict: "game_type" });
+}
 
 function parseExcludeSignatures(raw: string | null): string[] {
   if (!raw) return [];
@@ -77,7 +117,7 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 2. Live generation fallback ─────────────────────────────────────────────
-  console.log(`[/api/game/connections] Pool empty — generating live`);
+  console.log(`[/api/game/connections] Pool empty (or all excluded) — considering live generation`);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -93,6 +133,24 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const gate = await canTriggerConnectionsGeneration();
+    if (!gate.allowed) {
+      const headers = gate.retryAfterSeconds
+        ? { "Retry-After": String(gate.retryAfterSeconds) }
+        : undefined;
+      return NextResponse.json(
+        {
+          error:
+            excludeSignatures.length > 0
+              ? "No unseen Connections puzzle available right now."
+              : "Connections pool is empty right now.",
+          retryAfterSeconds: gate.retryAfterSeconds,
+        },
+        { status: 409, headers }
+      );
+    }
+
+    await recordConnectionsGenerationTriggered();
     const promptTheme = (await getPromptThemeForGameType(
       "connections"
     )) as Category;

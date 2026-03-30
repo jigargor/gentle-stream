@@ -1,4 +1,5 @@
 import type { Category } from "./constants";
+import type { GameType } from "./games/types";
 
 // ─── Raw shape returned by the ingest agent (LLM output) ─────────────────────
 export interface RawArticle {
@@ -68,12 +69,14 @@ export interface UserProfile {
   userId: string;
   categoryWeights: Record<Category, number>; // must sum to ~1.0
   gameRatio: number;                          // 0.0–1.0, portion of feed that is games
+  enabledGameTypes: GameType[];               // which game types can appear in the feed
   userRole: UserRole;
   displayName: string | null;
   username: string | null;
   /** When `username` was last set or changed; used for 24h rename cooldown. */
   usernameSetAt: string | null;
   avatarUrl: string | null;
+  weatherLocation?: string | null;
   seenArticleIds: string[];
   preferredEmotions: string[];               // subset of ArticleSentiment emotions
   preferredLocales: string[];                // ["global", "US"] etc.
@@ -211,6 +214,27 @@ export interface ArticleFeedSection {
   sectionType: "articles";
   articles: Article[];
   index: number;
+  newspaperLayout?: {
+    templateId:
+      | "single-hero"
+      | "two-columns"
+      | "hero-left"
+      | "middle-wide"
+      | "hero-sidebar";
+    layouts: LayoutVariant[];
+    orderedIndices?: number[];
+    columnHeightsPx?: number[];
+    inlineGapPx?: number;
+    inlineTargetColumn?: number | null;
+    inlineSuggestedModuleType?: "weather" | "spotify" | "generated_art" | "nasa";
+    inlineModule?: {
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      reason: "inline";
+      targetColumn: number;
+      data: FeedModuleData;
+    } | null;
+    residualGapPx: number;
+  };
 }
 
 export interface GameFeedSection {
@@ -222,8 +246,75 @@ export interface GameFeedSection {
   connectionsDaily?: boolean;
 }
 
+export interface WeatherModuleData {
+  mode: "weather" | "generated_art";
+  title: string;
+  subtitle: string;
+  locationLabel?: string;
+  temperatureC?: number;
+  condition?: string;
+  humidity?: number;
+  windKph?: number;
+  imageUrl?: string;
+}
+
+export interface GeneratedImageModuleData {
+  mode: "generated_art";
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+}
+
+export interface NasaModuleData {
+  mode: "nasa" | "fallback";
+  title: string;
+  subtitle: string;
+  imageUrl?: string;
+  sourceUrl?: string;
+}
+
+export interface SpotifyMoodTrack {
+  id: string;
+  name: string;
+  artist: string;
+  albumName?: string;
+  albumImageUrl?: string;
+  spotifyUrl: string;
+  previewUrl?: string | null;
+}
+
+export interface SpotifyMoodTileData {
+  mode: "spotify" | "fallback";
+  title: string;
+  subtitle: string;
+  mood: string;
+  market: string;
+  tracks: SpotifyMoodTrack[];
+  playlistUrl?: string;
+  imageUrl?: string;
+}
+
+export type FeedModuleData =
+  | WeatherModuleData
+  | SpotifyMoodTileData
+  | GeneratedImageModuleData
+  | NasaModuleData;
+
+export interface ModuleFeedSection {
+  sectionType: "module" | "filler";
+  moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+  /** Legacy compatibility: prefer moduleType going forward. */
+  fillerType?: "weather" | "spotify" | "generated_art" | "nasa";
+  reason: "gap" | "interval";
+  index: number;
+  data: FeedModuleData;
+}
+
 /** A single row in the infinite scroll feed — either articles or a game */
-export type FeedSection = ArticleFeedSection | GameFeedSection;
+export type FeedSection = ArticleFeedSection | GameFeedSection | ModuleFeedSection;
+
+/** Back-compat alias while the old name is phased out. */
+export type WeatherFillerData = WeatherModuleData;
 
 // ─── Agent job payloads ───────────────────────────────────────────────────────
 export interface IngestJobPayload {

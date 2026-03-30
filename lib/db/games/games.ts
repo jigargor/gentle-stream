@@ -11,6 +11,7 @@ import { db } from "../client";
 import { resolveGameFlavor } from "@/lib/db/gameFlavorDefaults";
 import type { CrosswordPuzzle } from "@/lib/games/crosswordIngestAgent";
 import type { ConnectionsPuzzle } from "@/lib/games/connectionsIngestAgent";
+import { makeConnectionsPuzzleId } from "@/lib/games/connectionsUniqueness";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,13 @@ export async function getGameFromPool(
   const flavor = await resolveGameFlavor(type, flavorOverride);
 
   function signatureForRow(row: GameRow): string | null {
-    const payload = row.payload as { uniquenessSignature?: unknown; puzzleId?: unknown } | null;
+    const payload = row.payload as
+      | ({
+          uniquenessSignature?: unknown;
+          puzzleId?: unknown;
+          groups?: unknown;
+        } & Record<string, unknown>)
+      | null;
     if (!payload || typeof payload !== "object") return null;
     const sig =
       typeof payload.uniquenessSignature === "string"
@@ -103,7 +110,51 @@ export async function getGameFromPool(
         : typeof payload.puzzleId === "string"
           ? payload.puzzleId
           : null;
-    return sig?.trim() || null;
+    const trimmed = sig?.trim() || null;
+    if (trimmed) return trimmed;
+
+    // Legacy Connections rows may not have identity fields; compute a stable id from payload.
+    if (row.type === "connections" && Array.isArray(payload.groups)) {
+      try {
+        return makeConnectionsPuzzleId(payload as unknown as ConnectionsPuzzle);
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  async function backfillConnectionsSignatureIfMissing(row: GameRow): Promise<void> {
+    if (row.type !== "connections") return;
+    const payload = row.payload as
+      | ({ uniquenessSignature?: unknown; puzzleId?: unknown } & Record<string, unknown>)
+      | null;
+    if (!payload || typeof payload !== "object") return;
+    const has =
+      typeof payload.uniquenessSignature === "string" ||
+      typeof payload.puzzleId === "string";
+    if (has) return;
+    if (!Array.isArray((payload as Record<string, unknown>).groups)) return;
+
+    let puzzleId: string;
+    try {
+      puzzleId = makeConnectionsPuzzleId(payload as unknown as ConnectionsPuzzle);
+    } catch {
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      puzzleId,
+      uniquenessSignature: puzzleId,
+    };
+
+    // Best-effort: don't block serving the puzzle.
+    void db
+      .from("games")
+      .update({ payload: nextPayload as never })
+      .eq("id", row.id);
   }
 
   function pickFromRows(rows: GameRow[]): GameRow | null {
@@ -113,9 +164,15 @@ export async function getGameFromPool(
       const sig = signatureForRow(r);
       return !sig || !excludeSet.has(sig);
     });
-    if (filtered.length > 0) return pickRowPreferringLowUse(filtered, randomTieBreak);
+    if (filtered.length > 0) {
+      const picked = pickRowPreferringLowUse(filtered, randomTieBreak);
+      void backfillConnectionsSignatureIfMissing(picked);
+      return picked;
+    }
     if (!allowExcludedFallback) return null;
-    return pickRowPreferringLowUse(rows, randomTieBreak);
+    const picked = pickRowPreferringLowUse(rows, randomTieBreak);
+    void backfillConnectionsSignatureIfMissing(picked);
+    return picked;
   }
 
   const { data: flavorRows } = await db

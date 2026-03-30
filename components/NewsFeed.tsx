@@ -7,6 +7,8 @@ import CategoryDrawer from "./CategoryDrawer";
 import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
+import WeatherFillerCard from "./feed/WeatherFillerCard";
+import SpotifyMoodTile from "./feed/SpotifyMoodTile";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -16,9 +18,19 @@ import type {
   FeedSection,
   ArticleFeedSection,
   GameFeedSection,
+  ModuleFeedSection,
+  FeedModuleData,
+  WeatherModuleData,
+  SpotifyMoodTileData,
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
+import type { GameType } from "@/lib/games/types";
+import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
+import {
+  buildGeneratedImageModuleData,
+  chooseModuleTypeByPolicy,
+} from "@/lib/feed/modules/policy";
 
 // Strip any <cite ...>...</cite> or bare </cite> tags that leak from Claude
 function stripCiteTags(text: string): string {
@@ -62,7 +74,27 @@ const FEED_FETCH_TIMEOUT_MS = 90_000;
 const SENTINEL_PREFETCH_PX = 900;
 const MIN_LOAD_GAP_MS = 650;
 const REACHED_END_COOLDOWN_MS = 20_000;
+const DEFAULT_GAP_MIN_PX = 180;
+const DEFAULT_INLINE_GAP_MIN_PX = 140;
+const DEFAULT_FILLER_INTERVAL = 4;
+const DEFAULT_WEATHER_WEIGHT = 3;
+const DEFAULT_SPOTIFY_WEIGHT = 1;
 type FeedKindFilter = "all" | ArticleContentKind;
+
+function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
+  if (input == null) return defaultValue;
+  const value = input.trim().toLowerCase();
+  if (value === "1" || value === "true" || value === "yes" || value === "on") return true;
+  if (value === "0" || value === "false" || value === "no" || value === "off") return false;
+  return defaultValue;
+}
+
+function readPositiveInt(input: string | undefined, defaultValue: number): number {
+  if (!input) return defaultValue;
+  const parsed = Number.parseInt(input, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return defaultValue;
+  return parsed;
+}
 
 export interface NewsFeedProps {
   /** Stable id from Supabase `auth.users` — used for ranking, seen state, future metrics. */
@@ -81,20 +113,19 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const [liveGenerating, setLiveGenerating] = useState(false);
   /** True once game ratio is resolved for the current session/user bootstrap. */
   const [isFeedReady, setIsFeedReady] = useState(false);
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
   // Use refs for values that loadMore closes over — avoids stale closure bugs
   const loadingRef = useRef(false);
   const sectionCountRef = useRef(0);
   /** Counts game sections only — drives fair rotation in feedGamePickForOrdinal. */
   const gameSlotOrdinalRef = useRef(0);
-  /** NYT-style: at most one Connections slot per session; hide after completion today. */
-  const connectionsCompletedTodayRef = useRef(false);
-  const connectionsShownInSessionRef = useRef(false);
   const activeCategoryRef = useRef<Category | null>(null);
   const activeKindFilterRef = useRef<FeedKindFilter>("all");
   /** Bumps on each [userId] bootstrap so Strict Mode / fast remounts only run one initial loadMore. */
   const feedBootstrapGenRef = useRef(0);
   const gameRatioRef = useRef(DEFAULT_GAME_RATIO);
+  const enabledGameTypesRef = useRef<GameType[] | null>(null);
   const feedReadyRef = useRef(false);
   const lastArticleCategoryRef = useRef<string | undefined>(undefined);
   // Hard de-dup across all rendered sections in this session/category view.
@@ -109,10 +140,177 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const pendingLoadRef = useRef(false);
   const lastLoadStartAtRef = useRef(0);
   const reachedEndTimeoutIdRef = useRef<number | null>(null);
+  const minGapRetryTimeoutIdRef = useRef<number | null>(null);
+  const articleSectionsRenderedRef = useRef(0);
+  const fillerMetricsRef = useRef({
+    gapDetected: 0,
+    moduleInserted: 0,
+    weatherInserted: 0,
+    spotifyInserted: 0,
+    artFallbackUsed: 0,
+  });
+  const browserGeoRef = useRef<{ lat: number; lon: number } | null>(null);
+  const browserGeoAttemptedRef = useRef(false);
+  const preferredWeatherLocationRef = useRef<string | null>(null);
+
+  const fillerEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
+    true
+  );
+  const betweenGapMinPx = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_BETWEEN_GAP_MIN_PX ??
+      process.env.NEXT_PUBLIC_FEED_GAP_MIN_PX,
+    DEFAULT_GAP_MIN_PX
+  );
+  const inlineGapMinPx = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_INLINE_GAP_MIN_PX,
+    DEFAULT_INLINE_GAP_MIN_PX
+  );
+  const inlineModulesEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_FEED_INLINE_MODULES_ENABLED,
+    true
+  );
+  const fillerInterval = readPositiveInt(
+    process.env.NEXT_PUBLIC_FEED_FILLER_INTERVAL,
+    DEFAULT_FILLER_INTERVAL
+  );
+  const modulePolicy = process.env.NEXT_PUBLIC_FEED_MODULE_POLICY ?? "hybrid";
+  const spotifyModuleEnabled = readTruthyFlag(
+    process.env.NEXT_PUBLIC_SPOTIFY_MODULE_ENABLED,
+    true
+  );
+  const weatherWeight = readPositiveInt(
+    process.env.NEXT_PUBLIC_WEATHER_MODULE_WEIGHT,
+    DEFAULT_WEATHER_WEIGHT
+  );
+  const spotifyWeight = readPositiveInt(
+    process.env.NEXT_PUBLIC_SPOTIFY_MODULE_WEIGHT,
+    DEFAULT_SPOTIFY_WEIGHT
+  );
 
   // Sentinel ref — plain IntersectionObserver (no library dependency on stale state)
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const resolveBrowserGeo = useCallback(async (): Promise<{ lat: number; lon: number } | null> => {
+    if (browserGeoRef.current) return browserGeoRef.current;
+    try {
+      const stored = localStorage.getItem("gentle_stream_browser_geo");
+      if (stored) {
+        const parsed = JSON.parse(stored) as { lat?: unknown; lon?: unknown };
+        if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
+          browserGeoRef.current = { lat: parsed.lat, lon: parsed.lon };
+          return browserGeoRef.current;
+        }
+      }
+    } catch {
+      /* ignore malformed cache */
+    }
+
+    if (browserGeoAttemptedRef.current) return null;
+    browserGeoAttemptedRef.current = true;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+
+    return await new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          };
+          browserGeoRef.current = coords;
+          try {
+            localStorage.setItem("gentle_stream_browser_geo", JSON.stringify(coords));
+          } catch {
+            /* ignore storage write failures */
+          }
+          resolve(coords);
+        },
+        () => resolve(null),
+        {
+          enableHighAccuracy: false,
+          timeout: 5_000,
+          maximumAge: 15 * 60 * 1000,
+        }
+      );
+    });
+  }, []);
+
+  const fetchModuleData = useCallback(
+    async (input: {
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+      category?: string;
+      location?: string;
+    }): Promise<FeedModuleData | null> => {
+      if (input.moduleType === "generated_art" || input.moduleType === "nasa") {
+        return buildGeneratedImageModuleData({
+          category: input.category,
+          location: input.location,
+        });
+      }
+      try {
+        const params = new URLSearchParams();
+        if (input.category) params.set("category", input.category);
+        const preferredLocation = preferredWeatherLocationRef.current?.trim();
+        const effectiveLocation = preferredLocation || input.location;
+        if (effectiveLocation) params.set("location", effectiveLocation);
+        if (input.moduleType === "weather" && !effectiveLocation) {
+          const browserCoords = await resolveBrowserGeo();
+          if (browserCoords) {
+            params.set("lat", String(browserCoords.lat));
+            params.set("lon", String(browserCoords.lon));
+          }
+        }
+        const path =
+          input.moduleType === "spotify"
+            ? "/api/feed/modules/spotify"
+            : "/api/feed/modules/weather";
+        const res = await fetch(`${path}?${params.toString()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { data?: FeedModuleData };
+        if (!body.data) return null;
+        // Avoid placing fallback-only spotify tiles in feed automatically.
+        if (
+          input.moduleType === "spotify" &&
+          (body.data as SpotifyMoodTileData).mode === "fallback"
+        ) {
+          return null;
+        }
+        return body.data;
+      } catch {
+        return null;
+      }
+    },
+    [resolveBrowserGeo]
+  );
+
+  const fetchModuleSection = useCallback(
+    async (input: {
+      index: number;
+      reason: "gap" | "interval";
+      category?: string;
+      location?: string;
+      moduleType: "weather" | "spotify" | "generated_art" | "nasa";
+    }): Promise<ModuleFeedSection | null> => {
+      const data = await fetchModuleData({
+        moduleType: input.moduleType,
+        category: input.category,
+        location: input.location,
+      });
+      if (!data) return null;
+      return {
+        sectionType: "module",
+        moduleType: input.moduleType,
+        fillerType: input.moduleType,
+        reason: input.reason,
+        index: input.index,
+        data,
+      };
+    },
+    [fetchModuleData]
+  );
 
   const loadMore = useCallback(async (overrideCategory?: Category | null) => {
     if (!feedReadyRef.current) return;
@@ -123,7 +321,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     }
 
     const now = Date.now();
-    if (now - lastLoadStartAtRef.current < MIN_LOAD_GAP_MS) return;
+    const gapMs = now - lastLoadStartAtRef.current;
+    if (gapMs < MIN_LOAD_GAP_MS) {
+      pendingLoadRef.current = true;
+      if (minGapRetryTimeoutIdRef.current != null) return;
+      const waitMs = Math.max(MIN_LOAD_GAP_MS - gapMs + 25, 25);
+      minGapRetryTimeoutIdRef.current = window.setTimeout(() => {
+        minGapRetryTimeoutIdRef.current = null;
+        if (loadingRef.current || reachedEndRef.current || !feedReadyRef.current) return;
+        void loadMore(overrideCategory);
+      }, waitMs);
+      return;
+    }
     lastLoadStartAtRef.current = now;
 
     loadingRef.current = true;
@@ -141,31 +350,18 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     try {
       // ── Decide: game slot or article section? ────────────────────────────────
       if (shouldBeGame(currentIndex, gameRatioRef.current)) {
-        const offerDailyConnections =
-          !connectionsCompletedTodayRef.current &&
-          !connectionsShownInSessionRef.current;
-
         let gameType: GameFeedSection["gameType"];
         let difficulty: GameFeedSection["difficulty"];
-        let connectionsDaily = false;
-
-        if (offerDailyConnections) {
-          connectionsShownInSessionRef.current = true;
-          gameType = "connections";
-          difficulty = "medium";
-          connectionsDaily = true;
-        } else {
-          const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++);
-          gameType = pick.gameType;
-          difficulty = pick.difficulty;
-        }
+        const enabled = enabledGameTypesRef.current ?? [];
+        const pick = feedGamePickForOrdinal(gameSlotOrdinalRef.current++, enabled);
+        gameType = pick.gameType;
+        difficulty = pick.difficulty;
 
         const gameSection: GameFeedSection = {
           sectionType: "game",
           gameType,
           difficulty,
           index: currentIndex,
-          ...(connectionsDaily ? { connectionsDaily: true } : {}),
         };
         setSections((prev) => [...prev, gameSection]);
         sectionCountRef.current += 1;
@@ -248,13 +444,133 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       // Remember the category for the next game slot's word bank
       if (data.category) lastArticleCategoryRef.current = data.category;
 
+      const layoutPlan = chooseNewspaperLayout(uniqueForView, currentIndex);
+      const orderedArticles =
+        layoutPlan.orderedIndices.length === uniqueForView.length
+          ? layoutPlan.orderedIndices.map((idx) => uniqueForView[idx]!).filter(Boolean)
+          : uniqueForView;
       const section: ArticleFeedSection = {
         sectionType: "articles",
-        articles: uniqueForView,
+        articles: orderedArticles,
         index: currentIndex,
+        newspaperLayout: layoutPlan,
       };
 
-      setSections((prev) => [...prev, section]);
+      const shouldInsertGapFiller =
+        fillerEnabled && layoutPlan.residualGapPx >= betweenGapMinPx;
+      const shouldInsertIntervalFiller =
+        fillerEnabled &&
+        !shouldInsertGapFiller &&
+        articleSectionsRenderedRef.current > 0 &&
+        articleSectionsRenderedRef.current % fillerInterval === 0;
+
+      const inlineLocation =
+        orderedArticles.find((entry) => entry.location?.trim())?.location ?? undefined;
+      const shouldInsertInlineModule =
+        inlineModulesEnabled &&
+        layoutPlan.inlineTargetColumn !== null &&
+        layoutPlan.inlineGapPx >= inlineGapMinPx;
+
+      if (
+        shouldInsertInlineModule &&
+        layoutPlan.inlineTargetColumn !== null &&
+        section.newspaperLayout
+      ) {
+        const preferredInlineType = layoutPlan.inlineSuggestedModuleType;
+        const preferredType =
+          preferredInlineType === "weather" || preferredInlineType === "spotify"
+            ? preferredInlineType
+            : chooseModuleTypeByPolicy({
+                seed: currentIndex + 101,
+                weatherWeight,
+                spotifyWeight,
+                spotifyEnabled: spotifyModuleEnabled,
+                policy: modulePolicy,
+              });
+        let inlineData = await fetchModuleData({
+          moduleType: preferredType,
+          category: data.category,
+          location: inlineLocation,
+        });
+        if (!inlineData) {
+          inlineData = buildGeneratedImageModuleData({
+            category: data.category,
+            location: inlineLocation,
+          });
+        }
+        section.newspaperLayout.inlineModule = {
+          moduleType:
+            "mode" in inlineData && inlineData.mode === "generated_art"
+              ? "generated_art"
+              : preferredType,
+          reason: "inline",
+          targetColumn: layoutPlan.inlineTargetColumn,
+          data: inlineData,
+        };
+      }
+
+      const nextSections: FeedSection[] = [section];
+      if (shouldInsertGapFiller || shouldInsertIntervalFiller) {
+        if (shouldInsertGapFiller) fillerMetricsRef.current.gapDetected += 1;
+        const preferredModule = chooseModuleTypeByPolicy({
+          seed: currentIndex,
+          weatherWeight,
+          spotifyWeight,
+          spotifyEnabled: spotifyModuleEnabled,
+          policy: modulePolicy,
+        });
+        let moduleSection = await fetchModuleSection({
+          index: currentIndex + 1,
+          reason: shouldInsertGapFiller ? "gap" : "interval",
+          category: data.category,
+          location: inlineLocation,
+          moduleType: preferredModule,
+        });
+
+        if (!moduleSection && preferredModule === "spotify") {
+          moduleSection = await fetchModuleSection({
+            index: currentIndex + 1,
+            reason: shouldInsertGapFiller ? "gap" : "interval",
+            category: data.category,
+            location: inlineLocation,
+            moduleType: "weather",
+          });
+        }
+        if (!moduleSection) {
+          moduleSection = await fetchModuleSection({
+            index: currentIndex + 1,
+            reason: shouldInsertGapFiller ? "gap" : "interval",
+            category: data.category,
+            location: inlineLocation,
+            moduleType: "generated_art",
+          });
+        }
+
+        if (moduleSection) {
+          nextSections.push(moduleSection);
+          fillerMetricsRef.current.moduleInserted += 1;
+          if (moduleSection.moduleType === "weather")
+            fillerMetricsRef.current.weatherInserted += 1;
+          if (moduleSection.moduleType === "spotify")
+            fillerMetricsRef.current.spotifyInserted += 1;
+          if (
+            moduleSection.moduleType === "weather" &&
+            (moduleSection.data as WeatherModuleData).mode === "generated_art"
+          ) {
+            fillerMetricsRef.current.artFallbackUsed += 1;
+          }
+          console.info("[feed-filler]", {
+            reason: moduleSection.reason,
+            moduleType: moduleSection.moduleType,
+            residualGapPx: layoutPlan.residualGapPx,
+            gapThresholdPx: betweenGapMinPx,
+            inlineGapPx: layoutPlan.inlineGapPx,
+            metricSnapshot: fillerMetricsRef.current,
+          });
+        }
+      }
+
+      setSections((prev) => [...prev, ...nextSections]);
       for (const article of uniqueForView) {
         const key = articleUniqKey(article);
         renderedArticleKeysRef.current.add(key);
@@ -266,7 +582,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           renderedDbArticleIdsRef.current.add(article.id);
         }
       }
-      sectionCountRef.current += 1;
+      articleSectionsRenderedRef.current += 1;
+      sectionCountRef.current += nextSections.length;
     } catch (e: unknown) {
       const aborted = e instanceof Error && e.name === "AbortError";
       const msg = aborted
@@ -298,7 +615,19 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         pendingLoadRef.current = false;
       }
     }
-  }, []); // stable — reads everything from refs
+  }, [
+    fillerEnabled,
+    betweenGapMinPx,
+    inlineGapMinPx,
+    inlineModulesEnabled,
+    fillerInterval,
+    modulePolicy,
+    fetchModuleSection,
+    fetchModuleData,
+    weatherWeight,
+    spotifyWeight,
+    spotifyModuleEnabled,
+  ]); // stable refs + config
 
   // Resolve game ratio from server (or localStorage), then load — avoids first sections using DEFAULT_GAME_RATIO.
   useEffect(() => {
@@ -321,11 +650,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       window.clearTimeout(reachedEndTimeoutIdRef.current);
       reachedEndTimeoutIdRef.current = null;
     }
+    if (minGapRetryTimeoutIdRef.current) {
+      window.clearTimeout(minGapRetryTimeoutIdRef.current);
+      minGapRetryTimeoutIdRef.current = null;
+    }
     pendingLoadRef.current = false;
     lastLoadStartAtRef.current = 0;
     sectionCountRef.current = 0;
+    articleSectionsRenderedRef.current = 0;
     gameSlotOrdinalRef.current = 0;
-    connectionsShownInSessionRef.current = false;
     lastArticleCategoryRef.current = undefined;
     renderedArticleKeysRef.current = new Set();
     renderedDbArticleIdsRef.current = new Set();
@@ -356,6 +689,35 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             localStorage.setItem("gentle_stream_game_ratio", String(r));
             usedServerRatio = true;
           }
+
+          if (Array.isArray(profile.enabledGameTypes)) {
+            enabledGameTypesRef.current = profile.enabledGameTypes.filter(
+              (v: unknown): v is GameType => typeof v === "string"
+            );
+            try {
+              localStorage.setItem(
+                "gentle_stream_enabled_game_types",
+                JSON.stringify(enabledGameTypesRef.current)
+              );
+            } catch {
+              /* ignore */
+            }
+          }
+
+          if (typeof profile.weatherLocation === "string" && profile.weatherLocation.trim()) {
+            const weatherLocation = profile.weatherLocation.trim();
+            preferredWeatherLocationRef.current = weatherLocation;
+            try {
+              localStorage.setItem(
+                "gentle_stream_weather_location",
+                weatherLocation
+              );
+            } catch {
+              /* ignore */
+            }
+          } else {
+            preferredWeatherLocationRef.current = null;
+          }
         }
       } catch {
         /* offline or unauthenticated preview */
@@ -373,32 +735,32 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         }
       }
 
-      let completedConnectionsToday = false;
-      try {
-        const cdRes = await fetch("/api/user/connections-daily", {
-          credentials: "include",
-        });
-        if (cdRes.ok) {
-          const cd = (await cdRes.json()) as { completedToday?: boolean };
-          if (cd.completedToday === true) completedConnectionsToday = true;
-        }
-      } catch {
-        /* offline */
-      }
-      if (!completedConnectionsToday) {
+      if (enabledGameTypesRef.current == null) {
         try {
-          const dayKey = new Date().toISOString().slice(0, 10);
-          if (
-            localStorage.getItem(`gentle_stream_connections_done_${dayKey}`) ===
-            "1"
-          ) {
-            completedConnectionsToday = true;
+          const storedEnabled = localStorage.getItem("gentle_stream_enabled_game_types");
+          if (storedEnabled) {
+            const parsed = JSON.parse(storedEnabled) as unknown;
+            if (Array.isArray(parsed)) {
+              enabledGameTypesRef.current = parsed.filter(
+                (v): v is GameType => typeof v === "string"
+              );
+            }
           }
         } catch {
           /* ignore */
         }
       }
-      connectionsCompletedTodayRef.current = completedConnectionsToday;
+
+      if (preferredWeatherLocationRef.current == null) {
+        try {
+          const storedLocation = localStorage.getItem("gentle_stream_weather_location");
+          if (storedLocation && storedLocation.trim()) {
+            preferredWeatherLocationRef.current = storedLocation.trim();
+          }
+        } catch {
+          /* ignore */
+        }
+      }
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
@@ -417,19 +779,55 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   }, [userId]);
 
   useEffect(() => {
-    function onConnectionsCompleted() {
-      connectionsCompletedTodayRef.current = true;
+    function onEnabledTypesUpdated(e: Event) {
+      const ce = e as CustomEvent<{ enabledGameTypes?: unknown }>;
+      const enabled = ce.detail?.enabledGameTypes;
+      if (Array.isArray(enabled)) {
+        enabledGameTypesRef.current = enabled.filter(
+          (v): v is GameType => typeof v === "string"
+        );
+        try {
+          localStorage.setItem(
+            "gentle_stream_enabled_game_types",
+            JSON.stringify(enabledGameTypesRef.current)
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+
+      reachedEndRef.current = false;
+      if (reachedEndTimeoutIdRef.current) {
+        window.clearTimeout(reachedEndTimeoutIdRef.current);
+        reachedEndTimeoutIdRef.current = null;
+      }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
+      pendingLoadRef.current = false;
+      setSections([]);
+      sectionCountRef.current = 0;
+      gameSlotOrdinalRef.current = 0;
+      loadingRef.current = false;
+      setLoading(false);
+      setError(null);
+      renderedArticleKeysRef.current = new Set();
+      renderedDbArticleIdsRef.current = new Set();
+      articleSectionsRenderedRef.current = 0;
+      void loadMore();
     }
+
     window.addEventListener(
-      "gentle-stream-connections-completed",
-      onConnectionsCompleted
+      "gentle-stream-enabled-game-types",
+      onEnabledTypesUpdated as EventListener
     );
     return () =>
       window.removeEventListener(
-        "gentle-stream-connections-completed",
-        onConnectionsCompleted
+        "gentle-stream-enabled-game-types",
+        onEnabledTypesUpdated as EventListener
       );
-  }, []);
+  }, [loadMore]);
 
   // Keep activeCategoryRef in sync
   useEffect(() => {
@@ -463,8 +861,25 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         window.clearTimeout(reachedEndTimeoutIdRef.current);
         reachedEndTimeoutIdRef.current = null;
       }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    function updateScrollTopVisibility() {
+      setShowScrollTopButton(window.scrollY > 480);
+    }
+    updateScrollTopVisibility();
+    window.addEventListener("scroll", updateScrollTopVisibility, { passive: true });
+    return () => window.removeEventListener("scroll", updateScrollTopVisibility);
+  }, []);
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   const handleCategorySelect = (cat: Category) => {
     const next = activeCategory === cat ? null : cat;
@@ -475,18 +890,16 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       window.clearTimeout(reachedEndTimeoutIdRef.current);
       reachedEndTimeoutIdRef.current = null;
     }
+    if (minGapRetryTimeoutIdRef.current) {
+      window.clearTimeout(minGapRetryTimeoutIdRef.current);
+      minGapRetryTimeoutIdRef.current = null;
+    }
     pendingLoadRef.current = false;
     setSections((prev) => {
-      const hadConnections = prev.some(
-        (s) =>
-          s.sectionType === "game" &&
-          s.gameType === "connections" &&
-          s.connectionsDaily === true
-      );
-      if (!hadConnections) connectionsShownInSessionRef.current = false;
       return [];
     });
     sectionCountRef.current = 0;
+    articleSectionsRenderedRef.current = 0;
     loadingRef.current = false;
     setLoading(false);
     lastArticleCategoryRef.current = undefined;
@@ -504,11 +917,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         window.clearTimeout(reachedEndTimeoutIdRef.current);
         reachedEndTimeoutIdRef.current = null;
       }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
       pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
+      articleSectionsRenderedRef.current = 0;
       gameSlotOrdinalRef.current = 0;
-      connectionsShownInSessionRef.current = false;
       loadingRef.current = false;
       setError(null);
       renderedArticleKeysRef.current = new Set();
@@ -528,11 +945,15 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         window.clearTimeout(reachedEndTimeoutIdRef.current);
         reachedEndTimeoutIdRef.current = null;
       }
+      if (minGapRetryTimeoutIdRef.current) {
+        window.clearTimeout(minGapRetryTimeoutIdRef.current);
+        minGapRetryTimeoutIdRef.current = null;
+      }
       pendingLoadRef.current = false;
       setSections([]);
       sectionCountRef.current = 0;
+      articleSectionsRenderedRef.current = 0;
       gameSlotOrdinalRef.current = 0;
-      connectionsShownInSessionRef.current = false;
       loadingRef.current = false;
       setLoading(false);
       setError(null);
@@ -661,17 +1082,38 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 key={`game-${section.index}`}
                 gameType={section.gameType}
                 difficulty={section.difficulty}
-                connectionsDaily={section.connectionsDaily === true}
               />
             );
           }
-          return (
-            <NewsSection
-              key={`news-${section.index}`}
-              articles={section.articles}
-              sectionIndex={section.index}
-            />
-          );
+          if (section.sectionType === "module" || section.sectionType === "filler") {
+            if (section.moduleType === "spotify") {
+              return (
+                <SpotifyMoodTile
+                  key={`module-${section.index}-spotify`}
+                  data={section.data as SpotifyMoodTileData}
+                  reason={section.reason}
+                />
+              );
+            }
+            return (
+              <WeatherFillerCard
+                key={`module-${section.index}-weather`}
+                data={section.data as WeatherModuleData}
+                reason={section.reason}
+              />
+            );
+          }
+          if (section.sectionType === "articles") {
+            return (
+              <NewsSection
+                key={`news-${section.index}`}
+                articles={section.articles}
+                sectionIndex={section.index}
+                layoutPlan={section.newspaperLayout}
+              />
+            );
+          }
+          return null;
         })}
 
         {error && (
@@ -682,6 +1124,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               if (reachedEndTimeoutIdRef.current) {
                 window.clearTimeout(reachedEndTimeoutIdRef.current);
                 reachedEndTimeoutIdRef.current = null;
+              }
+              if (minGapRetryTimeoutIdRef.current) {
+                window.clearTimeout(minGapRetryTimeoutIdRef.current);
+                minGapRetryTimeoutIdRef.current = null;
               }
               pendingLoadRef.current = false;
               void loadMore();
@@ -708,6 +1154,34 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           &nbsp;&middot;&nbsp; Only the uplifting, only the inspiring
         </footer>
       </main>
+      {showScrollTopButton ? (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          aria-label="Scroll to top"
+          style={{
+            position: "fixed",
+            right: "1.1rem",
+            bottom: "1.1rem",
+            width: "2.45rem",
+            height: "2.45rem",
+            borderRadius: "999px",
+            border: "1px solid #1a1a1a",
+            background: "#faf8f3",
+            color: "#1a1a1a",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+            cursor: "pointer",
+            zIndex: 250,
+            fontSize: "1.1rem",
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ↑
+        </button>
+      ) : null}
     </div>
   );
 }

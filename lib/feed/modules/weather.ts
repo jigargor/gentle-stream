@@ -1,0 +1,273 @@
+import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
+import type { WeatherFillerData } from "@/lib/types";
+
+interface WeatherSnapshot {
+  city: string;
+  country?: string;
+  temperatureC: number;
+  condition: string;
+  humidity: number;
+  windKph: number;
+}
+
+interface CachedEntry {
+  expiresAt: number;
+  data: WeatherFillerData;
+}
+
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const WEATHER_TIMEOUT_MS = 5_000;
+const cache = new Map<string, CachedEntry>();
+
+const CATEGORY_DEFAULT_CITY: Record<string, string> = {
+  world: "London",
+  science: "Reykjavik",
+  tech: "San Francisco",
+  health: "Singapore",
+  travel: "Barcelona",
+  culture: "Paris",
+  sports: "Los Angeles",
+  games: "Tokyo",
+};
+
+function normalizeToken(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function defaultCityForCategory(category?: string | null): string {
+  const key = normalizeToken(category);
+  return CATEGORY_DEFAULT_CITY[key] ?? "New York";
+}
+
+function buildCacheKey(input: { location?: string | null; category?: string | null }): string {
+  return `${normalizeToken(input.location)}|${normalizeToken(input.category)}`;
+}
+
+function buildCacheKeyWithCoords(input: {
+  location?: string | null;
+  category?: string | null;
+  lat?: number;
+  lon?: number;
+}): string {
+  if (typeof input.lat === "number" && typeof input.lon === "number") {
+    const lat = input.lat.toFixed(3);
+    const lon = input.lon.toFixed(3);
+    return `geo:${lat},${lon}|${normalizeToken(input.category)}`;
+  }
+  return buildCacheKey(input);
+}
+
+function withTimeout(signal: AbortSignal, ms: number): AbortController {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  signal.addEventListener(
+    "abort",
+    () => {
+      clearTimeout(timer);
+      controller.abort();
+    },
+    { once: true }
+  );
+  return controller;
+}
+
+async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
+  const parentController = new AbortController();
+  const timeoutController = withTimeout(parentController.signal, timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        accept: "application/json",
+      },
+      cache: "no-store",
+      signal: timeoutController.signal,
+    });
+    if (!res.ok) throw new Error(`Weather upstream failed (${res.status})`);
+    return (await res.json()) as T;
+  } finally {
+    parentController.abort();
+  }
+}
+
+async function resolveCoordinates(cityQuery: string, apiKey: string): Promise<{ lat: number; lon: number; city: string; country?: string } | null> {
+  const params = new URLSearchParams({
+    q: cityQuery,
+    limit: "1",
+    appid: apiKey,
+  });
+  const url = `https://api.openweathermap.org/geo/1.0/direct?${params.toString()}`;
+  const rows = await fetchJson<Array<{ lat: number; lon: number; name: string; country?: string }>>(url, WEATHER_TIMEOUT_MS);
+  const first = rows[0];
+  if (!first) return null;
+  return {
+    lat: first.lat,
+    lon: first.lon,
+    city: first.name,
+    country: first.country,
+  };
+}
+
+async function reverseGeocode(
+  lat: number,
+  lon: number,
+  apiKey: string
+): Promise<{ city: string; country?: string } | null> {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    limit: "1",
+    appid: apiKey,
+  });
+  const url = `https://api.openweathermap.org/geo/1.0/reverse?${params.toString()}`;
+  const rows = await fetchJson<Array<{ name: string; country?: string }>>(url, WEATHER_TIMEOUT_MS);
+  const first = rows[0];
+  if (!first) return null;
+  return { city: first.name, country: first.country };
+}
+
+async function fetchOneCallWeather(lat: number, lon: number, apiKey: string): Promise<Omit<WeatherSnapshot, "city" | "country">> {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    appid: apiKey,
+    units: "metric",
+    exclude: "minutely,hourly,daily,alerts",
+  });
+  // One Call API 3.0 provides current + hourly/daily forecasts in one response.
+  const url = `https://api.openweathermap.org/data/3.0/onecall?${params.toString()}`;
+  const data = await fetchJson<{
+    current?: {
+      temp?: number;
+      humidity?: number;
+      wind_speed?: number;
+      weather?: Array<{ description?: string }>;
+    };
+  }>(url, WEATHER_TIMEOUT_MS);
+  const current = data.current ?? {};
+  return {
+    temperatureC: Math.round(current.temp ?? 0),
+    condition: current.weather?.[0]?.description ?? "Clear skies",
+    humidity: Math.round(current.humidity ?? 0),
+    windKph: Math.round((current.wind_speed ?? 0) * 3.6),
+  };
+}
+
+function fallbackArtData(input: {
+  location?: string | null;
+  category?: string | null;
+}): WeatherFillerData {
+  const fallbackMode =
+    process.env.NEXT_PUBLIC_FEED_FILLER_FALLBACK?.trim().toLowerCase() ??
+    "generated_art";
+  const city = (input.location ?? "").trim() || defaultCityForCategory(input.category);
+  if (fallbackMode !== "generated_art") {
+    return {
+      mode: "generated_art",
+      title: "Forecast Desk",
+      subtitle: "Live weather unavailable. Generated-art fallback is disabled by config.",
+      locationLabel: city,
+      imageUrl: picsumFallbackUrl(`${city}|weather-fallback-disabled`, 1200, 700),
+    };
+  }
+  const prompt = `Atmospheric editorial illustration of ${city} weather patterns, warm newspaper palette, subtle texture, no text`;
+  const imageUrl =
+    pollinationsImageUrl(prompt, 1200, 700, {
+      category: input.category ?? null,
+      location: city,
+    }) ?? picsumFallbackUrl(`${city}|${input.category ?? "weather-fallback"}`, 1200, 700);
+
+  return {
+    mode: "generated_art",
+    title: "Forecast Desk",
+    subtitle: "Live weather unavailable. Editorial illustration keeps the page full.",
+    locationLabel: city,
+    imageUrl,
+  };
+}
+
+function weatherDataToCard(snapshot: WeatherSnapshot): WeatherFillerData {
+  const locationLabel = snapshot.country
+    ? `${snapshot.city}, ${snapshot.country}`
+    : snapshot.city;
+  return {
+    mode: "weather",
+    title: "Weather Brief",
+    subtitle: "A quick climate pulse to fill the column.",
+    locationLabel,
+    temperatureC: snapshot.temperatureC,
+    condition: snapshot.condition,
+    humidity: snapshot.humidity,
+    windKph: snapshot.windKph,
+  };
+}
+
+export async function getWeatherFillerData(input: {
+  location?: string | null;
+  category?: string | null;
+  lat?: number;
+  lon?: number;
+}): Promise<WeatherFillerData> {
+  const cacheKey = buildCacheKeyWithCoords(input);
+  const now = Date.now();
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
+  if (!apiKey) {
+    console.warn("[weather-module] OPENWEATHER_API_KEY is missing; serving generated_art fallback.");
+    const fallback = fallbackArtData(input);
+    return fallback;
+  }
+
+  try {
+    if (typeof input.lat === "number" && typeof input.lon === "number") {
+      const [place, onecall] = await Promise.all([
+        reverseGeocode(input.lat, input.lon, apiKey),
+        fetchOneCallWeather(input.lat, input.lon, apiKey),
+      ]);
+      const snapshot: WeatherSnapshot = {
+        city: place?.city ?? "Local",
+        country: place?.country,
+        ...onecall,
+      };
+      const data = weatherDataToCard(snapshot);
+      cache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });
+      return data;
+    }
+    const requestedCity = (input.location ?? "").trim();
+    const defaultCity = defaultCityForCategory(input.category);
+    const city = requestedCity || defaultCity;
+    let geocoded = await resolveCoordinates(city, apiKey);
+    if (!geocoded && requestedCity) {
+      console.warn(
+        `[weather-module] Geocoding returned no results for location="${city}". Retrying with default city="${defaultCity}".`
+      );
+      geocoded = await resolveCoordinates(defaultCity, apiKey);
+    }
+    if (!geocoded) {
+      console.warn(
+        `[weather-module] Geocoding returned no results for both location="${city}" and default city="${defaultCity}". Serving fallback.`
+      );
+      const fallback = fallbackArtData(input);
+      return fallback;
+    }
+    const onecall = await fetchOneCallWeather(geocoded.lat, geocoded.lon, apiKey);
+    const snapshot: WeatherSnapshot = {
+      city: geocoded.city,
+      country: geocoded.country,
+      ...onecall,
+    };
+    const data = weatherDataToCard({
+      ...snapshot,
+      city: geocoded.city || snapshot.city,
+      country: geocoded.country || snapshot.country,
+    });
+    cache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });
+    return data;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[weather-module] One Call fetch failed: ${message}. Serving fallback.`);
+    const fallback = fallbackArtData(input);
+    return fallback;
+  }
+}

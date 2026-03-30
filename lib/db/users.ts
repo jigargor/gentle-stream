@@ -1,5 +1,6 @@
 import { db } from "./client";
 import type { UserProfile, UserRole } from "../types";
+import type { GameType } from "../games/types";
 import type { Category } from "../constants";
 import {
   CATEGORIES,
@@ -12,11 +13,13 @@ interface UserProfileRow {
   user_id: string;
   category_weights: Record<string, number>;
   game_ratio: number;
+  enabled_game_types?: string[] | null;
   user_role?: string;
   display_name?: string | null;
   username?: string | null;
   username_set_at?: string | null;
   avatar_url?: string | null;
+  weather_location?: string | null;
   preferred_emotions: string[];
   preferred_locales: string[];
   seen_article_ids: string[];
@@ -32,6 +35,39 @@ export class UsernameCooldownError extends Error {
     this.name = "UsernameCooldownError";
     this.unlockAtIso = unlockAtIso;
   }
+}
+
+const DEFAULT_ENABLED_GAME_TYPES: GameType[] = [
+  "sudoku",
+  "word_search",
+  "crossword",
+  "killer_sudoku",
+  "nonogram",
+  "connections",
+] as const;
+
+function normalizeEnabledGameTypes(input: unknown): GameType[] {
+  if (!Array.isArray(input)) return [...DEFAULT_ENABLED_GAME_TYPES];
+  const allowed = new Set<string>([
+    "sudoku",
+    "killer_sudoku",
+    "word_search",
+    "nonogram",
+    "crossword",
+    "connections",
+  ]);
+  const out: GameType[] = [];
+  const seen = new Set<GameType>();
+  for (const v of input) {
+    if (typeof v !== "string") continue;
+    const t = v.trim().toLowerCase();
+    if (!allowed.has(t)) continue;
+    const gt = t as GameType;
+    if (seen.has(gt)) continue;
+    seen.add(gt);
+    out.push(gt);
+  }
+  return out.length > 0 ? out : [...DEFAULT_ENABLED_GAME_TYPES];
 }
 
 function normalizeUsernameValue(s: string | null | undefined): string | null {
@@ -56,11 +92,13 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     userId: row.user_id,
     categoryWeights: weights,
     gameRatio: row.game_ratio ?? DEFAULT_GAME_RATIO,
+    enabledGameTypes: normalizeEnabledGameTypes(row.enabled_game_types ?? null),
     userRole: role,
     displayName: row.display_name ?? null,
     username: row.username ?? null,
     usernameSetAt: row.username_set_at ?? null,
     avatarUrl: row.avatar_url ?? null,
+    weatherLocation: row.weather_location ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
     seenArticleIds: row.seen_article_ids ?? [],
@@ -88,6 +126,7 @@ export async function getOrCreateUserProfile(
     user_id: userId,
     category_weights: DEFAULT_CATEGORY_WEIGHTS,
     game_ratio: DEFAULT_GAME_RATIO,
+    enabled_game_types: [...DEFAULT_ENABLED_GAME_TYPES],
     user_role: "general" as const,
     preferred_emotions: [],
     preferred_locales: ["global"],
@@ -176,6 +215,7 @@ export async function updateUserPreferences(
       UserProfile,
       | "categoryWeights"
       | "gameRatio"
+      | "enabledGameTypes"
       | "preferredEmotions"
       | "preferredLocales"
     >
@@ -184,6 +224,9 @@ export async function updateUserPreferences(
   const updates: Partial<UserProfileRow> = {};
   if (prefs.categoryWeights) updates.category_weights = prefs.categoryWeights;
   if (prefs.gameRatio !== undefined) updates.game_ratio = prefs.gameRatio;
+  if (prefs.enabledGameTypes !== undefined) {
+    updates.enabled_game_types = normalizeEnabledGameTypes(prefs.enabledGameTypes);
+  }
   if (prefs.preferredEmotions) updates.preferred_emotions = prefs.preferredEmotions;
   if (prefs.preferredLocales) updates.preferred_locales = prefs.preferredLocales;
 
@@ -207,11 +250,13 @@ export async function updateUserDisplay(
     displayName?: string | null;
     username?: string | null;
     avatarUrl?: string | null;
+    weatherLocation?: string | null;
   }
 ): Promise<UserProfile> {
   const updates: Partial<UserProfileRow> = {};
   if (fields.displayName !== undefined) updates.display_name = fields.displayName;
   if (fields.avatarUrl !== undefined) updates.avatar_url = fields.avatarUrl;
+  if (fields.weatherLocation !== undefined) updates.weather_location = fields.weatherLocation;
 
   if (fields.username !== undefined) {
     const { data: row, error: selErr } = await db

@@ -11,6 +11,7 @@ import {
   getOrCreateUserProfile,
   updateUserPreferences,
 } from "@/lib/db/users";
+import type { GameType } from "@/lib/games/types";
 
 export async function GET() {
   try {
@@ -40,29 +41,59 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json()) as { gameRatio?: unknown };
+    const body = (await request.json()) as {
+      gameRatio?: unknown;
+      enabledGameTypes?: unknown;
+    };
 
-    if (body.gameRatio === undefined) {
+    const wantsGameRatio = body.gameRatio !== undefined;
+    const wantsEnabledTypes = body.enabledGameTypes !== undefined;
+    if (!wantsGameRatio && !wantsEnabledTypes) {
       return NextResponse.json(
-        { error: "Provide gameRatio (number from 0 to 1)" },
+        { error: "Provide gameRatio and/or enabledGameTypes" },
         { status: 400 }
       );
     }
 
-    const gameRatio = body.gameRatio;
-    if (
-      typeof gameRatio !== "number" ||
-      Number.isNaN(gameRatio) ||
-      gameRatio < 0 ||
-      gameRatio > 1
-    ) {
-      return NextResponse.json(
-        { error: "gameRatio must be a number from 0 to 1" },
-        { status: 400 }
-      );
+    let gameRatio: number | undefined;
+    if (wantsGameRatio) {
+      if (
+        typeof body.gameRatio !== "number" ||
+        Number.isNaN(body.gameRatio) ||
+        body.gameRatio < 0 ||
+        body.gameRatio > 1
+      ) {
+        return NextResponse.json(
+          { error: "gameRatio must be a number from 0 to 1" },
+          { status: 400 }
+        );
+      }
+      gameRatio = body.gameRatio;
     }
 
-    const updated = await updateUserPreferences(user.id, { gameRatio });
+    let enabledGameTypes: GameType[] | undefined;
+    if (wantsEnabledTypes) {
+      if (!Array.isArray(body.enabledGameTypes)) {
+        return NextResponse.json(
+          { error: "enabledGameTypes must be an array of game type strings" },
+          { status: 400 }
+        );
+      }
+      enabledGameTypes = body.enabledGameTypes.filter(
+        (v): v is GameType => typeof v === "string"
+      ) as GameType[];
+      if (enabledGameTypes.length === 0) {
+        return NextResponse.json(
+          { error: "Select at least one game type" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const updated = await updateUserPreferences(user.id, {
+      ...(gameRatio !== undefined ? { gameRatio } : {}),
+      ...(enabledGameTypes !== undefined ? { enabledGameTypes } : {}),
+    });
     return NextResponse.json(updated);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";

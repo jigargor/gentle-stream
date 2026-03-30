@@ -205,9 +205,7 @@ export default function ConnectionsCard({
     if (state.completed && !completionDispatched.current) {
       completionDispatched.current = true;
       try {
-        window.dispatchEvent(new CustomEvent("gentle-stream-connections-completed"));
-        const d = new Date().toISOString().slice(0, 10);
-        localStorage.setItem(`gentle_stream_connections_done_${d}`, "1");
+        // Completion is persisted via /api/user/game-completion (when authenticated).
       } catch {
         /* ignore */
       }

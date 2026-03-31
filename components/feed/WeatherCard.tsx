@@ -22,8 +22,7 @@ type HoverHalf = "left" | "right" | null;
 
 export function getWeatherPanelIds(data: WeatherFillerData): string[] {
   if (data.mode !== "weather") return [];
-  const panelIds = ["summary", "details"];
-  if ((data.alerts ?? []).length > 0) panelIds.push("alerts");
+  const panelIds = ["summary", "details", "alerts"];
   if ((data.hourly ?? []).length > 0) panelIds.push("hourly");
   if ((data.daily ?? []).length > 0) panelIds.push("weekly");
   return panelIds;

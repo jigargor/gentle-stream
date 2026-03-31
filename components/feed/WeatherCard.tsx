@@ -74,6 +74,36 @@ function formatTemperature(
   return `${Math.round(convertFromCelsius(valueC, unitSystem))}\u00b0${unitLabel}`;
 }
 
+function formatWindSpeed(
+  valueKph: number | undefined,
+  unitSystem: "metric" | "imperial"
+): string {
+  if (typeof valueKph !== "number") return "--";
+  if (unitSystem === "metric") return `${Math.round(valueKph)} km/h`;
+  const mph = valueKph / 1.60934;
+  return `${Math.round(mph)} mph`;
+}
+
+function formatPrecipAmount(
+  valueMm: number | undefined,
+  unitSystem: "metric" | "imperial"
+): string {
+  if (typeof valueMm !== "number") return "--";
+  if (unitSystem === "metric") return `${Math.round(valueMm * 10) / 10} mm`;
+  const inches = valueMm / 25.4;
+  return `${Math.round(inches * 100) / 100} in`;
+}
+
+function formatVisibility(
+  valueKm: number | undefined,
+  unitSystem: "metric" | "imperial"
+): string {
+  if (typeof valueKm !== "number") return "--";
+  if (unitSystem === "metric") return `${Math.round(valueKm * 10) / 10} km`;
+  const miles = valueKm / 1.60934;
+  return `${Math.round(miles * 10) / 10} mi`;
+}
+
 function getTimeZoneAbbreviation(date: Date, timezoneIana: string | undefined): string {
   if (!timezoneIana) return "";
   try {
@@ -241,7 +271,7 @@ export default function WeatherCard({
         </div>
         <div>
           Wind:{" "}
-          {typeof weatherData.windKph === "number" ? `${weatherData.windKph} km/h` : "--"}
+          {formatWindSpeed(weatherData.windKph, resolvedUnitSystem)}
         </div>
         <div style={{ marginTop: "0.25rem", color: "#7d735f" }}>{weatherData.subtitle}</div>
       </div>
@@ -266,11 +296,11 @@ export default function WeatherCard({
       </div>
       <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Precip amount:{" "}
-        {typeof weatherData.precipAmountMm === "number" ? `${weatherData.precipAmountMm} mm` : "--"}
+        {formatPrecipAmount(weatherData.precipAmountMm, resolvedUnitSystem)}
       </div>
       <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Visibility:{" "}
-        {typeof weatherData.visibilityKm === "number" ? `${weatherData.visibilityKm} km` : "--"}
+        {formatVisibility(weatherData.visibilityKm, resolvedUnitSystem)}
       </div>
       <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Cloud cover:{" "}
@@ -278,7 +308,7 @@ export default function WeatherCard({
       </div>
       <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Wind:{" "}
-        {typeof weatherData.windKph === "number" ? `${weatherData.windKph} km/h` : "--"}
+        {formatWindSpeed(weatherData.windKph, resolvedUnitSystem)}
       </div>
     </div>
   );

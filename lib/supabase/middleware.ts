@@ -18,7 +18,7 @@ const PUBLIC_PREFIXES = [
   "/login",
   "/auth/callback",
   "/auth/auth-code-error",
-  "/api/auth/email-link",
+  "/api/auth/email-password",
   "/privacy",
   "/terms",
   "/data-deletion",
@@ -154,7 +154,7 @@ export async function updateSession(request: NextRequest, traceId?: string) {
     const sp = request.nextUrl.searchParams;
     if (sp.has("error") || sp.has("reason")) {
       // Stay on login so we can show auth errors / session expiry; otherwise logged-in
-      // users get bounced home and never see e.g. a failed magic-link handoff message.
+      // users get bounced home and never see e.g. a failed OAuth handoff message.
     } else {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/";

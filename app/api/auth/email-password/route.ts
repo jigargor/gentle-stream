@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createPublicServerClient } from "@/lib/supabase/public-server";
+import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
 import {
   buildRateLimitKey,
   consumeRateLimit,
@@ -11,12 +12,20 @@ import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import {
+  SESSION_START_COOKIE,
+  sessionStartCookieOptions,
+} from "@/lib/auth/session-policy";
 
-const emailLinkBodySchema = z.object({
-  email: z.string().trim().email(),
-  redirectTo: z.string().trim().url(),
-  turnstileToken: z.string().trim().min(1),
-});
+const emailPasswordBodySchema = z
+  .object({
+    email: z.string().trim().email(),
+    password: z.string().min(8).max(256),
+    mode: z.enum(["sign_in", "sign_up"]),
+    redirectTo: z.string().trim().url(),
+    turnstileToken: z.string().trim().optional().default(""),
+  })
+  .strict();
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -61,17 +70,20 @@ export async function POST(request: NextRequest) {
   }
 
   const ipLimit = await consumeRateLimit({
-    policy: { id: "auth-email-link-ip", windowMs: 10 * 60 * 1000, max: 16 },
-    key: buildRateLimitKey({ request, routeId: "auth-email-link" }),
+    policy: { id: "auth-email-password-ip", windowMs: 10 * 60 * 1000, max: 20 },
+    key: buildRateLimitKey({ request, routeId: "auth-email-password" }),
   });
   if (!ipLimit.allowed) return rateLimitExceededResponse(ipLimit, request);
 
   const parsedBody = await parseJsonBody({
     request,
-    schema: emailLinkBodySchema,
+    schema: emailPasswordBodySchema,
   });
   if (!parsedBody.ok) return parsedBody.response;
+
   const email = parsedBody.data.email.trim().toLowerCase();
+  const password = parsedBody.data.password;
+  const mode = parsedBody.data.mode;
   const redirectTo = parsedBody.data.redirectTo.trim();
   const turnstileToken = parsedBody.data.turnstileToken.trim();
 
@@ -93,7 +105,7 @@ export async function POST(request: NextRequest) {
   }
 
   const emailLimit = await consumeRateLimit({
-    policy: { id: "auth-email-link-email", windowMs: 10 * 60 * 1000, max: 6 },
+    policy: { id: "auth-email-password-email", windowMs: 10 * 60 * 1000, max: 10 },
     key: `email:${email}`,
   });
   if (!emailLimit.allowed) return rateLimitExceededResponse(emailLimit, request);
@@ -111,19 +123,50 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const supabase = createPublicServerClient();
-  const { error } = await supabase.auth.signInWithOtp({
+  if (mode === "sign_up") {
+    const supabase = createPublicServerClient();
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) {
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.INVALID_REQUEST,
+        message: "Could not create account right now.",
+      });
+    }
+    return NextResponse.json({
+      ok: true,
+      requiresEmailVerification: true,
+    });
+  }
+
+  const response = NextResponse.json({
+    ok: true,
+    requiresEmailVerification: false,
+  });
+  const supabase = createSupabaseResponseClient(request, response);
+  const { error } = await supabase.auth.signInWithPassword({
     email,
-    options: { emailRedirectTo: redirectTo },
+    password,
   });
   if (error) {
     return apiErrorResponse({
       request,
       status: 400,
       code: API_ERROR_CODES.INVALID_REQUEST,
-      message: "Could not send sign-in link right now.",
+      message: "Invalid email or password.",
     });
   }
 
-  return NextResponse.json({ ok: true });
+  const nowSec = Math.floor(Date.now() / 1000);
+  response.cookies.set(
+    SESSION_START_COOKIE,
+    String(nowSec),
+    sessionStartCookieOptions()
+  );
+  return response;
 }

@@ -32,7 +32,7 @@ export default async function LoginPage({
       initialSessionExpired={
         firstParam(resolvedSearchParams.reason) === "session_expired"
       }
-      initialMagicLinkBrowserError={errorParam === "magic_link_browser"}
+      initialOauthBrowserError={errorParam === "oauth_browser"}
     />
   );
 }

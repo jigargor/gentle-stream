@@ -284,8 +284,9 @@ Public legal endpoints:
 
 Clickwrap / consent behavior:
 - Social sign-in (Google/Facebook) redirects to `/terms/accept` until the user scrolls through Terms and agrees (cookie-backed gate).
-- Email sign-in (`/login` → “Email me a sign-in link”) requires checking the “I have read and agree…” box (Terms + Privacy) before the link is requested.
-- When Turnstile is enabled in env vars, the `/login` page renders the Cloudflare widget and `POST /api/auth/email-link` verifies the Turnstile token (rate-limited).
+- Email auth (`/login` → email/password Sign in or Sign up) requires checking the “I have read and agree…” box (Terms + Privacy) before submission.
+- Sign up uses Supabase email verification (`signUp` + `emailRedirectTo`) before first password login.
+- When Turnstile is enabled in env vars, the `/login` page renders the Cloudflare widget and `POST /api/auth/email-password` verifies the Turnstile token (rate-limited).
 
 ---
 

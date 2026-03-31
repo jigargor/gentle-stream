@@ -96,7 +96,7 @@ async function redirectToLoginCleared(
 }
 
 /**
- * OAuth (Google/Facebook) and email magic links land here with ?code=...
+ * OAuth (Google/Facebook) and email verification links land here with ?code=...
  * Cookies must be written onto the returned redirect response (Route Handler quirk).
  *
  * Do not call signOut before exchangeCodeForSession: signOut removes the PKCE code
@@ -121,7 +121,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     const errKey = isPkceVerifierMissing(error)
-      ? "magic_link_browser"
+      ? "oauth_browser"
       : "auth";
     return redirectToLoginCleared(request, { error: errKey });
   }

@@ -3,13 +3,29 @@
 import { useEffect, useMemo, useState } from "react";
 import type { WeatherFillerData } from "@/lib/types";
 import { picsumFallbackUrl } from "@/lib/article-image";
+import PlaceAutocompleteInput from "@/components/location/PlaceAutocompleteInput";
 
 interface WeatherFillerCardProps {
   data: WeatherFillerData;
   reason: "gap" | "interval" | "singleton";
 }
 
+function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
+  if (typeof input !== "string") return defaultValue;
+  const normalized = input.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
 export default function WeatherFillerCard({ data, reason }: WeatherFillerCardProps) {
+  const googlePlacesApiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY?.trim() ?? "";
+  const placesAutofillFlag = readTruthyFlag(
+    process.env.NEXT_PUBLIC_GOOGLE_PLACES_AUTOFILL_ENABLED,
+    false
+  );
+  const isPlacesAutofillEnabled =
+    placesAutofillFlag && googlePlacesApiKey.length > 0;
   const [weatherData, setWeatherData] = useState<WeatherFillerData>(data);
   const isWeather = weatherData.mode === "weather";
   const reasonLabel =
@@ -147,18 +163,42 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
               {weatherData.locationLabel ?? "Global desk"}
             </p>
             <div style={{ marginTop: "0.35rem", display: "flex", gap: "0.35rem" }}>
-              <input
-                value={locationInput}
-                onChange={(event) => setLocationInput(event.target.value)}
-                placeholder="Set location"
-                style={{
-                  border: "1px solid #d7d0c1",
-                  padding: "0.18rem 0.32rem",
-                  fontSize: "0.68rem",
-                  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-                  minWidth: "9rem",
-                }}
-              />
+              <div style={{ minWidth: "9rem", flex: "1 1 auto" }}>
+                {isPlacesAutofillEnabled ? (
+                  <PlaceAutocompleteInput
+                    value={locationInput}
+                    onChange={(nextValue) => setLocationInput(nextValue)}
+                    onSelect={(selection) => setLocationInput(selection.label)}
+                    ariaLabel="Weather tile location"
+                    placeholder="Set location"
+                    inputStyle={{
+                      border: "1px solid #d7d0c1",
+                      padding: "0.18rem 0.32rem",
+                      fontSize: "0.68rem",
+                      fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                    listStyle={{
+                      maxHeight: "10rem",
+                    }}
+                  />
+                ) : (
+                  <input
+                    value={locationInput}
+                    onChange={(event) => setLocationInput(event.target.value)}
+                    placeholder="Set location"
+                    style={{
+                      border: "1px solid #d7d0c1",
+                      padding: "0.18rem 0.32rem",
+                      fontSize: "0.68rem",
+                      fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => void updateLocation()}
@@ -173,7 +213,7 @@ export default function WeatherFillerCard({ data, reason }: WeatherFillerCardPro
                   padding: "0.16rem 0.38rem",
                 }}
               >
-                {updatingLocation ? "Updating..." : "Change"}
+                {updatingLocation ? "Updating..." : "Update"}
               </button>
             </div>
           </div>

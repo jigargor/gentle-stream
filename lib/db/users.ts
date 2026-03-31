@@ -8,6 +8,7 @@ import {
   DEFAULT_GAME_RATIO,
 } from "../constants";
 import { USERNAME_CHANGE_COOLDOWN_MS } from "../user/username-policy";
+import { getEnv } from "@/lib/env";
 
 interface UserProfileRow {
   user_id: string;
@@ -47,6 +48,11 @@ const DEFAULT_ENABLED_GAME_TYPES: GameType[] = [
   "connections",
 ] as const;
 let isUserSeenArticlesTableAvailable = true;
+const env = getEnv();
+const isSeenTableEnabled =
+  env.FEED_SEEN_TABLE_READS_ENABLED == null
+    ? true
+    : env.FEED_SEEN_TABLE_READS_ENABLED;
 
 function isMissingUserSeenArticlesTable(errorMessage: string): boolean {
   return (
@@ -216,7 +222,7 @@ export async function markArticlesSeen(
     source,
     section_index: sectionIndex,
   }));
-  if (isUserSeenArticlesTableAvailable) {
+  if (isSeenTableEnabled && isUserSeenArticlesTableAvailable) {
     const { error: seenError } = await db
       .from("user_seen_articles")
       .upsert(seenRows, { onConflict: "user_id,article_id" });
@@ -251,7 +257,7 @@ export async function listRecentlySeenArticleIds(
   userId: string,
   limit = 500
 ): Promise<string[]> {
-  if (!isUserSeenArticlesTableAvailable) {
+  if (!isSeenTableEnabled || !isUserSeenArticlesTableAvailable) {
     const profile = await getOrCreateUserProfile(userId);
     return profile.seenArticleIds.slice(-limit);
   }

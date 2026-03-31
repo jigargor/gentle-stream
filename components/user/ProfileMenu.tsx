@@ -21,6 +21,7 @@ import type {
 import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
 import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
 import NasaApodCard from "@/components/feed/NasaApodCard";
+import PlaceAutocompleteInput from "@/components/location/PlaceAutocompleteInput";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
@@ -52,6 +53,14 @@ function formatDuration(totalSec: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
+  if (typeof input !== "string") return defaultValue;
+  const normalized = input.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
 export function ProfileMenu({
   userEmail,
   onGameRatioSaved,
@@ -59,6 +68,13 @@ export function ProfileMenu({
   onThemePreferenceToggle,
   isAdmin = false,
 }: ProfileMenuProps) {
+  const googlePlacesApiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY?.trim() ?? "";
+  const placesAutofillFlag = readTruthyFlag(
+    process.env.NEXT_PUBLIC_GOOGLE_PLACES_AUTOFILL_ENABLED,
+    false
+  );
+  const isPlacesAutofillEnabled =
+    placesAutofillFlag && googlePlacesApiKey.length > 0;
   const [open, setOpen] = useState(false);
   const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
   const [feedModuleModal, setFeedModuleModal] = useState<
@@ -1156,21 +1172,46 @@ export function ProfileMenu({
                 >
                   Weather location
                 </label>
-                <input
-                  value={profileForm.weatherLocation}
-                  onChange={(e) =>
-                    setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
-                  }
-                  placeholder="City or region (e.g. New York)"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    marginBottom: "0.45rem",
-                    padding: "0.35rem 0.45rem",
-                    border: "1px solid #ccc",
-                    fontSize: "0.85rem",
-                  }}
-                />
+                {isPlacesAutofillEnabled ? (
+                  <PlaceAutocompleteInput
+                    value={profileForm.weatherLocation}
+                    onChange={(nextValue) =>
+                      setProfileForm((f) => ({ ...f, weatherLocation: nextValue }))
+                    }
+                    onSelect={(selection) =>
+                      setProfileForm((f) => ({
+                        ...f,
+                        weatherLocation: selection.label,
+                      }))
+                    }
+                    ariaLabel="Weather location"
+                    placeholder="Search location (e.g. New York, NY, USA)"
+                    inputStyle={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      marginBottom: "0.45rem",
+                      padding: "0.35rem 0.45rem",
+                      border: "1px solid #ccc",
+                      fontSize: "0.85rem",
+                    }}
+                  />
+                ) : (
+                  <input
+                    value={profileForm.weatherLocation}
+                    onChange={(e) =>
+                      setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
+                    }
+                    placeholder="City or region (e.g. New York)"
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      marginBottom: "0.45rem",
+                      padding: "0.35rem 0.45rem",
+                      border: "1px solid #ccc",
+                      fontSize: "0.85rem",
+                    }}
+                  />
+                )}
                 {profile && (
                   <AvatarInput
                     userEmail={userEmail}

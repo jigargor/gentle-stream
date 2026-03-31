@@ -10,6 +10,27 @@ import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
+const EDGE_PUNCTUATION = ",.;:/\\|_-";
+
+function collapseSpaces(input: string): string {
+  return input
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function trimEdgePunctuation(input: string): string {
+  let start = 0;
+  let end = input.length;
+  while (start < end && EDGE_PUNCTUATION.includes(input[start] ?? "")) start += 1;
+  while (end > start && EDGE_PUNCTUATION.includes(input[end - 1] ?? "")) end -= 1;
+  return input.slice(start, end).trim();
+}
+
+function normalizeWeatherLocation(input: string): string {
+  const collapsed = collapseSpaces(input.trim());
+  return trimEdgePunctuation(collapsed);
+}
 
 const profilePatchSchema = z.object({
   displayName: z.union([z.string(), z.null()]).optional(),
@@ -133,7 +154,7 @@ export async function PATCH(request: NextRequest) {
   if (body.weatherLocation !== undefined) {
     if (body.weatherLocation === null || body.weatherLocation === "") weatherLocation = null;
     else if (typeof body.weatherLocation === "string") {
-      const t = body.weatherLocation.trim();
+      const t = normalizeWeatherLocation(body.weatherLocation);
       if (t.length > 120) {
         return apiErrorResponse({
           request,

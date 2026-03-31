@@ -58,6 +58,8 @@ const envSchema = z.object({
   TURNSTILE_SECRET_KEY: optionalTrimmedString,
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: optionalTrimmedString,
   OPENWEATHER_API_KEY: optionalTrimmedString,
+  NEXT_PUBLIC_GOOGLE_PLACES_API_KEY: optionalTrimmedString,
+  NEXT_PUBLIC_GOOGLE_PLACES_AUTOFILL_ENABLED: optionalBooleanString,
   NEXT_PUBLIC_FEED_FILLER_FALLBACK: optionalTrimmedString,
   NEXT_PUBLIC_ENGAGEMENT_SCROLL_DEPTH_ENABLED: optionalBooleanString,
   SPOTIFY_CLIENT_ID: optionalTrimmedString,

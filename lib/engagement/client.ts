@@ -9,6 +9,8 @@ let queue: ArticleEngagementEventInput[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionId: string | null = null;
 let engagementDisabled = false;
+const lastEventAtByKey = new Map<string, number>();
+let sequence = 0;
 
 function getSessionId(): string {
   if (sessionId) return sessionId;
@@ -62,10 +64,20 @@ export function trackArticleEngagement(
   event: Omit<ArticleEngagementEventInput, "sessionId" | "occurredAt">
 ): void {
   if (engagementDisabled) return;
+  const nowMs = Date.now();
+  const dedupeKey = `${event.articleId}|${event.eventType}|${event.eventValue ?? "null"}`;
+  const lastAt = lastEventAtByKey.get(dedupeKey) ?? 0;
+  if (nowMs - lastAt < 1500) return;
+  lastEventAtByKey.set(dedupeKey, nowMs);
+  sequence += 1;
   queue.push({
     ...event,
     sessionId: getSessionId(),
-    occurredAt: new Date().toISOString(),
+    occurredAt: new Date(nowMs).toISOString(),
+    context: {
+      ...(event.context ?? {}),
+      seq: sequence,
+    },
   });
   if (queue.length >= MAX_BATCH_SIZE) {
     void flushNow();

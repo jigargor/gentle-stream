@@ -12,6 +12,7 @@
 
 import { getUntaggedArticles, updateArticleTags } from "../db/articles";
 import type { StoredArticle } from "../types";
+import { captureException, startSpan } from "@/lib/observability";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -28,9 +29,11 @@ interface TaggerEnrichment {
  * Process all untagged articles in the DB (up to `limit` per run).
  */
 export async function runTaggerAgent(limit = 20): Promise<void> {
+  const span = startSpan("agent.tagger", { limit });
   const articles = await getUntaggedArticles(limit);
   if (articles.length === 0) {
     console.log("[TaggerAgent] No untagged articles found.");
+    span.end({ processed: 0 });
     return;
   }
 
@@ -38,6 +41,7 @@ export async function runTaggerAgent(limit = 20): Promise<void> {
 
   // Process in parallel — no web search, so rate limits are relaxed
   await Promise.allSettled(articles.map(tagSingleArticle));
+  span.end({ processed: articles.length });
 }
 
 async function tagSingleArticle(article: StoredArticle): Promise<void> {
@@ -62,6 +66,11 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
 
   if (!response.ok) {
     console.error(`[TaggerAgent] API error for article ${article.id}: ${response.status}`);
+    captureException(new Error(`tagger_api_${response.status}`), {
+      agent: "tagger",
+      articleId: article.id,
+      status: response.status,
+    });
     return;
   }
 
@@ -87,6 +96,7 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
     console.log(`[TaggerAgent] Tagged article ${article.id}: score=${enrichment.qualityScore}`);
   } catch (e) {
     console.error(`[TaggerAgent] Parse error for article ${article.id}:`, e);
+    captureException(e, { agent: "tagger", articleId: article.id, phase: "parse" });
   }
 }
 

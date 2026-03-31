@@ -45,6 +45,9 @@ interface ArticleSubmissionRow {
   published_article_id: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
+  deleted_by_user_id?: string | null;
+  delete_reason?: string | null;
 
   recipe_servings?: number | null;
   recipe_ingredients?: string[] | null;
@@ -297,6 +300,7 @@ export async function listSubmissionsByAuthor(authorUserId: string): Promise<Art
     .from("article_submissions")
     .select("*")
     .eq("author_user_id", authorUserId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) throw new Error(`listSubmissionsByAuthor: ${error.message}`);
   return (data as ArticleSubmissionRow[]).map(rowToSubmission);
@@ -327,6 +331,7 @@ export async function updateSubmissionForAuthor(input: {
     .select("*")
     .eq("id", input.id)
     .eq("author_user_id", input.authorUserId)
+    .is("deleted_at", null)
     .single();
   if (existingError || !existing) throw new Error("Submission not found");
   const row = existing as ArticleSubmissionRow;
@@ -397,6 +402,7 @@ export async function listSubmissionsForAdmin(status?: ArticleSubmissionStatus):
   let query = db
     .from("article_submissions")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
   const { data, error } = await query;
@@ -411,15 +417,42 @@ export async function reviewSubmission(input: {
   adminNote: string | null;
   rejectionReason: string | null;
 }): Promise<{ submission: ArticleSubmission; publishedArticle: StoredArticle | null }> {
+  const reviewedAt = new Date().toISOString();
   const { data: row, error: fetchError } = await db
     .from("article_submissions")
     .select("*")
     .eq("id", input.submissionId)
+    .is("deleted_at", null)
     .single();
   if (fetchError || !row) throw new Error("Submission not found");
   const submission = row as ArticleSubmissionRow;
+  const previousStatus = submission.status;
   if (submission.status !== "pending") {
     throw new Error("Submission is no longer pending");
+  }
+
+  async function recordModerationEvent(params: {
+    action: string;
+    toStatus: string;
+    reason: string | null;
+    note: string | null;
+    articleId?: string | null;
+  }): Promise<void> {
+    const { error: eventError } = await db.from("moderation_events").insert({
+      submission_id: submission.id,
+      article_id: params.articleId ?? null,
+      actor_user_id: input.reviewerUserId,
+      action: params.action,
+      from_status: previousStatus,
+      to_status: params.toStatus,
+      reason: params.reason,
+      note: params.note,
+      metadata: {
+        contentKind: submission.content_kind ?? "user_article",
+      },
+      created_at: reviewedAt,
+    });
+    if (eventError) throw new Error(`reviewSubmission moderation event: ${eventError.message}`);
   }
 
   if (input.action === "request_changes") {
@@ -432,12 +465,18 @@ export async function reviewSubmission(input: {
           "Please revise this draft based on moderation guidance and resubmit.",
         rejection_reason: null,
         reviewed_by_user_id: input.reviewerUserId,
-        reviewed_at: new Date().toISOString(),
+        reviewed_at: reviewedAt,
       })
       .eq("id", input.submissionId)
       .select("*")
       .single();
     if (requestError) throw new Error(`reviewSubmission request_changes: ${requestError.message}`);
+    await recordModerationEvent({
+      action: "request_changes",
+      toStatus: "changes_requested",
+      reason: null,
+      note: input.adminNote,
+    });
     return { submission: rowToSubmission(requested as ArticleSubmissionRow), publishedArticle: null };
   }
 
@@ -449,12 +488,21 @@ export async function reviewSubmission(input: {
         admin_note: input.adminNote,
         rejection_reason: input.rejectionReason,
         reviewed_by_user_id: input.reviewerUserId,
-        reviewed_at: new Date().toISOString(),
+        reviewed_at: reviewedAt,
+        deleted_at: reviewedAt,
+        deleted_by_user_id: input.reviewerUserId,
+        delete_reason: input.rejectionReason ?? "Rejected by moderator",
       })
       .eq("id", input.submissionId)
       .select("*")
       .single();
     if (rejectError) throw new Error(`reviewSubmission reject: ${rejectError.message}`);
+    await recordModerationEvent({
+      action: "reject",
+      toStatus: "rejected",
+      reason: input.rejectionReason,
+      note: input.adminNote,
+    });
     return { submission: rowToSubmission(rejected as ArticleSubmissionRow), publishedArticle: null };
   }
 
@@ -502,6 +550,9 @@ export async function reviewSubmission(input: {
       author_user_id: submission.author_user_id,
       submission_id: submission.id,
       creator_explicit_tags: explicitTags,
+      deleted_at: null,
+      deleted_by_user_id: null,
+      delete_reason: null,
 
       recipe_servings:
         submission.content_kind === "recipe" ? submission.recipe_servings ?? null : null,
@@ -527,13 +578,24 @@ export async function reviewSubmission(input: {
       admin_note: input.adminNote,
       rejection_reason: null,
       reviewed_by_user_id: input.reviewerUserId,
-      reviewed_at: new Date().toISOString(),
+        reviewed_at: reviewedAt,
+        deleted_at: null,
+        deleted_by_user_id: null,
+        delete_reason: null,
       published_article_id: (article as { id: string }).id,
     })
     .eq("id", input.submissionId)
     .select("*")
     .single();
   if (approveError) throw new Error(`reviewSubmission approve: ${approveError.message}`);
+
+  await recordModerationEvent({
+    action: "approve",
+    toStatus: "approved",
+    reason: null,
+    note: input.adminNote,
+    articleId: (article as { id: string }).id,
+  });
 
   return {
     submission: rowToSubmission(approved as ArticleSubmissionRow),

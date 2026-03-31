@@ -41,6 +41,12 @@ function normalizeEventValue(
   if (eventType === "impression" || eventType === "read_75pct")
     return Math.max(0, Math.min(1, n));
 
+  if (eventType === "click_through")
+    return Math.max(0, Math.min(1, n));
+
+  if (eventType === "scroll_depth")
+    return Math.max(0, Math.min(1, n));
+
   if (eventType === "read_30s" || eventType === "read_dwell")
     return Math.max(0, Math.min(1800, n));
 

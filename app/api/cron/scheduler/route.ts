@@ -28,6 +28,7 @@ import {
 } from "@/lib/constants";
 import type { Category } from "@/lib/constants";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,12 +74,20 @@ export async function GET(request: NextRequest) {
   }
 
   const runStartedAt = Date.now();
+  const traceId = request.headers.get("x-trace-id") ?? undefined;
+  const span = startSpan("cron.scheduler", { traceId });
   const triggerSource = request.headers.get("x-vercel-cron") ? "vercel-cron" : "manual";
   let runId: string;
   try {
     runId = await createCronIngestRun(triggerSource);
+    captureMessage({
+      level: "info",
+      message: "cron.scheduler.run_started",
+      context: { runId, triggerSource, traceId },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    captureException(error, { route: "cron.scheduler", phase: "create_run", traceId });
     return apiErrorResponse({
       request,
       status: 500,
@@ -269,6 +278,12 @@ export async function GET(request: NextRequest) {
         });
       } catch (e) {
         console.error(`[Scheduler] Ingest failed for "${cat}":`, e);
+        captureException(e, {
+          route: "cron.scheduler",
+          runId,
+          category: cat,
+          traceId,
+        });
         hadErrors = true;
         categoriesChecked += 1;
         const message = e instanceof Error ? e.message : "Unknown ingest error";
@@ -304,6 +319,7 @@ export async function GET(request: NextRequest) {
       }
     }
   } catch (e) {
+    captureException(e, { route: "cron.scheduler", runId, phase: "loop", traceId });
     hadErrors = true;
     errorSummaryParts.push(
       e instanceof Error ? e.message : "Scheduler loop failed"
@@ -312,6 +328,7 @@ export async function GET(request: NextRequest) {
     try {
       await appendCronIngestCategoryLogs(runId, categoryLogs);
     } catch (e) {
+      captureException(e, { route: "cron.scheduler", runId, phase: "append_logs", traceId });
       hadErrors = true;
       errorSummaryParts.push(
         e instanceof Error ? e.message : "Could not append category logs"
@@ -346,7 +363,29 @@ export async function GET(request: NextRequest) {
       });
     } catch (e) {
       console.error("[Scheduler] Could not finish ingest run:", e);
+      captureException(e, { route: "cron.scheduler", runId, phase: "finish_run", traceId });
     }
+    captureMessage({
+      level: hadErrors ? "warning" : "info",
+      message: "cron.scheduler.run_finished",
+      context: {
+        runId,
+        traceId,
+        hadErrors,
+        totalInserted,
+        totalFailed,
+        warningCount,
+        durationMs: Date.now() - runStartedAt,
+      },
+    });
+    span.end({
+      runId,
+      hadErrors,
+      totalInserted,
+      totalFailed,
+      warningCount,
+    });
+    await flushOnShutdown();
   }
 
   return NextResponse.json({

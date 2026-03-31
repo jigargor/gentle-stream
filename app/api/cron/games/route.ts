@@ -28,6 +28,7 @@ import {
   MIN_WORD_POOL_TOTAL,
 } from "@/lib/db/gameWordPool";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { captureException, flushOnShutdown, startSpan } from "@/lib/observability";
 
 /**
  * Word-pool cap for demo: keep growth bounded while still ensuring freshness.
@@ -105,6 +106,9 @@ export async function GET(request: NextRequest) {
   }
 
   const results: Record<string, unknown> = {};
+  const span = startSpan("cron.games", {
+    traceId: request.headers.get("x-trace-id") ?? undefined,
+  });
 
   // ── Crosswords (blocked minis) ──────────────────────────────────────────────
   try {
@@ -114,6 +118,7 @@ export async function GET(request: NextRequest) {
       cap: MAX_CROSSWORDS_IN_POOL,
     };
   } catch (e) {
+    captureException(e, { route: "cron.games", pool: "crossword" });
     results.crossword = { error: e instanceof Error ? e.message : "failed" };
   }
 
@@ -125,6 +130,7 @@ export async function GET(request: NextRequest) {
       cap: MAX_CONNECTIONS_IN_POOL,
     };
   } catch (e) {
+    captureException(e, { route: "cron.games", pool: "connections" });
     results.connections = { error: e instanceof Error ? e.message : "failed" };
   }
 
@@ -137,9 +143,12 @@ export async function GET(request: NextRequest) {
       cap: MAX_WORD_POOL_TOTAL,
     };
   } catch (e) {
+    captureException(e, { route: "cron.games", pool: "word_pool" });
     results.wordPool = { error: e instanceof Error ? e.message : "failed" };
   }
 
+  span.end({ ok: true });
+  await flushOnShutdown();
   return NextResponse.json({
     message: "Games cron complete",
     ranAt: new Date().toISOString(),

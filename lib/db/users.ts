@@ -46,6 +46,14 @@ const DEFAULT_ENABLED_GAME_TYPES: GameType[] = [
   "nonogram",
   "connections",
 ] as const;
+let isUserSeenArticlesTableAvailable = true;
+
+function isMissingUserSeenArticlesTable(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("Could not find the table 'public.user_seen_articles'") ||
+    errorMessage.includes("schema cache")
+  );
+}
 
 function normalizeEnabledGameTypes(input: unknown): GameType[] {
   if (!Array.isArray(input)) return [...DEFAULT_ENABLED_GAME_TYPES];
@@ -190,10 +198,42 @@ export async function getUserProfileById(userId: string): Promise<UserProfile | 
  */
 export async function markArticlesSeen(
   userId: string,
-  articleIds: string[]
+  articleIds: string[],
+  metadata?: { source?: string; sectionIndex?: number | null }
 ): Promise<void> {
   if (articleIds.length === 0) return;
 
+  const seenAtIso = new Date().toISOString();
+  const source = metadata?.source?.trim() || "feed";
+  const sectionIndex =
+    typeof metadata?.sectionIndex === "number" && Number.isFinite(metadata.sectionIndex)
+      ? Math.trunc(metadata.sectionIndex)
+      : null;
+  const seenRows = Array.from(new Set(articleIds)).map((articleId) => ({
+    user_id: userId,
+    article_id: articleId,
+    seen_at: seenAtIso,
+    source,
+    section_index: sectionIndex,
+  }));
+  if (isUserSeenArticlesTableAvailable) {
+    const { error: seenError } = await db
+      .from("user_seen_articles")
+      .upsert(seenRows, { onConflict: "user_id,article_id" });
+    if (seenError) {
+      if (isMissingUserSeenArticlesTable(seenError.message)) {
+        isUserSeenArticlesTableAvailable = false;
+        console.warn(
+          "[markArticlesSeen] user_seen_articles unavailable; falling back to profile array: %s",
+          seenError.message
+        );
+      } else {
+        throw new Error(`markArticlesSeen user_seen_articles: ${seenError.message}`);
+      }
+    }
+  }
+
+  // Legacy compatibility window: continue updating profile array while dual-write is enabled.
   const profile = await getOrCreateUserProfile(userId);
   const updated = [...profile.seenArticleIds, ...articleIds];
   // Cap at 500 — beyond this, articles will have expired anyway
@@ -205,6 +245,32 @@ export async function markArticlesSeen(
     .eq("user_id", userId);
 
   if (error) throw new Error(`markArticlesSeen: ${error.message}`);
+}
+
+export async function listRecentlySeenArticleIds(
+  userId: string,
+  limit = 500
+): Promise<string[]> {
+  if (!isUserSeenArticlesTableAvailable) {
+    const profile = await getOrCreateUserProfile(userId);
+    return profile.seenArticleIds.slice(-limit);
+  }
+  const capped = Math.max(1, Math.min(5000, Math.trunc(limit)));
+  const { data, error } = await db
+    .from("user_seen_articles")
+    .select("article_id")
+    .eq("user_id", userId)
+    .order("seen_at", { ascending: false })
+    .limit(capped);
+  if (error) {
+    if (isMissingUserSeenArticlesTable(error.message)) {
+      isUserSeenArticlesTableAvailable = false;
+      const profile = await getOrCreateUserProfile(userId);
+      return profile.seenArticleIds.slice(-limit);
+    }
+    throw new Error(`listRecentlySeenArticleIds: ${error.message}`);
+  }
+  return (data ?? []).map((row) => String((row as { article_id: string }).article_id));
 }
 
 /**

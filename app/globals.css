@@ -339,6 +339,20 @@ body {
   }
 }
 
+/* Single-hero + optional reading rail (lg+): story + aside */
+.news-section--single-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  .news-section--single-hero.news-section--with-rail {
+    grid-template-columns: minmax(0, 1.7fr) minmax(260px, min(32vw, 420px));
+    align-items: start;
+    column-gap: 1rem;
+  }
+}
+
 /* ─── Responsive grid overrides ──────────────────────── */
 @media (max-width: 768px) {
   .news-grid {

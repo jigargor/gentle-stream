@@ -213,34 +213,7 @@ export interface NewsSection {
 
 export type LayoutVariant = "hero" | "wide" | "standard";
 
-// ─── Feed sections — articles or games ────────────────────────────────────────
-
-export interface ArticleFeedSection {
-  sectionType: "articles";
-  articles: Article[];
-  index: number;
-  newspaperLayout?: {
-    templateId:
-      | "single-hero"
-      | "two-columns"
-      | "hero-left"
-      | "middle-wide"
-      | "hero-sidebar";
-    layouts: LayoutVariant[];
-    orderedIndices?: number[];
-    columnHeightsPx?: number[];
-    inlineGapPx?: number;
-    inlineTargetColumn?: number | null;
-    inlineSuggestedModuleType?: "generated_art" | "todo";
-    inlineModule?: {
-      moduleType: "generated_art" | "todo";
-      reason: "inline";
-      targetColumn: number;
-      data: FeedModuleData;
-    } | null;
-    residualGapPx: number;
-  };
-}
+// ─── Feed sections — articles or games (ArticleFeedSection below module data types) ─
 
 export interface GameFeedSection {
   sectionType: "game";
@@ -323,6 +296,56 @@ export type FeedModuleData =
   | GeneratedImageModuleData
   | NasaModuleData
   | TodoModuleData;
+
+/** Short list for the single-hero reading rail (same category, excluding current). */
+export interface RelatedHeadlineItem {
+  id: string;
+  headline: string;
+  category: string;
+}
+
+export type ReadingRailModule =
+  | { kind: "weather"; data: WeatherModuleData }
+  | { kind: "spotify"; data: SpotifyMoodTileData }
+  | { kind: "nasa"; data: NasaModuleData }
+  | { kind: "generated_art"; data: GeneratedImageModuleData }
+  | { kind: "todo"; data: TodoModuleData };
+
+export interface ReadingRailConfig {
+  enabled: boolean;
+  primary?: ReadingRailModule;
+  secondary?: ReadingRailModule;
+  relatedHeadlines?: RelatedHeadlineItem[];
+}
+
+export interface ArticleFeedSection {
+  sectionType: "articles";
+  articles: Article[];
+  index: number;
+  newspaperLayout?: {
+    templateId:
+      | "single-hero"
+      | "two-columns"
+      | "hero-left"
+      | "middle-wide"
+      | "hero-sidebar";
+    layouts: LayoutVariant[];
+    orderedIndices?: number[];
+    columnHeightsPx?: number[];
+    inlineGapPx?: number;
+    inlineTargetColumn?: number | null;
+    inlineSuggestedModuleType?: "generated_art" | "todo";
+    inlineModule?: {
+      moduleType: "generated_art" | "todo";
+      reason: "inline";
+      targetColumn: number;
+      data: FeedModuleData;
+    } | null;
+    residualGapPx: number;
+    /** Wide single-hero: optional side rail (filled client-side in NewsFeed). */
+    readingRail?: ReadingRailConfig | null;
+  };
+}
 
 /**
  * Feed rows for API-driven modules. Todo + generated_art fill column gaps; weather / Spotify /

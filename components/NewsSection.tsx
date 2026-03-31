@@ -1,9 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import ArticleCard from "./ArticleCard";
 import type { Article, ArticleFeedSection } from "@/lib/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 import InlineModuleCard from "./feed/InlineModuleCard";
+
+const ReadingRail = dynamic(() => import("./feed/ReadingRail"), {
+  loading: () => (
+    <aside
+      style={{ minHeight: 72 }}
+      aria-label="Alongside this story"
+      aria-busy="true"
+    />
+  ),
+  ssr: false,
+});
 
 type SectionLayoutPlan = NonNullable<ArticleFeedSection["newspaperLayout"]>;
 
@@ -34,16 +46,19 @@ export default function NewsSection({
 
   // Fewer than 3: still render so infinite scroll can show partial pages
   if (plan.templateId === "single-hero") {
+    const rail = plan.readingRail;
+    const showRail =
+      Boolean(rail?.enabled) &&
+      Boolean(rail?.primary || rail?.secondary || (rail?.relatedHeadlines?.length ?? 0) > 0);
     return (
       <div
-        className="news-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr",
-          ...borderStyles,
-        }}
+        className={`news-grid news-section--single-hero${showRail ? " news-section--with-rail" : ""}`}
+        style={borderStyles}
       >
-        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+        <div style={{ minWidth: 0 }}>
+          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+        </div>
+        {showRail && rail ? <ReadingRail rail={rail} /> : null}
       </div>
     );
   }

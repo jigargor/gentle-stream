@@ -115,6 +115,7 @@ export async function GET(request: NextRequest) {
       .from("articles")
       .select("*")
       .eq("tagged", true)
+      .is("deleted_at", null)
       .order("fetched_at", { ascending: false })
       .limit(Math.min(160, limit * 8));
     if (category) query = query.eq("category", category);

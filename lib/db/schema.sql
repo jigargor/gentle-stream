@@ -102,6 +102,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_username_lower
   ON user_profiles (LOWER(username))
   WHERE username IS NOT NULL AND TRIM(username) <> '';
 
+CREATE TABLE IF NOT EXISTS user_seen_articles (
+  user_id TEXT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
+  article_id UUID NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+  seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  source TEXT NOT NULL DEFAULT 'feed',
+  section_index INT,
+  PRIMARY KEY (user_id, article_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_seen_articles_user_seen_at
+  ON user_seen_articles (user_id, seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_user_seen_articles_article_id
+  ON user_seen_articles (article_id);
+
 -- ─── Creator publishing ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS creator_profiles (
   user_id                    TEXT PRIMARY KEY REFERENCES user_profiles (user_id) ON DELETE CASCADE,

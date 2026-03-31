@@ -1,6 +1,8 @@
 export const ARTICLE_ENGAGEMENT_EVENT_TYPES = [
   "impression",
   "open",
+  "click_through",
+  "scroll_depth",
   "read_30s",
   "read_75pct",
   "read_dwell",
@@ -16,6 +18,8 @@ export interface ArticleEngagementContext {
   source?: "feed" | "saved" | "search" | "direct" | "unknown";
   sectionIndex?: number;
   cardIndex?: number;
+  seq?: number;
+  scrollDepth?: number;
   gameNeighbor?: string | null;
   locale?: string | null;
   userAgent?: string | null;

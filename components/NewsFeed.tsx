@@ -28,6 +28,8 @@ import type {
   WeatherModuleData,
   SpotifyMoodTileData,
   TodoModuleData,
+  RelatedHeadlineItem,
+  ReadingRailModule,
 } from "@/lib/types";
 import { DEFAULT_GAME_RATIO } from "@/lib/constants";
 import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
@@ -760,6 +762,69 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           reason: "inline",
           targetColumn: layoutPlan.inlineTargetColumn,
           data: inlineData,
+        };
+      }
+
+      if (
+        layoutPlan.templateId === "single-hero" &&
+        searchQuery.length < 2 &&
+        section.newspaperLayout
+      ) {
+        await ensureSingletonFeedCached();
+        const cache = singletonFeedCacheRef.current;
+        const hero = orderedArticles[0];
+
+        let primary: ReadingRailModule | undefined;
+        if (cache.weather) primary = { kind: "weather", data: cache.weather };
+        else if (cache.nasa) primary = { kind: "nasa", data: cache.nasa };
+
+        let secondary: ReadingRailModule | undefined;
+        if (cache.spotify) secondary = { kind: "spotify", data: cache.spotify };
+        else {
+          const gen = await fetchModuleData({
+            moduleType: "generated_art",
+            category: data.category,
+            location: inlineLocation,
+          });
+          if (gen?.mode === "generated_art")
+            secondary = {
+              kind: "generated_art",
+              data: gen as GeneratedImageModuleData,
+            };
+        }
+
+        let relatedHeadlines: RelatedHeadlineItem[] = [];
+        if (
+          hero &&
+          "id" in hero &&
+          typeof hero.id === "string" &&
+          hero.id.length > 0 &&
+          "category" in hero &&
+          hero.category
+        ) {
+          try {
+            const res = await fetch(
+              `/api/feed/related?articleId=${encodeURIComponent(hero.id)}&category=${encodeURIComponent(String(hero.category))}&limit=3`,
+              { cache: "no-store" }
+            );
+            if (res.ok) {
+              const j = (await res.json()) as { headlines?: RelatedHeadlineItem[] };
+              relatedHeadlines = j.headlines ?? [];
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const enabled = Boolean(
+          primary || secondary || relatedHeadlines.length > 0
+        );
+        section.newspaperLayout.readingRail = {
+          enabled,
+          primary,
+          secondary,
+          relatedHeadlines:
+            relatedHeadlines.length > 0 ? relatedHeadlines : undefined,
         };
       }
 

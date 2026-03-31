@@ -19,7 +19,11 @@ import {
   getRandomAvailableArticles,
   getUntaggedArticlesForFeed,
 } from "../db/articles";
-import { getOrCreateUserProfile, markArticlesSeen } from "../db/users";
+import {
+  getOrCreateUserProfile,
+  listRecentlySeenArticleIds,
+  markArticlesSeen,
+} from "../db/users";
 import { getUserAffinityRows } from "../db/engagement";
 import type {
   ArticleContentKind,
@@ -30,6 +34,7 @@ import type {
 import type { Category } from "../constants";
 import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS, RECIPE_CATEGORY } from "../constants";
 import { buildAffinityIndex, scoreArticleWithEngagement } from "../feed/recommendationScore";
+import { captureException } from "@/lib/observability";
 
 /** Section label when articles come from multiple categories (random backfill). */
 const MIXED_SECTION_LABEL = "Mixed";
@@ -100,12 +105,20 @@ function feedBucketsForTraversal(
   return base;
 }
 
-async function collectCandidatesAcrossCategories(
+export async function collectAcrossBuckets(
   profile: UserProfile,
+  userId: string,
   sectionIndex: number,
   poolSize: number,
   excludeIds: string[],
-  contentKinds?: ArticleContentKind[]
+  contentKinds: ArticleContentKind[] | undefined,
+  fetchFn: (
+    category: Category | typeof RECIPE_CATEGORY,
+    limit: number,
+    excludeIds: string[],
+    contentKinds: ArticleContentKind[] | undefined,
+    userId: string
+  ) => Promise<StoredArticle[]>
 ): Promise<StoredArticle[]> {
   const order = feedBucketsForTraversal(profile, sectionIndex, contentKinds);
   const collected: StoredArticle[] = [];
@@ -114,42 +127,12 @@ async function collectCandidatesAcrossCategories(
   for (const cat of order) {
     if (collected.length >= poolSize) break;
     const remaining = poolSize - collected.length;
-    const batch = await getArticlesForFeed(
+    const batch = await fetchFn(
       cat,
       remaining + 8,
       excludeIds,
-      contentKinds
-    );
-    for (const article of batch) {
-      if (collectedIds.has(article.id)) continue;
-      collectedIds.add(article.id);
-      collected.push(article);
-      if (collected.length >= poolSize) break;
-    }
-  }
-
-  return collected;
-}
-
-async function collectUntaggedAcrossCategories(
-  profile: UserProfile,
-  sectionIndex: number,
-  poolSize: number,
-  excludeIds: string[],
-  contentKinds?: ArticleContentKind[]
-): Promise<StoredArticle[]> {
-  const order = feedBucketsForTraversal(profile, sectionIndex, contentKinds);
-  const collected: StoredArticle[] = [];
-  const collectedIds = new Set<string>();
-
-  for (const cat of order) {
-    if (collected.length >= poolSize) break;
-    const remaining = poolSize - collected.length;
-    const batch = await getUntaggedArticlesForFeed(
-      cat,
-      remaining + 8,
-      excludeIds,
-      contentKinds
+      contentKinds,
+      userId
     );
     for (const article of batch) {
       if (collectedIds.has(article.id)) continue;
@@ -208,15 +191,14 @@ export async function getRankedFeed(
   } = options;
 
   const profile = await getOrCreateUserProfile(userId);
-  const effectiveExcludeIds = Array.from(
-    new Set([...profile.seenArticleIds, ...excludeArticleIds])
-  );
+  const effectiveExcludeIds = Array.from(new Set(excludeArticleIds));
   let affinityIndex = new Map<string, number>();
   try {
     const affinityRows = await getUserAffinityRows(userId);
     affinityIndex = buildAffinityIndex(affinityRows);
   } catch (error) {
     console.warn("[rankerAgent] Failed loading user affinity rows:", error);
+    captureException(error, { agent: "ranker", userId, phase: "load_affinity" });
   }
   // Future: build `FeedSelectionContext` from profile + engagement signals here.
 
@@ -226,13 +208,21 @@ export async function getRankedFeed(
   // Fetch a candidate pool (fetch more than needed so we can rank and trim)
   const poolSize = pageSize * 5;
   let candidates = category
-    ? await getArticlesForFeed(category, poolSize, effectiveExcludeIds, contentKinds ?? undefined)
-    : await collectCandidatesAcrossCategories(
+    ? await getArticlesForFeed(
+        category,
+        poolSize,
+        effectiveExcludeIds,
+        contentKinds ?? undefined,
+        userId
+      )
+    : await collectAcrossBuckets(
         profile,
+        userId,
         sectionIndex,
         poolSize,
         effectiveExcludeIds,
-        contentKinds ?? undefined
+        contentKinds ?? undefined,
+        getArticlesForFeed
       );
 
   // If nothing is tagged yet (tagger backlog / 429), still show fresh ingested rows
@@ -242,14 +232,17 @@ export async function getRankedFeed(
           category,
           poolSize,
           effectiveExcludeIds,
-          contentKinds ?? undefined
+          contentKinds ?? undefined,
+          userId
         )
-      : await collectUntaggedAcrossCategories(
+      : await collectAcrossBuckets(
           profile,
+          userId,
           sectionIndex,
           poolSize,
           effectiveExcludeIds,
-          contentKinds ?? undefined
+          contentKinds ?? undefined,
+          getUntaggedArticlesForFeed
         );
   }
 
@@ -260,9 +253,12 @@ export async function getRankedFeed(
 
   // No profile-based recommendations for this section — pull from the whole catalog
   if (candidates.length === 0) {
+    const randomExcludeIds = Array.from(
+      new Set([...effectiveExcludeIds, ...(await listRecentlySeenArticleIds(userId, 800))])
+    );
     candidates = await getRandomAvailableArticles(
       poolSize,
-      effectiveExcludeIds,
+      randomExcludeIds,
       contentKinds ?? undefined
     );
     if (candidates.length > 0) {
@@ -306,7 +302,10 @@ export async function getRankedFeed(
 
   // Mark as seen so they don't repeat in this user's feed
   if (markSeen && selected.length > 0) {
-    await markArticlesSeen(userId, selected.map((a) => a.id));
+    await markArticlesSeen(userId, selected.map((a) => a.id), {
+      source: "ranker",
+      sectionIndex,
+    });
   }
 
   return {

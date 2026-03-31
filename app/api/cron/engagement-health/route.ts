@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { db } from "@/lib/db/client";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
 
 const WINDOW_HOURS = 24;
 const MIN_EVENT_ACCEPT_RATE = 0.95;
@@ -104,6 +105,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const span = startSpan("cron.engagement_health", {
+      traceId: request.headers.get("x-trace-id") ?? undefined,
+    });
     const sinceIso = new Date(
       Date.now() - WINDOW_HOURS * 60 * 60 * 1000
     ).toISOString();
@@ -117,12 +121,24 @@ export async function GET(request: NextRequest) {
     };
     if (!status.ok) {
       console.error("[EngagementHealth] Alerts:", alerts, metrics);
+      captureMessage({
+        level: "warning",
+        message: "cron.engagement_health.alerts",
+        context: { alertCount: alerts.length, sinceIso },
+      });
     } else {
       console.log("[EngagementHealth] OK", metrics);
     }
+    span.end({ ok: status.ok, alertCount: alerts.length });
+    await flushOnShutdown();
     return NextResponse.json(status);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    captureException(error, {
+      route: "cron.engagement_health",
+      traceId: request.headers.get("x-trace-id") ?? undefined,
+    });
+    await flushOnShutdown();
     return apiErrorResponse({
       request,
       status: 500,

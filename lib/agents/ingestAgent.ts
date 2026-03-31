@@ -16,6 +16,7 @@ import {
   parseMessageBatchJsonlLine,
   pollMessageBatchUntilEnded,
 } from "@/lib/anthropic/messageBatch";
+import { captureException, captureMessage, startSpan } from "@/lib/observability";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const env = getEnv();
@@ -109,9 +110,26 @@ export async function runIngestAgent(
   total: number = INGEST_BATCH_SIZE,
   options: RunIngestAgentOptions = {}
 ): Promise<IngestResult> {
+  const span = startSpan("agent.ingest", { category, total });
   const pipeline = resolvePipelineMode(category, options.pipeline);
-  if (pipeline === "legacy") return runLegacyIngest(category, total);
-  return runOverhaulIngest(category, total, options);
+  try {
+    const result =
+      pipeline === "legacy"
+        ? await runLegacyIngest(category, total)
+        : await runOverhaulIngest(category, total, options);
+    span.end({
+      category,
+      pipeline: result.pipelineMode,
+      insertedCount: result.inserted.length,
+      failedCount: result.failedCount,
+      stoppedEarly: result.stoppedEarly,
+    });
+    return result;
+  } catch (error) {
+    captureException(error, { agent: "ingest", category, pipeline });
+    span.end({ category, pipeline, failed: true });
+    throw error;
+  }
 }
 
 async function runOverhaulIngest(
@@ -199,6 +217,11 @@ async function runOverhaulIngest(
       failedCount += 1;
       const message = error instanceof Error ? error.message : "Discovery failed";
       if (errors.length < 8) errors.push(message);
+      captureException(error, {
+        agent: "ingest",
+        category,
+        phase: "discovery",
+      });
       console.error('[IngestAgent:overhaul] Discovery failed for "%s": %s', category, message);
       break;
     }
@@ -308,6 +331,12 @@ async function runOverhaulIngest(
             failedCount += 1;
             const message = error instanceof Error ? error.message : "Expansion failed";
             if (errors.length < 8) errors.push(message);
+            captureException(error, {
+              agent: "ingest",
+              category,
+              phase: "expansion",
+              candidateHeadline: row.candidate.headline.slice(0, 72),
+            });
             console.error(
               '[IngestAgent:overhaul] Expansion failed for "%s" candidate="%s": %s',
               category,
@@ -318,6 +347,11 @@ async function runOverhaulIngest(
         }
       } catch (batchErr) {
         const msg = batchErr instanceof Error ? batchErr.message : "Message batch failed";
+        captureException(batchErr, {
+          agent: "ingest",
+          category,
+          phase: "message_batch",
+        });
         console.error("[IngestAgent:overhaul] Message batch error, falling back to sync: %s", msg);
         if (errors.length < 8) errors.push(msg);
         for (const candidate of accepted) {
@@ -347,6 +381,12 @@ async function runOverhaulIngest(
             failedCount += 1;
             const message = error instanceof Error ? error.message : "Expansion failed";
             if (errors.length < 8) errors.push(message);
+            captureException(error, {
+              agent: "ingest",
+              category,
+              phase: "expansion_fallback",
+              candidateHeadline: candidate.headline.slice(0, 72),
+            });
             console.error(
               '[IngestAgent:overhaul] Expansion failed for "%s" candidate="%s": %s',
               category,
@@ -385,6 +425,12 @@ async function runOverhaulIngest(
           failedCount += 1;
           const message = error instanceof Error ? error.message : "Expansion failed";
           if (errors.length < 8) errors.push(message);
+          captureException(error, {
+            agent: "ingest",
+            category,
+            phase: "expansion_sync",
+            candidateHeadline: candidate.headline.slice(0, 72),
+          });
           console.error(
             '[IngestAgent:overhaul] Expansion failed for "%s" candidate="%s": %s',
             category,
@@ -413,6 +459,19 @@ async function runOverhaulIngest(
     String(inputTokens),
     String(outputTokens)
   );
+  captureMessage({
+    level: "info",
+    message: "agent.ingest.overhaul_summary",
+    context: {
+      category,
+      insertedCount: allInserted.length,
+      attemptedCount,
+      skippedCount,
+      failedCount,
+      stoppedEarly,
+      candidateCount,
+    },
+  });
 
   return {
     category,

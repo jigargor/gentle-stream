@@ -4,8 +4,22 @@ import { getAuthorDisplayByUserIds } from "./users";
 import type { ArticleContentKind, StoredArticle } from "../types";
 import { RECIPE_CATEGORY, type ArticleStorageCategory, type Category } from "../constants";
 import { v4 as uuidv4 } from "uuid";
+import { getEnv } from "@/lib/env";
 
 const NON_EXPIRING_EXPIRES_AT = "2100-01-01T00:00:00.000Z";
+const env = getEnv();
+const isSeenTableReadsEnabled =
+  env.FEED_SEEN_TABLE_READS_ENABLED == null
+    ? true
+    : env.FEED_SEEN_TABLE_READS_ENABLED;
+let isFeedSeenRpcAvailable = true;
+
+function isMissingFeedSeenRpc(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("Could not find the function public.get_feed_articles_for_user") ||
+    errorMessage.includes("schema cache")
+  );
+}
 
 // ─── Row shape as it comes back from Supabase ─────────────────────────────────
 interface ArticleRow {
@@ -519,13 +533,39 @@ export async function getArticlesForFeed(
   category: Category | typeof RECIPE_CATEGORY,
   limit: number,
   excludeIds: string[] = [],
-  contentKinds?: ArticleContentKind[]
+  contentKinds?: ArticleContentKind[],
+  userId?: string
 ): Promise<StoredArticle[]> {
+  if (userId && isSeenTableReadsEnabled && isFeedSeenRpcAvailable) {
+    const { data, error } = await db.rpc("get_feed_articles_for_user", {
+      p_category: category,
+      p_limit: limit,
+      p_user_id: userId,
+      p_tagged: true,
+      p_content_kinds: contentKinds && contentKinds.length > 0 ? contentKinds : null,
+      p_exclude_ids: excludeIds,
+    });
+    if (error) {
+      if (isMissingFeedSeenRpc(error.message)) {
+        isFeedSeenRpcAvailable = false;
+        console.warn(
+          "[getArticlesForFeed] RPC unavailable; falling back to query path: %s",
+          error.message
+        );
+      } else {
+        throw new Error(`getArticlesForFeed rpc: ${error.message}`);
+      }
+    } else {
+      return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+    }
+  }
+
   let query = db
     .from("articles")
     .select("*")
     .eq("category", category)
     .eq("tagged", true)
+    .is("deleted_at", null)
     .order("quality_score", { ascending: false })
     .limit(limit);
 
@@ -553,13 +593,39 @@ export async function getUntaggedArticlesForFeed(
   category: Category | typeof RECIPE_CATEGORY,
   limit: number,
   excludeIds: string[] = [],
-  contentKinds?: ArticleContentKind[]
+  contentKinds?: ArticleContentKind[],
+  userId?: string
 ): Promise<StoredArticle[]> {
+  if (userId && isSeenTableReadsEnabled && isFeedSeenRpcAvailable) {
+    const { data, error } = await db.rpc("get_feed_articles_for_user", {
+      p_category: category,
+      p_limit: limit,
+      p_user_id: userId,
+      p_tagged: false,
+      p_content_kinds: contentKinds && contentKinds.length > 0 ? contentKinds : null,
+      p_exclude_ids: excludeIds,
+    });
+    if (error) {
+      if (isMissingFeedSeenRpc(error.message)) {
+        isFeedSeenRpcAvailable = false;
+        console.warn(
+          "[getUntaggedArticlesForFeed] RPC unavailable; falling back to query path: %s",
+          error.message
+        );
+      } else {
+        throw new Error(`getUntaggedArticlesForFeed rpc: ${error.message}`);
+      }
+    } else {
+      return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+    }
+  }
+
   let query = db
     .from("articles")
     .select("*")
     .eq("category", category)
     .eq("tagged", false)
+    .is("deleted_at", null)
     .order("fetched_at", { ascending: false })
     .limit(limit);
 
@@ -577,6 +643,41 @@ export async function getUntaggedArticlesForFeed(
   const { data, error } = await query;
   if (error) throw new Error(`getUntaggedArticlesForFeed: ${error.message}`);
   return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
+}
+
+/**
+ * Recent tagged articles in the same storage category (excludes one id). For reading-rail "related" links.
+ */
+export async function listRecentTaggedInCategory(params: {
+  category: string;
+  excludeArticleId: string;
+  limit: number;
+}): Promise<{ id: string; headline: string; category: string }[]> {
+  const cap = Math.min(10, Math.max(1, Math.trunc(params.limit)));
+  let query = db
+    .from("articles")
+    .select("id, headline, category")
+    .eq("category", params.category)
+    .eq("tagged", true)
+    .is("deleted_at", null)
+    .neq("id", params.excludeArticleId)
+    .order("fetched_at", { ascending: false })
+    .limit(cap);
+
+  if (params.category === RECIPE_CATEGORY) {
+    query = query.eq("content_kind", "recipe");
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`listRecentTaggedInCategory: ${error.message}`);
+  return (data ?? []).map((row) => {
+    const r = row as { id: string; headline: string; category: string };
+    return {
+      id: r.id,
+      headline: r.headline,
+      category: r.category,
+    };
+  });
 }
 
 function shuffleInPlace<T>(items: T[]): void {
@@ -601,6 +702,7 @@ export async function getRandomAvailableArticles(
   let query = db
     .from("articles")
     .select("*")
+    .is("deleted_at", null)
     .limit(cap);
 
   if (excludeIds.length > 0) {
@@ -628,6 +730,7 @@ export async function getRandomArticlesResurfacing(
   let query = db
     .from("articles")
     .select("*")
+    .is("deleted_at", null)
     .limit(cap);
   if (contentKinds && contentKinds.length > 0) {
     query = query.in("content_kind", contentKinds);
@@ -650,7 +753,8 @@ export async function countAvailableByCategory(): Promise<
   const { data, error } = await db
     .from("articles")
     .select("category")
-    .eq("tagged", true);
+    .eq("tagged", true)
+    .is("deleted_at", null);
 
   if (error) throw new Error(`countAvailableByCategory: ${error.message}`);
 
@@ -672,7 +776,8 @@ export async function getAvailableStockSnapshotByCategory(): Promise<
   const { data, error } = await db
     .from("articles")
     .select("category,fetched_at")
-    .eq("tagged", true);
+    .eq("tagged", true)
+    .is("deleted_at", null);
 
   if (error) {
     throw new Error(`getAvailableStockSnapshotByCategory: ${error.message}`);
@@ -769,6 +874,7 @@ export async function getArticleById(
     .from("articles")
     .select("*")
     .eq("id", id)
+    .is("deleted_at", null)
     .single();
 
   if (error || !data) return null;
@@ -793,6 +899,7 @@ export async function listCreatorPublishedArticles(
     .select("id, headline, category, content_kind, fetched_at")
     .eq("author_user_id", authorUserId)
     .eq("source", "creator")
+    .is("deleted_at", null)
     .order("fetched_at", { ascending: false });
   if (error) throw new Error(`listCreatorPublishedArticles: ${error.message}`);
   return (data as {
@@ -820,7 +927,8 @@ export async function getCreatorArticleEngagementTotals(authorUserId: string): P
     .from("articles")
     .select("id")
     .eq("author_user_id", authorUserId)
-    .eq("source", "creator");
+    .eq("source", "creator")
+    .is("deleted_at", null);
   if (error) throw new Error(`getCreatorArticleEngagementTotals articles: ${error.message}`);
   const ids = (rows as { id: string }[] | null)?.map((r) => r.id) ?? [];
   if (ids.length === 0) return { totalLikes: 0, totalSaves: 0 };
@@ -850,6 +958,7 @@ export async function getUntaggedArticles(
     .from("articles")
     .select("*")
     .eq("tagged", false)
+    .is("deleted_at", null)
     .limit(limit);
 
   if (error) throw new Error(`getUntaggedArticles: ${error.message}`);

@@ -30,6 +30,12 @@ import { ShareMenu } from "@/components/articles/ShareMenu";
 
 const HERO_IMG_W = 800;
 const HERO_IMG_H = 450;
+const isScrollDepthTelemetryEnabled =
+  process.env.NEXT_PUBLIC_ENGAGEMENT_SCROLL_DEPTH_ENABLED == null
+    ? true
+    : process.env.NEXT_PUBLIC_ENGAGEMENT_SCROLL_DEPTH_ENABLED === "1" ||
+      process.env.NEXT_PUBLIC_ENGAGEMENT_SCROLL_DEPTH_ENABLED.toLowerCase() ===
+        "true";
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
@@ -180,6 +186,7 @@ export default function ArticleCard({
   const read30LoggedRef = useRef(false);
   const read75LoggedRef = useRef(false);
   const dwellLoggedRef = useRef(false);
+  const scrollMilestonesLoggedRef = useRef<Set<number>>(new Set());
   const visibleSinceRef = useRef<number | null>(null);
   const visibleAccumMsRef = useRef(0);
 
@@ -292,7 +299,14 @@ export default function ArticleCard({
 
   const emitEngagement = useCallback(
     (
-      eventType: "impression" | "open" | "read_30s" | "read_75pct" | "read_dwell",
+      eventType:
+        | "impression"
+        | "open"
+        | "click_through"
+        | "scroll_depth"
+        | "read_30s"
+        | "read_75pct"
+        | "read_dwell",
       eventValue?: number
     ) => {
       if (!userApiAllowed) return;
@@ -301,7 +315,10 @@ export default function ArticleCard({
         articleId,
         eventType,
         eventValue: eventValue ?? null,
-        context: engagementContext,
+        context:
+          eventType === "scroll_depth"
+            ? { ...engagementContext, scrollDepth: eventValue }
+            : engagementContext,
       });
     },
     [articleId, engagementContext]
@@ -313,12 +330,17 @@ export default function ArticleCard({
     emitEngagement("open");
   }, [emitEngagement]);
 
+  const markClickThrough = useCallback(() => {
+    emitEngagement("click_through", 1);
+  }, [emitEngagement]);
+
   useEffect(() => {
     impressionLoggedRef.current = false;
     openLoggedRef.current = false;
     read30LoggedRef.current = false;
     read75LoggedRef.current = false;
     dwellLoggedRef.current = false;
+    scrollMilestonesLoggedRef.current = new Set();
     visibleSinceRef.current = null;
     visibleAccumMsRef.current = 0;
   }, [articleId]);
@@ -453,6 +475,15 @@ export default function ArticleCard({
 
       const viewedBottom = vh - rect.top;
       const ratio = Math.max(0, Math.min(1, viewedBottom / Math.max(rect.height, 1)));
+      if (isScrollDepthTelemetryEnabled) {
+        const milestones = [0.25, 0.5, 0.75, 1] as const;
+        for (const milestone of milestones) {
+          if (ratio < milestone) continue;
+          if (scrollMilestonesLoggedRef.current.has(milestone)) continue;
+          scrollMilestonesLoggedRef.current.add(milestone);
+          emitEngagement("scroll_depth", milestone);
+        }
+      }
       if (ratio >= 0.75) {
         read75LoggedRef.current = true;
         emitEngagement("read_75pct", ratio);
@@ -807,7 +838,10 @@ export default function ArticleCard({
             onMouseLeave={(e) => {
               e.currentTarget.style.color = "#0d0d0d";
             }}
-            onClick={() => markOpen()}
+            onClick={() => {
+              markOpen();
+              markClickThrough();
+            }}
           >
             {article.headline}
           </a>
@@ -1273,7 +1307,10 @@ export default function ArticleCard({
                 target="_blank"
                 rel="noopener noreferrer"
                 style={sourceLinkStyle}
-                onClick={() => markOpen()}
+                onClick={() => {
+                  markOpen();
+                  markClickThrough();
+                }}
               >
                 {sourceLinkLabel(u)}
               </a>

@@ -9,6 +9,10 @@
     ".": "./src/index.ts",
     "./constants": "./src/constants.ts",
     "./games/types": "./src/games/types.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./schemas/validation": "./src/schemas/validation.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   }
 }

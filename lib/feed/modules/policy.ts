@@ -1,5 +1,12 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
-import type { GeneratedImageModuleData } from "@/lib/types";
+import type {
+  GeneratedImageModuleData,
+  IconFractalModuleData,
+} from "@/lib/types";
+
+const INLINE_BREATHER_MIN_GAP_PX = 145;
+const INLINE_BREATHER_MAX_GAP_PX = 360;
+const INLINE_ICON_FRACTAL_MIN_GAP_PX = 361;
 
 export interface ModulePolicyInput {
   seed: number;
@@ -49,9 +56,19 @@ export function chooseGapIntervalModuleType(input: {
 
 /** Inline column balance: follow layout hint when todo is enabled. */
 export function chooseInlineModuleType(input: {
-  layoutHint: "generated_art" | "todo";
+  layoutHint: "generated_art" | "todo" | "editorial_breather";
   todoEnabled: boolean;
-}): "todo" | "generated_art" {
+  inlineGapPx: number;
+  residualGapPx: number;
+}): "todo" | "generated_art" | "editorial_breather" | "icon_fractal" {
+  // Small-to-medium gaps feel best with a subtle editorial breather.
+  const effectiveGap = Math.max(input.inlineGapPx, input.residualGapPx);
+  if (
+    effectiveGap >= INLINE_BREATHER_MIN_GAP_PX &&
+    effectiveGap <= INLINE_BREATHER_MAX_GAP_PX
+  )
+    return "editorial_breather";
+  if (effectiveGap >= INLINE_ICON_FRACTAL_MIN_GAP_PX) return "icon_fractal";
   if (!input.todoEnabled) return "generated_art";
   return input.layoutHint === "todo" ? "todo" : "generated_art";
 }
@@ -62,16 +79,30 @@ export function buildGeneratedImageModuleData(input: {
 }): GeneratedImageModuleData {
   const location = (input.location ?? "").trim() || "Global";
   const category = (input.category ?? "").trim() || "feature";
+  const seedKey = `${category}|${location}|inline-fun`;
   const prompt = `Editorial newspaper illustration, ${category} mood, ${location}, textured ink and watercolor, no text`;
-  const imageUrl =
+  const pollinationsUrl =
     pollinationsImageUrl(prompt, 1200, 700, {
       category,
       location,
-    }) ?? picsumFallbackUrl(`${category}|${location}|inline-fun`, 1200, 700);
+    });
+  const primaryFallbackUrl = picsumFallbackUrl(seedKey, 1200, 700);
+  const fallbackImageUrl = picsumFallbackUrl(`${seedKey}|curio-backup`, 1200, 700);
+  const imageUrl = pollinationsUrl ?? primaryFallbackUrl;
   return {
     mode: "generated_art",
     title: "Daily Curio",
     subtitle: "A playful visual to fill the page rhythm.",
     imageUrl,
+    fallbackImageUrl,
+  };
+}
+
+export function buildIconFractalModuleData(input: {
+  seed: number;
+}): IconFractalModuleData {
+  return {
+    mode: "icon_fractal",
+    seed: Math.abs(Math.trunc(input.seed)),
   };
 }

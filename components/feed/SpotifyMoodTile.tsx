@@ -18,16 +18,21 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
 
   return (
     <section
+      className="gs-card-lift"
       style={{
-        borderTop: "3px double #1a1a1a",
-        borderBottom: "2px solid #1a1a1a",
+        borderTop: "3px double var(--gs-ink-strong)",
+        borderBottom: "2px solid var(--gs-ink-strong)",
+        borderLeft: "1px solid var(--gs-border)",
+        borderRight: "1px solid var(--gs-border)",
+        borderRadius: "var(--gs-radius-sm)",
         backgroundImage: hasBackgroundImage
           ? `linear-gradient(rgba(247,243,234,0.9), rgba(247,243,234,0.95)), url("${data.imageUrl}")`
           : undefined,
         backgroundSize: hasBackgroundImage ? "cover" : undefined,
         backgroundPosition: hasBackgroundImage ? "center" : undefined,
-        backgroundColor: "#f7f3ea",
+        backgroundColor: "var(--gs-surface-soft)",
         padding: "0.95rem 1rem",
+        boxShadow: "0 8px 20px rgba(20, 15, 10, 0.08)",
       }}
       aria-label="Spotify mood module"
     >
@@ -37,7 +42,7 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
           alignItems: "baseline",
           justifyContent: "space-between",
           gap: "0.75rem",
-          borderBottom: "1px solid #d7d0c1",
+          borderBottom: "1px solid var(--gs-border)",
           paddingBottom: "0.4rem",
           marginBottom: "0.75rem",
         }}
@@ -135,17 +140,27 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
               <th
                 style={{
                   textAlign: "left",
-                  borderBottom: "1px solid #d7d0c1",
+                  borderBottom: "1px solid var(--gs-border)",
                   padding: "0.25rem 0.35rem",
                   fontWeight: 700,
                 }}
               >
-                Song - Artist
+                Song
               </th>
               <th
                 style={{
                   textAlign: "left",
-                  borderBottom: "1px solid #d7d0c1",
+                  borderBottom: "1px solid var(--gs-border)",
+                  padding: "0.25rem 0.35rem",
+                  fontWeight: 700,
+                }}
+              >
+                Artist
+              </th>
+              <th
+                style={{
+                  textAlign: "left",
+                  borderBottom: "1px solid var(--gs-border)",
                   padding: "0.25rem 0.35rem",
                   fontWeight: 700,
                 }}
@@ -157,17 +172,20 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
           <tbody>
             {data.tracks.slice(0, 6).map((track) => (
               <tr key={track.id}>
-                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid #ece7dc" }}>
+                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid var(--gs-border)" }}>
                   <a
                     href={track.spotifyUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ color: "#1a472a", textDecoration: "none" }}
                   >
-                    {track.name} - {track.artist}
+                    {track.name}
                   </a>
                 </td>
-                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid #ece7dc" }}>
+                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid var(--gs-border)" }}>
+                  {track.artist}
+                </td>
+                <td style={{ padding: "0.3rem 0.35rem", borderBottom: "1px solid var(--gs-border)" }}>
                   {track.albumName ?? "Unknown album"}
                 </td>
               </tr>

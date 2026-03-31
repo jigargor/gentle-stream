@@ -37,11 +37,16 @@ export default function TodoCard({ data, reason }: TodoCardProps) {
 
   return (
     <section
+      className="gs-card-lift"
       style={{
-        borderTop: "3px double #1a1a1a",
-        borderBottom: "2px solid #1a1a1a",
-        background: "#f7f3ea",
+        borderTop: "3px double var(--gs-ink-strong)",
+        borderBottom: "2px solid var(--gs-ink-strong)",
+        borderLeft: "1px solid var(--gs-border)",
+        borderRight: "1px solid var(--gs-border)",
+        borderRadius: "var(--gs-radius-sm)",
+        background: "var(--gs-surface-soft)",
         padding: "0.95rem 1rem",
+        boxShadow: "0 8px 20px rgba(20, 15, 10, 0.08)",
       }}
       aria-label="Daily to-do module"
     >
@@ -51,7 +56,7 @@ export default function TodoCard({ data, reason }: TodoCardProps) {
           alignItems: "baseline",
           justifyContent: "space-between",
           gap: "0.75rem",
-          borderBottom: "1px solid #d7d0c1",
+          borderBottom: "1px solid var(--gs-border)",
           paddingBottom: "0.4rem",
           marginBottom: "0.75rem",
         }}
@@ -137,7 +142,8 @@ export default function TodoCard({ data, reason }: TodoCardProps) {
           onChange={(event) => setNewItemLabel(event.target.value)}
           placeholder="Add a to-do..."
           style={{
-            border: "1px solid #d7d0c1",
+            border: "1px solid var(--gs-border)",
+            borderRadius: "var(--gs-radius-sm)",
             padding: "0.26rem 0.4rem",
             flex: 1,
             minWidth: 0,
@@ -159,8 +165,9 @@ export default function TodoCard({ data, reason }: TodoCardProps) {
             }
           }}
           style={{
-            border: "1px solid #1a1a1a",
-            background: "#faf8f3",
+            border: "1px solid var(--gs-border-strong)",
+            background: "var(--gs-surface-elevated)",
+            borderRadius: "var(--gs-radius-pill)",
             cursor: "pointer",
             fontSize: "0.72rem",
             padding: "0.26rem 0.48rem",

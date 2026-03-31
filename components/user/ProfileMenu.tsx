@@ -632,6 +632,7 @@ export function ProfileMenu({
       }}
     >
       <button
+        className="gs-interactive gs-focus-ring"
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -769,6 +770,7 @@ export function ProfileMenu({
         <div
           role="dialog"
           aria-label="Profile and library"
+          className="gs-card-lift"
           style={{
             position: "absolute",
             right: 0,
@@ -776,9 +778,10 @@ export function ProfileMenu({
             width: "min(340px, 94vw)",
             maxHeight: "min(78vh, 640px)",
             overflowY: "auto",
-            background: "#faf8f3",
-            border: "1.5px solid #1a1a1a",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+            background: "var(--gs-surface-elevated)",
+            border: "1px solid var(--gs-border-strong)",
+            borderRadius: "var(--gs-radius-lg)",
+            boxShadow: "var(--gs-shadow-popover)",
             padding: "1rem 1rem 0.9rem",
             zIndex: 200,
             textAlign: "left",
@@ -890,6 +893,7 @@ export function ProfileMenu({
 
           <div style={{ margin: "0.2rem 0 1rem" }}>
             <button
+              className="gs-interactive gs-focus-ring"
               type="button"
               onClick={() => setGameSettingsOpen(true)}
               style={{
@@ -1645,7 +1649,7 @@ export function ProfileMenu({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.42)",
+            background: "rgba(9, 7, 4, 0.46)",
             zIndex: 9999,
             display: "flex",
             alignItems: "center",
@@ -1656,9 +1660,10 @@ export function ProfileMenu({
           <div
             style={{
               width: "min(520px, 96vw)",
-              background: "#faf8f3",
-              border: "1.5px solid #1a1a1a",
-              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              background: "var(--gs-surface-elevated)",
+              border: "1px solid var(--gs-border-strong)",
+              borderRadius: "var(--gs-radius-lg)",
+              boxShadow: "var(--gs-shadow-overlay)",
               padding: "1rem 1rem 0.9rem",
               maxHeight: "min(82vh, 720px)",
               overflowY: "auto",
@@ -1698,12 +1703,14 @@ export function ProfileMenu({
                 </div>
               </div>
               <button
+                className="gs-interactive gs-focus-ring"
                 type="button"
                 onClick={() => setGameSettingsOpen(false)}
                 style={{
-                  border: "1px solid #1a1a1a",
-                  background: "transparent",
-                  padding: "0.35rem 0.6rem",
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-soft)",
+                  borderRadius: "var(--gs-radius-pill)",
+                  padding: "0.35rem 0.7rem",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
                   textTransform: "uppercase",
@@ -1747,7 +1754,7 @@ export function ProfileMenu({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.42)",
+            background: "rgba(9, 7, 4, 0.46)",
             zIndex: 9999,
             display: "flex",
             alignItems: "center",
@@ -1758,9 +1765,10 @@ export function ProfileMenu({
           <div
             style={{
               width: "min(620px, 96vw)",
-              background: "#faf8f3",
-              border: "1.5px solid #1a1a1a",
-              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              background: "var(--gs-surface-elevated)",
+              border: "1px solid var(--gs-border-strong)",
+              borderRadius: "var(--gs-radius-lg)",
+              boxShadow: "var(--gs-shadow-overlay)",
               padding: "1rem 1rem 0.9rem",
               maxHeight: "min(86vh, 760px)",
               overflowY: "auto",
@@ -1774,12 +1782,14 @@ export function ProfileMenu({
               }}
             >
               <button
+                className="gs-interactive gs-focus-ring"
                 type="button"
                 onClick={() => setFeedModuleModal(null)}
                 style={{
-                  border: "1px solid #1a1a1a",
-                  background: "transparent",
-                  padding: "0.35rem 0.6rem",
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-soft)",
+                  borderRadius: "var(--gs-radius-pill)",
+                  padding: "0.35rem 0.7rem",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
                   textTransform: "uppercase",
@@ -1821,6 +1831,7 @@ export function ProfileMenu({
                   data={weatherModuleData}
                   reason="singleton"
                   weatherUnitSystem={profile?.weatherUnitSystem ?? "metric"}
+                  embedded
                 />
               ) : (
                 <p

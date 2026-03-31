@@ -9,6 +9,7 @@ interface WeatherCardProps {
   data: WeatherFillerData;
   reason: "gap" | "interval" | "singleton";
   weatherUnitSystem?: "metric" | "imperial";
+  embedded?: boolean;
 }
 
 interface WeatherPanel {
@@ -73,6 +74,36 @@ function formatTemperature(
   return `${Math.round(convertFromCelsius(valueC, unitSystem))}\u00b0${unitLabel}`;
 }
 
+function formatWindSpeed(
+  valueKph: number | undefined,
+  unitSystem: "metric" | "imperial"
+): string {
+  if (typeof valueKph !== "number") return "--";
+  if (unitSystem === "metric") return `${Math.round(valueKph)} km/h`;
+  const mph = valueKph / 1.60934;
+  return `${Math.round(mph)} mph`;
+}
+
+function formatPrecipAmount(
+  valueMm: number | undefined,
+  unitSystem: "metric" | "imperial"
+): string {
+  if (typeof valueMm !== "number") return "--";
+  if (unitSystem === "metric") return `${Math.round(valueMm * 10) / 10} mm`;
+  const inches = valueMm / 25.4;
+  return `${Math.round(inches * 100) / 100} in`;
+}
+
+function formatVisibility(
+  valueKm: number | undefined,
+  unitSystem: "metric" | "imperial"
+): string {
+  if (typeof valueKm !== "number") return "--";
+  if (unitSystem === "metric") return `${Math.round(valueKm * 10) / 10} km`;
+  const miles = valueKm / 1.60934;
+  return `${Math.round(miles * 10) / 10} mi`;
+}
+
 function getTimeZoneAbbreviation(date: Date, timezoneIana: string | undefined): string {
   if (!timezoneIana) return "";
   try {
@@ -96,7 +127,12 @@ function isInteractiveElement(target: EventTarget | null): boolean {
   );
 }
 
-export default function WeatherCard({ data, reason, weatherUnitSystem }: WeatherCardProps) {
+export default function WeatherCard({
+  data,
+  reason,
+  weatherUnitSystem,
+  embedded = false,
+}: WeatherCardProps) {
   const googlePlacesApiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY?.trim() ?? "";
   const placesAutofillFlag = readTruthyFlag(
     process.env.NEXT_PUBLIC_GOOGLE_PLACES_AUTOFILL_ENABLED,
@@ -221,7 +257,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
 
       <div
         style={{
-          borderLeft: "1px solid #ddd2bc",
+          borderLeft: "1px solid var(--gs-border)",
           paddingLeft: "0.8rem",
           fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
           fontSize: "0.8rem",
@@ -235,7 +271,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
         </div>
         <div>
           Wind:{" "}
-          {typeof weatherData.windKph === "number" ? `${weatherData.windKph} km/h` : "--"}
+          {formatWindSpeed(weatherData.windKph, resolvedUnitSystem)}
         </div>
         <div style={{ marginTop: "0.25rem", color: "#7d735f" }}>{weatherData.subtitle}</div>
       </div>
@@ -248,34 +284,31 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
         display: "grid",
         gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
         gap: "0.55rem",
-        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        fontSize: "0.8rem",
-        color: "#433c31",
       }}
     >
-      <div>
+      <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Feels like:{" "}
         {formatTemperature(weatherData.feelsLikeC, resolvedUnitSystem)}
       </div>
-      <div>
+      <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Precip chance:{" "}
         {typeof weatherData.precipChancePct === "number" ? `${weatherData.precipChancePct}%` : "--"}
       </div>
-      <div>
+      <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Precip amount:{" "}
-        {typeof weatherData.precipAmountMm === "number" ? `${weatherData.precipAmountMm} mm` : "--"}
+        {formatPrecipAmount(weatherData.precipAmountMm, resolvedUnitSystem)}
       </div>
-      <div>
+      <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Visibility:{" "}
-        {typeof weatherData.visibilityKm === "number" ? `${weatherData.visibilityKm} km` : "--"}
+        {formatVisibility(weatherData.visibilityKm, resolvedUnitSystem)}
       </div>
-      <div>
+      <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Cloud cover:{" "}
         {typeof weatherData.cloudCoverPct === "number" ? `${weatherData.cloudCoverPct}%` : "--"}
       </div>
-      <div>
+      <div style={{ border: "1px solid var(--gs-border)", borderRadius: "var(--gs-radius-sm)", padding: "0.42rem 0.5rem", fontFamily: "'IBM Plex Sans', system-ui, sans-serif", fontSize: "0.8rem", color: "#433c31", background: "rgba(255,255,255,0.46)" }}>
         Wind:{" "}
-        {typeof weatherData.windKph === "number" ? `${weatherData.windKph} km/h` : "--"}
+        {formatWindSpeed(weatherData.windKph, resolvedUnitSystem)}
       </div>
     </div>
   );
@@ -289,7 +322,8 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
           <div
             key={`${alert.title}-${idx}`}
             style={{
-              border: "1px solid #dbcdb2",
+              border: "1px solid var(--gs-border)",
+              borderRadius: "var(--gs-radius-sm)",
               background: "#fff8ef",
               padding: "0.5rem 0.55rem",
               marginBottom: "0.45rem",
@@ -328,9 +362,9 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
         <div
           key={entry.isoTime}
           style={{
-            border: "1px solid #ddd2bc",
+            border: "1px solid var(--gs-border)",
             background: "linear-gradient(180deg, #fcf8ef 0%, #f4eddf 100%)",
-            borderRadius: "0.55rem",
+            borderRadius: "var(--gs-radius-sm)",
             padding: "0.45rem 0.42rem",
             display: "flex",
             flexDirection: "column",
@@ -371,9 +405,9 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
         <div
           key={entry.isoDate}
           style={{
-            border: "1px solid #ddd2bc",
+            border: "1px solid var(--gs-border)",
             background: "linear-gradient(180deg, #fcf8ef 0%, #f4eddf 100%)",
-            borderRadius: "0.6rem",
+            borderRadius: "var(--gs-radius-sm)",
             padding: "0.5rem 0.45rem",
             display: "flex",
             flexDirection: "column",
@@ -443,13 +477,19 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
 
   return (
     <section
+      className="gs-card-lift"
       style={{
-        borderTop: "3px double #1a1a1a",
-        borderBottom: "2px solid #1a1a1a",
+        borderTop: embedded ? "none" : "3px double var(--gs-ink-strong)",
+        borderBottom: embedded ? "none" : "2px solid var(--gs-ink-strong)",
+        borderLeft: embedded ? "none" : "1px solid var(--gs-border)",
+        borderRight: embedded ? "none" : "1px solid var(--gs-border)",
+        borderRadius: "var(--gs-radius-md)",
         background:
           "radial-gradient(circle at 10% 10%, #fff8e8 0%, #f6f0e2 38%, #f0e9db 100%)",
         padding: "0.95rem 1rem",
-        boxShadow: "inset 0 0 0 1px rgba(94,83,62,0.08), inset 0 14px 28px rgba(255,255,255,0.35)",
+        boxShadow: embedded
+          ? "inset 0 0 0 1px rgba(94,83,62,0.06), inset 0 14px 28px rgba(255,255,255,0.3)"
+          : "0 8px 20px rgba(20, 15, 10, 0.1), inset 0 0 0 1px rgba(94,83,62,0.08), inset 0 14px 28px rgba(255,255,255,0.35)",
       }}
       aria-label="Weather card"
     >
@@ -459,7 +499,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
           alignItems: "flex-start",
           justifyContent: "space-between",
           gap: "0.75rem",
-          borderBottom: "1px solid #d7d0c1",
+          borderBottom: "1px solid var(--gs-border)",
           paddingBottom: "0.4rem",
           marginBottom: "0.75rem",
         }}
@@ -496,7 +536,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                     ariaLabel="Weather tile location"
                     placeholder="Set location"
                     inputStyle={{
-                      border: "1px solid #d7d0c1",
+                      border: "1px solid var(--gs-border)",
                       padding: "0.16rem 0.3rem",
                       fontSize: "0.64rem",
                       fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
@@ -513,7 +553,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                     onChange={(event) => setLocationInput(event.target.value)}
                     placeholder="Set location"
                     style={{
-                      border: "1px solid #d7d0c1",
+                      border: "1px solid var(--gs-border)",
                       padding: "0.16rem 0.3rem",
                       fontSize: "0.64rem",
                       fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
@@ -533,7 +573,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                 aria-label="Save weather location"
                 title="Save weather location"
                 style={{
-                  border: "1px solid #c8bea9",
+                  border: "1px solid var(--gs-border)",
                   background: "#f7f3ea",
                   color: "#6a614f",
                   minWidth: "1.55rem",
@@ -573,7 +613,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                 aria-label="Edit weather location"
                 title="Edit weather location"
                 style={{
-                  border: "1px solid #c8bea9",
+                  border: "1px solid var(--gs-border)",
                   background: "#f7f3ea",
                   color: "#6a614f",
                   width: "1.05rem",
@@ -650,7 +690,12 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
             setHoverHalf(event.clientX < rect.left + rect.width / 2 ? "left" : "right");
           }}
           onMouseLeave={() => setHoverHalf(null)}
-          style={{ minHeight: 240, touchAction: "pan-y", position: "relative" }}
+          style={{
+            minHeight: 240,
+            touchAction: "pan-y",
+            position: "relative",
+            transition: "transform var(--gs-motion-normal) var(--gs-ease-spring)",
+          }}
         >
           <div
             style={{
@@ -686,6 +731,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
               }}
             />
             <button
+              className="gs-focus-ring"
               type="button"
               onClick={() => movePanel(-1)}
               aria-label="Previous weather panel"
@@ -706,9 +752,13 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                 cursor: "pointer",
                 opacity: hoveredArrow === "prev" || hoverHalf === "left" ? 0.9 : 0.24,
                 transition:
-                  "opacity 180ms ease, transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 220ms ease, box-shadow 220ms ease",
+                  "opacity 180ms ease, transform 260ms var(--gs-ease-spring), background-color 220ms ease, box-shadow 220ms ease, filter 220ms ease",
                 boxShadow: "none",
                 backdropFilter: "none",
+                filter:
+                  hoveredArrow === "prev" || hoverHalf === "left"
+                    ? "drop-shadow(0 6px 10px rgba(24,18,11,0.22))"
+                    : "none",
                 fontSize: "1.4rem",
                 zIndex: 2,
               }}
@@ -729,6 +779,7 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
               {panelTitle}
             </span>
             <button
+              className="gs-focus-ring"
               type="button"
               onClick={() => movePanel(1)}
               aria-label="Next weather panel"
@@ -749,9 +800,13 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                 cursor: "pointer",
                 opacity: hoveredArrow === "next" || hoverHalf === "right" ? 0.9 : 0.24,
                 transition:
-                  "opacity 180ms ease, transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 220ms ease, box-shadow 220ms ease",
+                  "opacity 180ms ease, transform 260ms var(--gs-ease-spring), background-color 220ms ease, box-shadow 220ms ease, filter 220ms ease",
                 boxShadow: "none",
                 backdropFilter: "none",
+                filter:
+                  hoveredArrow === "next" || hoverHalf === "right"
+                    ? "drop-shadow(0 6px 10px rgba(24,18,11,0.22))"
+                    : "none",
                 fontSize: "1.4rem",
                 zIndex: 2,
               }}
@@ -770,18 +825,22 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
           >
             {panels.map((panel, idx) => (
               <button
+                className="gs-focus-ring"
                 key={panel.id}
                 type="button"
                 aria-label={`Go to ${panel.title} panel`}
                 onClick={() => setActivePanel(idx)}
                 style={{
-                  width: "0.42rem",
-                  height: "0.42rem",
+                  width: "0.5rem",
+                  height: "0.5rem",
                   borderRadius: "999px",
-                  border: "none",
-                  background: idx === boundedPanel ? "#1f1f1f" : "#c3b9a6",
+                  border: idx === boundedPanel ? "1px solid rgba(0,0,0,0.2)" : "none",
+                  background: idx === boundedPanel ? "#1f1f1f" : "#b6ab96",
                   cursor: "pointer",
                   padding: 0,
+                  transform: idx === boundedPanel ? "scale(1.16)" : "scale(1)",
+                  transition:
+                    "transform var(--gs-motion-fast) var(--gs-ease-spring), background var(--gs-motion-fast) var(--gs-ease-standard)",
                 }}
               />
             ))}
@@ -799,7 +858,8 @@ export default function WeatherCard({ data, reason, weatherUnitSystem }: Weather
                 width: "100%",
                 maxHeight: "220px",
                 objectFit: "cover",
-                border: "1px solid #d7d0c1",
+                border: "1px solid var(--gs-border)",
+                borderRadius: "var(--gs-radius-sm)",
                 marginBottom: "0.55rem",
               }}
             />

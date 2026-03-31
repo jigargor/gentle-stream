@@ -132,7 +132,7 @@ const iconActionStyle: CSSProperties = {
   border: "none",
   color: "#1a1a1a",
   cursor: "pointer",
-  borderRadius: "4px",
+  borderRadius: "var(--gs-radius-xs)",
 };
 
 interface ArticleCardProps {
@@ -787,14 +787,15 @@ export default function ArticleCard({
   return (
     <article
       ref={articleRef}
+      className="gs-card-lift"
       style={{
-        borderRight: !isHero ? "1px solid #d4cfc4" : "none",
+        borderRight: !isHero ? "1px solid var(--gs-border)" : "none",
         padding: isHero ? "1.5rem 1.6rem 1.2rem" : "1rem 1.2rem 1rem",
         display: "flex",
         flexDirection: "column",
         gap: "0.45rem",
         animation: `fadeSlideIn 0.5s ease ${index * 0.08}s both`,
-        background: "#faf8f3",
+        background: "var(--gs-surface)",
         minHeight: isHero ? "100%" : undefined,
         boxSizing: "border-box",
       }}
@@ -860,7 +861,7 @@ export default function ArticleCard({
             color: "#444",
             margin: 0,
             lineHeight: 1.42,
-            borderBottom: "1px solid #d4cfc4",
+            borderBottom: "1px solid var(--gs-border)",
             paddingBottom: "0.45rem",
           }}
         >
@@ -913,6 +914,7 @@ export default function ArticleCard({
         >
           {canSave ? (
             <button
+              className="gs-interactive gs-focus-ring"
               type="button"
               disabled={saveBusy || !saveStatusLoaded}
               onClick={() => void toggleSave()}
@@ -937,6 +939,7 @@ export default function ArticleCard({
           ) : null}
           {showLikeButton && canSave ? (
             <button
+              className="gs-interactive gs-focus-ring"
               type="button"
               disabled={likeBusy || !likeStatusLoaded}
               onClick={() => void toggleLike()}
@@ -1094,7 +1097,8 @@ export default function ArticleCard({
             width: "100%",
             height: "190px",
             overflow: "hidden",
-            border: "1px solid #ccc",
+            border: "1px solid var(--gs-border)",
+            borderRadius: "var(--gs-radius-sm)",
             background: "linear-gradient(135deg, #e8e4da 0%, #d4cfc4 100%)",
           }}
         >
@@ -1176,7 +1180,7 @@ export default function ArticleCard({
         style={{
           columns: isRecipeCard ? 1 : isHero ? 2 : 1,
           columnGap: "1.5rem",
-          columnRule: "1px solid #d4cfc4",
+          columnRule: "1px solid var(--gs-border)",
         }}
       >
         {isRecipeCard ? (
@@ -1289,7 +1293,7 @@ export default function ArticleCard({
           style={{
             marginTop: "0.65rem",
             paddingTop: "0.55rem",
-            borderTop: "1px solid #d4cfc4",
+            borderTop: "1px solid var(--gs-border)",
             fontFamily: "Georgia, serif",
             fontSize: isHero ? "0.72rem" : "0.66rem",
             color: "#666",

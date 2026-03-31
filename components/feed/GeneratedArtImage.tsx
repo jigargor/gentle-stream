@@ -10,6 +10,8 @@ interface GeneratedArtImageProps {
   className?: string;
   style?: CSSProperties;
   placeholderMinHeight?: number;
+  /** Called when the resolved image URL changes (null when showing placeholder). */
+  onActiveSourceChange?: (url: string | null) => void;
 }
 
 type ImageStage = "primary" | "fallback" | "placeholder";
@@ -22,6 +24,7 @@ export default function GeneratedArtImage({
   className,
   style,
   placeholderMinHeight = 96,
+  onActiveSourceChange,
 }: GeneratedArtImageProps) {
   const [stage, setStage] = useState<ImageStage>("primary");
 
@@ -34,6 +37,13 @@ export default function GeneratedArtImage({
     if (stage === "fallback") return fallbackSrc ?? "";
     return "";
   }, [fallbackSrc, primarySrc, stage]);
+
+  const activeUrlForDownload =
+    stage === "placeholder" || !activeSrc ? null : activeSrc;
+
+  useEffect(() => {
+    onActiveSourceChange?.(activeUrlForDownload);
+  }, [activeUrlForDownload, onActiveSourceChange]);
 
   function handleError() {
     setStage((current) => {

@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { GeneratedImageModuleData } from "@/lib/types";
+import CurioDownloadButton from "./CurioDownloadButton";
 import GeneratedArtImage from "./GeneratedArtImage";
 
 interface GeneratedArtModuleCardProps {
@@ -12,6 +14,14 @@ export default function GeneratedArtModuleCard({
   data,
   reason,
 }: GeneratedArtModuleCardProps) {
+  const [activeImageUrl, setActiveImageUrl] = useState<string | null>(
+    () => data.imageUrl
+  );
+
+  useEffect(() => {
+    setActiveImageUrl(data.imageUrl);
+  }, [data.imageUrl, data.fallbackImageUrl]);
+
   const reasonLabel =
     reason === "singleton" ? null : reason === "gap" ? "gap-fill" : "interval";
 
@@ -77,20 +87,36 @@ export default function GeneratedArtModuleCard({
       >
         {data.subtitle}
       </p>
-      <GeneratedArtImage
-        primarySrc={data.imageUrl}
-        fallbackSrc={data.fallbackImageUrl}
-        alt=""
-        loading="lazy"
-        placeholderMinHeight={180}
-        style={{
-          width: "100%",
-          maxHeight: "min(40vh, 360px)",
-          objectFit: "cover",
-          border: "1px solid var(--gs-border)",
-          borderRadius: "var(--gs-radius-sm)",
-        }}
-      />
+      <div style={{ position: "relative", width: "100%" }}>
+        <GeneratedArtImage
+          primarySrc={data.imageUrl}
+          fallbackSrc={data.fallbackImageUrl}
+          alt=""
+          loading="lazy"
+          placeholderMinHeight={180}
+          onActiveSourceChange={setActiveImageUrl}
+          style={{
+            width: "100%",
+            maxHeight: "min(40vh, 360px)",
+            objectFit: "cover",
+            border: "1px solid var(--gs-border)",
+            borderRadius: "var(--gs-radius-sm)",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: "0.5rem",
+            right: "0.5rem",
+            zIndex: 1,
+          }}
+        >
+          <CurioDownloadButton
+            sourceUrl={activeImageUrl}
+            fallbackUrls={[data.imageUrl, data.fallbackImageUrl]}
+          />
+        </div>
+      </div>
     </section>
   );
 }

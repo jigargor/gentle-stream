@@ -111,7 +111,7 @@ The ingest agent tracks real `usage.input_tokens` against a conservative per-min
 | **Unit / generator tests** | `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB. |
 | **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase; tagged test rows cleaned up in `finally`. |
 | **Security weekly audits** | Scheduled GitHub workflow `/.github/workflows/security-weekly.yml` runs `npm run security:inventory`, `npm run security:rls-audit`, and `npm run security:audit` weekly. |
-| **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (unit + component + Storybook tests, Playwright smoke, and DB integration when secrets are available). Additional workflows run **cross-browser E2E** on `develop`/`main` pushes and **nightly full E2E matrix**. |
+| **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (unit + component + Storybook tests, Playwright smoke, and DB integration when secrets are available). Additional workflows run **cross-browser E2E** on `develop` pushes/manual dispatch and a **nightly full E2E matrix**. |
 | **Vercel** | `vercel.json` sets `git.deploymentEnabled: false` so **only** the deploy workflow promotes production (no duplicate Git-triggered prod builds); crons still defined for scheduler/tagger/cleanup. |
 
 ---

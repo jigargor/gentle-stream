@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Difficulty, RabbitHolePuzzle } from "@/lib/games/types";
+import { parseEnglishWikipediaArticleTitle } from "@/lib/games/wikiReader";
 
 interface RabbitHoleCardProps {
   puzzle: RabbitHolePuzzle;
@@ -40,6 +41,16 @@ function modeFromSeed(seed: string): DesignModeOption["id"] {
   return DESIGN_MODES[hash % DESIGN_MODES.length]!.id;
 }
 
+interface ReaderFrame {
+  title: string;
+  html: string;
+}
+
+function wikipediaArticleUrl(title: string): string {
+  const segment = title.trim().replace(/\s+/g, "_");
+  return `https://en.wikipedia.org/wiki/${encodeURIComponent(segment)}`;
+}
+
 export default function RabbitHoleCard({
   puzzle,
   onNewPuzzle,
@@ -50,6 +61,9 @@ export default function RabbitHoleCard({
     modeFromSeed(puzzle.uniquenessSignature ?? puzzle.topic)
   );
   const [visitedLinks, setVisitedLinks] = useState<Record<string, boolean>>({});
+  const [readerStack, setReaderStack] = useState<ReaderFrame[]>([]);
+  const [readerLoading, setReaderLoading] = useState(false);
+  const [readerError, setReaderError] = useState<string | null>(null);
   const completionLoggedRef = useRef(false);
 
   const visitedCount = useMemo(
@@ -60,8 +74,65 @@ export default function RabbitHoleCard({
   useEffect(() => {
     setDesignMode(modeFromSeed(puzzle.uniquenessSignature ?? puzzle.topic));
     setVisitedLinks({});
+    setReaderStack([]);
+    setReaderError(null);
+    setReaderLoading(false);
     completionLoggedRef.current = false;
   }, [puzzle.uniquenessSignature, puzzle.topic]);
+
+  const currentReader = readerStack.length > 0 ? readerStack[readerStack.length - 1]! : null;
+
+  const loadWikiFromUrl = useCallback(async (wikiUrl: string) => {
+    const title = parseEnglishWikipediaArticleTitle(wikiUrl);
+    if (!title) return;
+    setReaderLoading(true);
+    setReaderError(null);
+    try {
+      const params = new URLSearchParams({ url: wikiUrl });
+      const res = await fetch(`/api/game/wiki-read?${params.toString()}`);
+      const body = (await res.json()) as { error?: string; html?: string; title?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not load article.");
+      const html = body.html;
+      if (!html) throw new Error("Empty article.");
+      setReaderStack((prev) => [
+        ...prev,
+        { title: body.title ?? title, html },
+      ]);
+    } catch (e) {
+      setReaderError(e instanceof Error ? e.message : "Could not load article.");
+    } finally {
+      setReaderLoading(false);
+    }
+  }, []);
+
+  function handleReaderClick(e: React.MouseEvent<HTMLDivElement>) {
+    const anchor = (e.target as HTMLElement | null)?.closest("a");
+    if (!anchor) return;
+    const hrefAttr = anchor.getAttribute("href") ?? "";
+    if (hrefAttr.startsWith("#")) return;
+
+    const nextTitle = parseEnglishWikipediaArticleTitle(anchor.href);
+    if (nextTitle) {
+      e.preventDefault();
+      void loadWikiFromUrl(anchor.href);
+      return;
+    }
+
+    try {
+      const u = new URL(anchor.href);
+      if (u.hostname.endsWith("wikipedia.org")) {
+        e.preventDefault();
+        window.open(anchor.href, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function handleReaderBack() {
+    setReaderStack((prev) => (prev.length <= 1 ? [] : prev.slice(0, -1)));
+    setReaderError(null);
+  }
 
   useEffect(() => {
     if (!metricsEnabled) return;
@@ -213,6 +284,185 @@ export default function RabbitHoleCard({
                 ? "rgba(255,255,255,0.55)"
                 : "rgba(255,255,255,0.72)",
           borderRadius: 8,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 280,
+          maxHeight: "min(52vh, 520px)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+            padding: "0.55rem 0.65rem",
+            borderBottom:
+              designMode === "neon-trail"
+                ? "1px solid rgba(232,121,249,0.25)"
+                : "1px solid rgba(40,40,40,0.12)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              disabled={readerStack.length === 0}
+              onClick={handleReaderBack}
+              style={{
+                border: "1px solid currentColor",
+                background: "transparent",
+                color: "inherit",
+                padding: "0.18rem 0.45rem",
+                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                fontSize: "0.65rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                cursor: readerStack.length === 0 ? "not-allowed" : "pointer",
+                opacity: readerStack.length === 0 ? 0.45 : 1,
+              }}
+            >
+              Back
+            </button>
+            <span
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.74rem",
+                fontWeight: 700,
+                maxWidth: "min(52vw, 280px)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={currentReader?.title ?? ""}
+            >
+              {currentReader ? currentReader.title : "Reader"}
+            </span>
+          </div>
+          {currentReader ? (
+            <a
+              href={wikipediaArticleUrl(currentReader.title)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                fontSize: "0.62rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: designMode === "neon-trail" ? "#f9a8d4" : "#1a472a",
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Open on Wikipedia
+            </a>
+          ) : null}
+        </div>
+
+        <div
+          style={{
+            position: "relative",
+            flex: 1,
+            overflow: "auto",
+            padding: "0.65rem 0.72rem",
+            color: designMode === "neon-trail" ? "#f5f3ff" : "#1a1a1a",
+          }}
+        >
+          {readerLoading && currentReader ? (
+            <div
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background:
+                  designMode === "neon-trail"
+                    ? "rgba(9, 3, 18, 0.72)"
+                    : "rgba(255, 255, 255, 0.82)",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.8rem",
+                fontStyle: "italic",
+              }}
+            >
+              Loading next article…
+            </div>
+          ) : null}
+          {readerLoading && !currentReader ? (
+            <p
+              style={{
+                margin: 0,
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.8rem",
+                fontStyle: "italic",
+                opacity: 0.85,
+              }}
+            >
+              Pulling article from Wikipedia…
+            </p>
+          ) : null}
+          {readerError ? (
+            <p
+              style={{
+                margin: "0 0 0.5rem",
+                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                fontSize: "0.74rem",
+                color: designMode === "neon-trail" ? "#fecaca" : "#9b2c2c",
+              }}
+            >
+              {readerError}
+            </p>
+          ) : null}
+          {!readerLoading && !currentReader ? (
+            <p
+              style={{
+                margin: 0,
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.77rem",
+                opacity: 0.88,
+              }}
+            >
+              Wikipedia blocks embedding its site in a frame, so articles load here instead. Use{" "}
+              <strong>Open gateway</strong> or a branch below to begin; tap article links to keep going
+              down the hole.
+            </p>
+          ) : null}
+          {currentReader ? (
+            <div
+              className="wiki-rabbit-hole-html"
+              onClick={handleReaderClick}
+              style={{
+                fontSize: "0.78rem",
+                lineHeight: 1.48,
+                wordBreak: "break-word",
+              }}
+              // Wikipedia HTML is fetched server-side and stripped of scripts/styles; links stay in-app when possible.
+              // eslint-disable-next-line react/no-danger
+              dangerouslySetInnerHTML={{ __html: currentReader.html }}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border:
+            designMode === "neon-trail"
+              ? "1px solid rgba(232,121,249,0.45)"
+              : designMode === "archive-desk"
+                ? "1px solid #cfb68c"
+                : "1px solid #9cb8ea",
+          background:
+            designMode === "neon-trail"
+              ? "rgba(14, 4, 31, 0.55)"
+              : designMode === "archive-desk"
+                ? "rgba(255,255,255,0.55)"
+                : "rgba(255,255,255,0.72)",
+          borderRadius: 8,
           padding: "0.7rem 0.72rem",
           display: "grid",
           gap: "0.6rem",
@@ -228,13 +478,16 @@ export default function RabbitHoleCard({
           Start article:{" "}
           <a
             href={puzzle.starterArticle}
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              void loadWikiFromUrl(puzzle.starterArticle);
+            }}
             style={{
               color: designMode === "neon-trail" ? "#f9a8d4" : "#1a472a",
               textDecoration: "underline",
               textUnderlineOffset: "2px",
               fontWeight: 700,
+              cursor: "pointer",
             }}
           >
             Open gateway
@@ -247,9 +500,11 @@ export default function RabbitHoleCard({
             <a
               key={link.href}
               href={link.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => markVisited(link.href)}
+              onClick={(e) => {
+                e.preventDefault();
+                markVisited(link.href);
+                void loadWikiFromUrl(link.href);
+              }}
               style={{
                 display: "block",
                 border:
@@ -268,6 +523,7 @@ export default function RabbitHoleCard({
                       : "rgba(255,255,255,0.82)",
                 color: designMode === "neon-trail" ? "#faf5ff" : "#1a1a1a",
                 textDecoration: "none",
+                cursor: "pointer",
               }}
             >
               <div

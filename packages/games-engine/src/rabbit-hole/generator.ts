@@ -1,4 +1,4 @@
-import type { Difficulty, RabbitHoleLink, RabbitHolePuzzle } from "../../domain/src/games/types";
+import type { Difficulty, RabbitHoleLink, RabbitHolePuzzle } from "@gentle-stream/domain/games/types";
 
 interface RabbitHoleTemplate {
   topic: string;

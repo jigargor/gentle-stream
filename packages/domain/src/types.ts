@@ -298,22 +298,6 @@ export interface GeneratedImageModuleData {
   fallbackImageUrl: string;
 }
 
-export interface EditorialBreatherModuleData {
-  mode: "editorial_breather";
-  title: string;
-  kicker?: string;
-  line: string;
-  motif: "linework" | "stamp" | "divider";
-  href?: string;
-  hrefLabel?: string;
-}
-
-export interface IconFractalModuleData {
-  mode: "icon_fractal";
-  /** Deterministic visual variation for this fractal render. */
-  seed: number;
-}
-
 export interface NasaModuleData {
   mode: "nasa" | "fallback";
   title: string;

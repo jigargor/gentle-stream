@@ -7,6 +7,10 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./sudoku/reducer": "./src/sudoku/reducer.ts"
+    "./sudoku/reducer": "./src/sudoku/reducer.ts",
+    "./rabbit-hole/generator": "./src/rabbit-hole/generator.ts"
+  },
+  "dependencies": {
+    "@gentle-stream/domain": "*"
   }
 }

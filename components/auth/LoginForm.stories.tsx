@@ -27,7 +27,7 @@ export const SessionExpired: Story = {
 
 export const MagicLinkBrowserError: Story = {
   args: {
-    initialMagicLinkBrowserError: true,
+    initialOauthBrowserError: true,
   },
 };
 

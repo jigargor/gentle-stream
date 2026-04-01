@@ -214,6 +214,7 @@ export interface GameFeedSection {
     | "nonogram"
     | "crossword"
     | "connections"
+    | "rabbit_hole"
     | "cryptic"
     | "lateral";
   difficulty: "easy" | "medium" | "hard";
@@ -222,15 +223,46 @@ export interface GameFeedSection {
   connectionsDaily?: boolean;
 }
 
+export interface WeatherAlertItem {
+  title: string;
+  severity?: string;
+  startsAt?: string;
+  endsAt?: string;
+}
+
+export interface WeatherHourlyItem {
+  isoTime: string;
+  tempC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
+export interface WeatherDailyItem {
+  isoDate: string;
+  minC: number;
+  maxC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
 export interface WeatherModuleData {
   mode: "weather" | "generated_art";
   title: string;
   subtitle: string;
   locationLabel?: string;
+  timezoneIana?: string;
   temperatureC?: number;
+  feelsLikeC?: number;
   condition?: string;
   humidity?: number;
   windKph?: number;
+  precipChancePct?: number;
+  precipAmountMm?: number;
+  visibilityKm?: number;
+  cloudCoverPct?: number;
+  alerts?: WeatherAlertItem[];
+  hourly?: WeatherHourlyItem[];
+  daily?: WeatherDailyItem[];
   imageUrl?: string;
 }
 
@@ -239,6 +271,24 @@ export interface GeneratedImageModuleData {
   title: string;
   subtitle: string;
   imageUrl: string;
+  /** Second-chance URL when primary generated art fails at runtime. */
+  fallbackImageUrl: string;
+}
+
+export interface EditorialBreatherModuleData {
+  mode: "editorial_breather";
+  title: string;
+  kicker?: string;
+  line: string;
+  motif: "linework" | "stamp" | "divider";
+  href?: string;
+  hrefLabel?: string;
+}
+
+export interface IconFractalModuleData {
+  mode: "icon_fractal";
+  /** Deterministic visual variation for this fractal render. */
+  seed: number;
 }
 
 export interface NasaModuleData {
@@ -292,6 +342,8 @@ export type FeedModuleData =
   | WeatherModuleData
   | SpotifyMoodTileData
   | GeneratedImageModuleData
+  | EditorialBreatherModuleData
+  | IconFractalModuleData
   | NasaModuleData
   | TodoModuleData;
 
@@ -332,9 +384,9 @@ export interface ArticleFeedSection {
     columnHeightsPx?: number[];
     inlineGapPx?: number;
     inlineTargetColumn?: number | null;
-    inlineSuggestedModuleType?: "generated_art" | "todo";
+    inlineSuggestedModuleType?: "generated_art" | "todo" | "editorial_breather";
     inlineModule?: {
-      moduleType: "generated_art" | "todo";
+      moduleType: "generated_art" | "todo" | "editorial_breather" | "icon_fractal";
       reason: "inline";
       targetColumn: number;
       data: FeedModuleData;
@@ -351,9 +403,23 @@ export interface ArticleFeedSection {
  */
 export interface ModuleFeedSection {
   sectionType: "module" | "filler";
-  moduleType: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
+  moduleType:
+    | "weather"
+    | "spotify"
+    | "generated_art"
+    | "editorial_breather"
+    | "icon_fractal"
+    | "nasa"
+    | "todo";
   /** Legacy compatibility: prefer moduleType going forward. */
-  fillerType?: "weather" | "spotify" | "generated_art" | "nasa" | "todo";
+  fillerType?:
+    | "weather"
+    | "spotify"
+    | "generated_art"
+    | "editorial_breather"
+    | "icon_fractal"
+    | "nasa"
+    | "todo";
   reason: "gap" | "interval" | "singleton";
   index: number;
   data: FeedModuleData;

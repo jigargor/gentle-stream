@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 
 /**
- * OAuth / magic-link `redirect_to` origin (scheme + host + optional port).
+ * OAuth / email-verification `redirect_to` origin (scheme + host + optional port).
  *
  * Import this module only from Server Components / Route Handlers — it uses `headers()`.
  *

@@ -18,9 +18,10 @@ import type {
   SpotifyMoodTileData,
   NasaModuleData,
 } from "@/lib/types";
-import WeatherFillerCard from "@/components/feed/WeatherFillerCard";
+import WeatherCard from "@/components/feed/WeatherCard";
 import SpotifyMoodTile from "@/components/feed/SpotifyMoodTile";
 import NasaApodCard from "@/components/feed/NasaApodCard";
+import PlaceAutocompleteInput from "@/components/location/PlaceAutocompleteInput";
 import { AvatarInput } from "./AvatarInput";
 
 interface ProfileMenuProps {
@@ -52,6 +53,14 @@ function formatDuration(totalSec: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
+  if (typeof input !== "string") return defaultValue;
+  const normalized = input.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
 export function ProfileMenu({
   userEmail,
   onGameRatioSaved,
@@ -59,6 +68,13 @@ export function ProfileMenu({
   onThemePreferenceToggle,
   isAdmin = false,
 }: ProfileMenuProps) {
+  const googlePlacesApiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY?.trim() ?? "";
+  const placesAutofillFlag = readTruthyFlag(
+    process.env.NEXT_PUBLIC_GOOGLE_PLACES_AUTOFILL_ENABLED,
+    false
+  );
+  const isPlacesAutofillEnabled =
+    placesAutofillFlag && googlePlacesApiKey.length > 0;
   const [open, setOpen] = useState(false);
   const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
   const [feedModuleModal, setFeedModuleModal] = useState<
@@ -70,6 +86,7 @@ export function ProfileMenu({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [themeSaving, setThemeSaving] = useState(false);
+  const [weatherUnitSaving, setWeatherUnitSaving] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [ratioDraft, setRatioDraft] = useState(0.2);
   const [profileForm, setProfileForm] = useState({
@@ -180,7 +197,11 @@ export function ProfileMenu({
     if (!open) return;
     function onDocMouseDown(e: MouseEvent) {
       const el = wrapRef.current;
-      if (el && !el.contains(e.target as Node)) setOpen(false);
+      const target = e.target;
+      if (target instanceof Element && target.closest('[data-place-autocomplete="true"]')) {
+        return;
+      }
+      if (el && !el.contains(target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -228,6 +249,39 @@ export function ProfileMenu({
       setSaveError("Could not update theme preference.");
     } finally {
       setThemeSaving(false);
+    }
+  }
+
+  async function saveWeatherUnitSystem(next: "metric" | "imperial") {
+    setSaveError(null);
+    setWeatherUnitSaving(true);
+    try {
+      const res = await fetch("/api/user/preferences", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weatherUnitSystem: next }),
+      });
+      const data = (await res.json().catch(() => ({}))) as UserProfile & { error?: string };
+      if (!res.ok) {
+        setSaveError(typeof data.error === "string" ? data.error : "Could not save units preference.");
+        return;
+      }
+      setProfile(data as UserProfile);
+      try {
+        localStorage.setItem("gentle_stream_weather_unit_system", next);
+      } catch {
+        /* ignore */
+      }
+      window.dispatchEvent(
+        new CustomEvent("gentle-stream-weather-unit-system", {
+          detail: { weatherUnitSystem: next },
+        })
+      );
+    } catch {
+      setSaveError("Could not save units preference.");
+    } finally {
+      setWeatherUnitSaving(false);
     }
   }
 
@@ -383,6 +437,7 @@ export function ProfileMenu({
   const displayGameTypes: Array<{ value: GameType; label: string; description: string }> = [
     { value: "connections", label: "Connections (daily)", description: "One daily puzzle per session." },
     { value: "crossword", label: "Crossword", description: "Mini word-square crossword." },
+    { value: "rabbit_hole", label: "Wiki rabbit hole", description: "Flashy link-chasing trivia journey." },
     { value: "sudoku", label: "Sudoku", description: "Classic 9×9 logic grid." },
     { value: "killer_sudoku", label: "Killer Sudoku", description: "Cage-sum variant." },
     { value: "word_search", label: "Word search", description: "Find themed words in a grid." },
@@ -578,6 +633,7 @@ export function ProfileMenu({
       }}
     >
       <button
+        className="gs-interactive gs-focus-ring"
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -715,6 +771,7 @@ export function ProfileMenu({
         <div
           role="dialog"
           aria-label="Profile and library"
+          className="gs-card-lift"
           style={{
             position: "absolute",
             right: 0,
@@ -722,9 +779,10 @@ export function ProfileMenu({
             width: "min(340px, 94vw)",
             maxHeight: "min(78vh, 640px)",
             overflowY: "auto",
-            background: "#faf8f3",
-            border: "1.5px solid #1a1a1a",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+            background: "var(--gs-surface-elevated)",
+            border: "1px solid var(--gs-border-strong)",
+            borderRadius: "var(--gs-radius-lg)",
+            boxShadow: "var(--gs-shadow-popover)",
             padding: "1rem 1rem 0.9rem",
             zIndex: 200,
             textAlign: "left",
@@ -836,6 +894,7 @@ export function ProfileMenu({
 
           <div style={{ margin: "0.2rem 0 1rem" }}>
             <button
+              className="gs-interactive gs-focus-ring"
               type="button"
               onClick={() => setGameSettingsOpen(true)}
               style={{
@@ -1156,21 +1215,46 @@ export function ProfileMenu({
                 >
                   Weather location
                 </label>
-                <input
-                  value={profileForm.weatherLocation}
-                  onChange={(e) =>
-                    setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
-                  }
-                  placeholder="City or region (e.g. New York)"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    marginBottom: "0.45rem",
-                    padding: "0.35rem 0.45rem",
-                    border: "1px solid #ccc",
-                    fontSize: "0.85rem",
-                  }}
-                />
+                {isPlacesAutofillEnabled ? (
+                  <PlaceAutocompleteInput
+                    value={profileForm.weatherLocation}
+                    onChange={(nextValue) =>
+                      setProfileForm((f) => ({ ...f, weatherLocation: nextValue }))
+                    }
+                    onSelect={(selection) =>
+                      setProfileForm((f) => ({
+                        ...f,
+                        weatherLocation: selection.label,
+                      }))
+                    }
+                    ariaLabel="Weather location"
+                    placeholder="Search location (e.g. New York, NY, USA)"
+                    inputStyle={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      marginBottom: "0.45rem",
+                      padding: "0.35rem 0.45rem",
+                      border: "1px solid #ccc",
+                      fontSize: "0.85rem",
+                    }}
+                  />
+                ) : (
+                  <input
+                    value={profileForm.weatherLocation}
+                    onChange={(e) =>
+                      setProfileForm((f) => ({ ...f, weatherLocation: e.target.value }))
+                    }
+                    placeholder="City or region (e.g. New York)"
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      marginBottom: "0.45rem",
+                      padding: "0.35rem 0.45rem",
+                      border: "1px solid #ccc",
+                      fontSize: "0.85rem",
+                    }}
+                  />
+                )}
                 {profile && (
                   <AvatarInput
                     userEmail={userEmail}
@@ -1286,6 +1370,52 @@ export function ProfileMenu({
             >
               {themePreference === "dark" ? "Dark mode" : "Light mode"}
             </span>
+            <div style={{ marginTop: "0.65rem" }}>
+              <div
+                style={{
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontSize: "0.72rem",
+                  color: "#666",
+                  marginBottom: "0.3rem",
+                }}
+              >
+                Units
+              </div>
+              <div
+                style={{
+                  display: "inline-flex",
+                  border: "1px solid #c8bea9",
+                  borderRadius: "999px",
+                  overflow: "hidden",
+                }}
+              >
+                {([
+                  { id: "metric", label: "Metric" },
+                  { id: "imperial", label: "Imperial" },
+                ] as const).map((unit) => {
+                  const active = (profile?.weatherUnitSystem ?? "metric") === unit.id;
+                  return (
+                    <button
+                      key={unit.id}
+                      type="button"
+                      disabled={weatherUnitSaving}
+                      onClick={() => void saveWeatherUnitSystem(unit.id)}
+                      style={{
+                        border: "none",
+                        background: active ? "#1a1a1a" : "#f5f1e8",
+                        color: active ? "#fff" : "#5d5445",
+                        fontSize: "0.66rem",
+                        padding: "0.22rem 0.5rem",
+                        cursor: weatherUnitSaving ? "wait" : "pointer",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {unit.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </section>
 
           <section style={{ marginBottom: "1rem" }}>
@@ -1520,7 +1650,7 @@ export function ProfileMenu({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.42)",
+            background: "rgba(9, 7, 4, 0.46)",
             zIndex: 9999,
             display: "flex",
             alignItems: "center",
@@ -1531,9 +1661,10 @@ export function ProfileMenu({
           <div
             style={{
               width: "min(520px, 96vw)",
-              background: "#faf8f3",
-              border: "1.5px solid #1a1a1a",
-              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              background: "var(--gs-surface-elevated)",
+              border: "1px solid var(--gs-border-strong)",
+              borderRadius: "var(--gs-radius-lg)",
+              boxShadow: "var(--gs-shadow-overlay)",
               padding: "1rem 1rem 0.9rem",
               maxHeight: "min(82vh, 720px)",
               overflowY: "auto",
@@ -1573,12 +1704,14 @@ export function ProfileMenu({
                 </div>
               </div>
               <button
+                className="gs-interactive gs-focus-ring"
                 type="button"
                 onClick={() => setGameSettingsOpen(false)}
                 style={{
-                  border: "1px solid #1a1a1a",
-                  background: "transparent",
-                  padding: "0.35rem 0.6rem",
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-soft)",
+                  borderRadius: "var(--gs-radius-pill)",
+                  padding: "0.35rem 0.7rem",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
                   textTransform: "uppercase",
@@ -1622,7 +1755,7 @@ export function ProfileMenu({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.42)",
+            background: "rgba(9, 7, 4, 0.46)",
             zIndex: 9999,
             display: "flex",
             alignItems: "center",
@@ -1633,9 +1766,10 @@ export function ProfileMenu({
           <div
             style={{
               width: "min(620px, 96vw)",
-              background: "#faf8f3",
-              border: "1.5px solid #1a1a1a",
-              boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+              background: "var(--gs-surface-elevated)",
+              border: "1px solid var(--gs-border-strong)",
+              borderRadius: "var(--gs-radius-lg)",
+              boxShadow: "var(--gs-shadow-overlay)",
               padding: "1rem 1rem 0.9rem",
               maxHeight: "min(86vh, 760px)",
               overflowY: "auto",
@@ -1649,12 +1783,14 @@ export function ProfileMenu({
               }}
             >
               <button
+                className="gs-interactive gs-focus-ring"
                 type="button"
                 onClick={() => setFeedModuleModal(null)}
                 style={{
-                  border: "1px solid #1a1a1a",
-                  background: "transparent",
-                  padding: "0.35rem 0.6rem",
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-soft)",
+                  borderRadius: "var(--gs-radius-pill)",
+                  padding: "0.35rem 0.7rem",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
                   textTransform: "uppercase",
@@ -1692,7 +1828,12 @@ export function ProfileMenu({
                   Loading weather&hellip;
                 </p>
               ) : weatherModuleData ? (
-                <WeatherFillerCard data={weatherModuleData} reason="singleton" />
+                <WeatherCard
+                  data={weatherModuleData}
+                  reason="singleton"
+                  weatherUnitSystem={profile?.weatherUnitSystem ?? "metric"}
+                  embedded
+                />
               ) : (
                 <p
                   style={{

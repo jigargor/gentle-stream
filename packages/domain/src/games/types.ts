@@ -7,6 +7,7 @@ export type GameType =
   | "nonogram"
   | "crossword"
   | "connections"
+  | "rabbit_hole"
   | "cryptic"
   | "lateral";
 
@@ -138,6 +139,25 @@ export interface ConnectionsPuzzle {
   /** Content-hash id to avoid repeating the same puzzle for users. */
   puzzleId?: string;
   /** Alias used by generic feed/game uniqueness memory. */
+  uniquenessSignature?: string;
+}
+
+// ─── Wiki Rabbit Hole ─────────────────────────────────────────────────────────
+
+export interface RabbitHoleLink {
+  title: string;
+  href: string;
+  blurb: string;
+  lure: string;
+  depth: number;
+}
+
+export interface RabbitHolePuzzle {
+  topic: string;
+  mission: string;
+  starterArticle: string;
+  links: RabbitHoleLink[];
+  difficulty: Difficulty;
   uniquenessSignature?: string;
 }
 

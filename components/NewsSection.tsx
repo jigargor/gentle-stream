@@ -26,8 +26,13 @@ interface NewsSectionProps {
 }
 
 const borderStyles = {
-  borderTop: "3px double #1a1a1a",
-  borderBottom: "2px solid #1a1a1a",
+  borderTop: "3px double var(--gs-ink-strong)",
+  borderBottom: "2px solid var(--gs-ink-strong)",
+  borderLeft: "1px solid var(--gs-border)",
+  borderRight: "1px solid var(--gs-border)",
+  borderRadius: "var(--gs-radius-sm)",
+  overflow: "hidden",
+  background: "var(--gs-surface)",
 };
 
 export default function NewsSection({
@@ -171,7 +176,7 @@ export default function NewsSection({
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
         <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
-        <div style={{ borderTop: "1px solid #d4cfc4" }} />
+        <div style={{ borderTop: "1px solid var(--gs-border)" }} />
         <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
         {inlineModule && inlineModule.targetColumn === 1 ? (
           <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />

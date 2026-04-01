@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Difficulty } from "@/lib/games/types";
+import type { Difficulty } from "@gentle-stream/domain/games/types";
 import { generateRabbitHole } from "@/lib/games/rabbitHoleGenerator";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 

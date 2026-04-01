@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Difficulty, RabbitHolePuzzle } from "@/lib/games/types";
+import type { Difficulty, RabbitHolePuzzle } from "@gentle-stream/domain/games/types";
 import {
   isAllowedEnglishWikipediaHost,
   parseEnglishWikipediaArticleTitle,

@@ -224,6 +224,28 @@ export interface GameFeedSection {
   connectionsDaily?: boolean;
 }
 
+export interface WeatherAlertItem {
+  title: string;
+  severity?: string;
+  startsAt?: string;
+  endsAt?: string;
+}
+
+export interface WeatherHourlyItem {
+  isoTime: string;
+  tempC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
+export interface WeatherDailyItem {
+  isoDate: string;
+  minC: number;
+  maxC: number;
+  condition: string;
+  precipChancePct?: number;
+}
+
 export interface WeatherModuleData {
   mode: "weather" | "generated_art";
   title: string;

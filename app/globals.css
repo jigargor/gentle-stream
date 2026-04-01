@@ -471,3 +471,16 @@ body {
     transform: none !important;
   }
 }
+
+/* In-card Wikipedia reader (Rabbit Hole): keep media inside the scroll pane */
+.wiki-rabbit-hole-html img,
+.wiki-rabbit-hole-html video {
+  max-width: 100%;
+  height: auto;
+}
+
+.wiki-rabbit-hole-html table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}

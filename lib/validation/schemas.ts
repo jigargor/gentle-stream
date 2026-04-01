@@ -39,6 +39,7 @@ export const gameTypeSchema = z.enum([
   "nonogram",
   "crossword",
   "connections",
+  "rabbit_hole",
 ]);
 
 export const gameDifficultySchema = z.enum(["easy", "medium", "hard"]);

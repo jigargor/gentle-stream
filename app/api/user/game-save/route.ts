@@ -10,9 +10,16 @@ const GAME_TYPES = new Set([
   "word_search",
   "killer_sudoku",
   "nonogram",
+  "rabbit_hole",
 ]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
-const gameTypeEnum = z.enum(["sudoku", "word_search", "killer_sudoku", "nonogram"]);
+const gameTypeEnum = z.enum([
+  "sudoku",
+  "word_search",
+  "killer_sudoku",
+  "nonogram",
+  "rabbit_hole",
+]);
 const difficultyEnum = z.enum(["easy", "medium", "hard"]);
 const gameTypeQuerySchema = z.object({ gameType: gameTypeEnum });
 const putBodySchema = z.object({

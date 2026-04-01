@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   -- Arrays stored as JSON for simplicity
   preferred_emotions TEXT[] NOT NULL DEFAULT '{}',
   preferred_locales  TEXT[] NOT NULL DEFAULT '{global}',
-  enabled_game_types TEXT[] NOT NULL DEFAULT '{sudoku,word_search,crossword,killer_sudoku,nonogram,connections}',
+  enabled_game_types TEXT[] NOT NULL DEFAULT '{sudoku,word_search,crossword,killer_sudoku,nonogram,connections,rabbit_hole}',
 
   -- Seen article IDs (prevent repeats in the feed)
   seen_article_ids   UUID[] NOT NULL DEFAULT '{}',
@@ -182,7 +182,7 @@ ALTER TABLE articles
 CREATE TABLE IF NOT EXISTS game_completions (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id           TEXT NOT NULL,
-  game_type         TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram', 'crossword', 'connections')),
+  game_type         TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram', 'crossword', 'connections', 'rabbit_hole')),
   difficulty        TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
   duration_seconds  INT NOT NULL CHECK (duration_seconds >= 0),
   score             DOUBLE PRECISION,
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS game_completions (
 CREATE TABLE IF NOT EXISTS game_saves (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id          TEXT NOT NULL,
-  game_type        TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram', 'crossword', 'connections')),
+  game_type        TEXT NOT NULL CHECK (game_type IN ('sudoku', 'word_search', 'killer_sudoku', 'nonogram', 'crossword', 'connections', 'rabbit_hole')),
   difficulty       TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
   elapsed_seconds  INT NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
   game_state       JSONB NOT NULL DEFAULT '{}',

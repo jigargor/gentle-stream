@@ -68,10 +68,10 @@ describe("/api/user/game-save", () => {
     const req = new NextRequest("http://localhost/api/user/game-save", {
       method: "PUT",
       body: JSON.stringify({
-        gameType: "sudoku",
+        gameType: "rabbit_hole",
         difficulty: "medium",
         elapsedSeconds: 12,
-        gameState: { grid: [] },
+        gameState: { linksVisited: 3 },
       }),
     });
     const res = await PUT(req);

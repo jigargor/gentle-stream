@@ -437,6 +437,7 @@ export function ProfileMenu({
   const displayGameTypes: Array<{ value: GameType; label: string; description: string }> = [
     { value: "connections", label: "Connections (daily)", description: "One daily puzzle per session." },
     { value: "crossword", label: "Crossword", description: "Mini word-square crossword." },
+    { value: "rabbit_hole", label: "Wiki rabbit hole", description: "Flashy link-chasing trivia journey." },
     { value: "sudoku", label: "Sudoku", description: "Classic 9×9 logic grid." },
     { value: "killer_sudoku", label: "Killer Sudoku", description: "Cage-sum variant." },
     { value: "word_search", label: "Word search", description: "Find themed words in a grid." },

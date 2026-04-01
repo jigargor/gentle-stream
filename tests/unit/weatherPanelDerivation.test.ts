@@ -17,9 +17,9 @@ function makeWeatherData(overrides: Partial<WeatherFillerData> = {}): WeatherFil
 }
 
 describe("getWeatherPanelIds", () => {
-  it("always includes summary and details for weather mode", () => {
+  it("always includes summary, details, and alerts for weather mode", () => {
     const panelIds = getWeatherPanelIds(makeWeatherData());
-    expect(panelIds).toEqual(["summary", "details"]);
+    expect(panelIds).toEqual(["summary", "details", "alerts"]);
   });
 
   it("adds alerts, hourly, and weekly panels only when data exists", () => {

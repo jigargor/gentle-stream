@@ -12,6 +12,7 @@ const GAME_TYPES = new Set([
   "nonogram",
   "crossword",
   "connections",
+  "rabbit_hole",
 ]);
 const DIFFS = new Set(["easy", "medium", "hard"]);
 const gameTypeEnum = z.enum([
@@ -21,6 +22,7 @@ const gameTypeEnum = z.enum([
   "nonogram",
   "crossword",
   "connections",
+  "rabbit_hole",
 ]);
 const difficultyEnum = z.enum(["easy", "medium", "hard"]);
 const getQuerySchema = z.object({

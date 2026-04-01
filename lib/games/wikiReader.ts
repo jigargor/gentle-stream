@@ -20,15 +20,14 @@ export function parseEnglishWikipediaArticleTitle(href: string): string | null {
   }
 }
 
-/** Strip common active-content patterns from upstream HTML (defense in depth). */
+/** Strict hostname allowlist for in-app reader navigation. */
+export function isAllowedEnglishWikipediaHost(hostname: string): boolean {
+  return WIKI_HOSTS.has(hostname.trim().toLowerCase());
+}
+
+/** Strip all HTML tags so no active content can execute. */
 export function stripUnsafeWikiHtmlFragment(html: string): string {
-  let out = html;
-  out = out.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
-  out = out.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
-  out = out.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "");
-  out = out.replace(/\son\w+\s*=\s*"[^"]*"/gi, "");
-  out = out.replace(/\son\w+\s*=\s*'[^']*'/gi, "");
-  return out;
+  return html.replace(/<[^>]+>/g, " ");
 }
 
 export function wikiHtmlApiPathForTitle(title: string): string {

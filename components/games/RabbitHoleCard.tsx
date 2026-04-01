@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Difficulty, RabbitHolePuzzle } from "@/lib/games/types";
-import { parseEnglishWikipediaArticleTitle } from "@/lib/games/wikiReader";
+import {
+  isAllowedEnglishWikipediaHost,
+  parseEnglishWikipediaArticleTitle,
+} from "@/lib/games/wikiReader";
 
 interface RabbitHoleCardProps {
   puzzle: RabbitHolePuzzle;
@@ -120,7 +123,7 @@ export default function RabbitHoleCard({
 
     try {
       const u = new URL(anchor.href);
-      if (u.hostname.endsWith("wikipedia.org")) {
+      if (isAllowedEnglishWikipediaHost(u.hostname)) {
         e.preventDefault();
         window.open(anchor.href, "_blank", "noopener,noreferrer");
       }

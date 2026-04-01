@@ -16,12 +16,18 @@ CREATE INDEX IF NOT EXISTS idx_user_seen_articles_article_id
 INSERT INTO user_seen_articles (user_id, article_id, seen_at, source, section_index)
 SELECT
   up.user_id,
-  seen.article_id,
+  a.id,
   NOW(),
   'backfill',
   NULL
 FROM user_profiles up
-CROSS JOIN LATERAL unnest(up.seen_article_ids) AS seen(article_id)
+CROSS JOIN LATERAL (
+  SELECT (seen_id)::uuid AS article_id
+  FROM unnest(up.seen_article_ids) AS seen_id
+  WHERE (seen_id)::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+) seen
+JOIN articles a
+  ON a.id = seen.article_id
 ON CONFLICT (user_id, article_id) DO NOTHING;
 
 CREATE OR REPLACE FUNCTION get_feed_articles_for_user(

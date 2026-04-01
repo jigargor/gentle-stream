@@ -1,0 +1,46 @@
+name: E2E Cross-browser (phase B)
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-cross-browser:
+    name: Playwright full suite (chromium, firefox, webkit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AUTH_DISABLED: "1"
+      NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Pin npm version
+        run: npm install --global npm@10.8.2
+      - name: Install dependencies
+        run: |
+          npm --version
+          node --version
+          npm ci || npm ci --legacy-peer-deps
+      - name: Install Playwright browsers
+        run: npm run test:e2e:install
+      - name: Run Playwright cross-browser suite
+        run: npm run test:e2e:cross-browser
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-cross-browser
+          path: playwright-report/
+          if-no-files-found: ignore

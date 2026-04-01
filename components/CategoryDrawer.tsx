@@ -45,6 +45,7 @@ export default function CategoryDrawer({
   return (
     <>
       <button
+        className="gs-interactive gs-focus-ring"
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -62,13 +63,14 @@ export default function CategoryDrawer({
           width: "2.35rem",
           height: "2.35rem",
           padding: 0,
-          border: "1px solid rgba(26, 26, 26, 0.28)",
-          background: "rgba(250, 248, 243, 0.42)",
+          border: "1px solid var(--gs-border)",
+          background: "rgba(250, 248, 243, 0.64)",
+          borderRadius: "var(--gs-radius-md)",
           backdropFilter: "blur(8px)",
           WebkitBackdropFilter: "blur(8px)",
           color: "#1a1a1a",
           cursor: "pointer",
-          boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
+          boxShadow: "var(--gs-shadow-popover)",
         }}
       >
         <svg
@@ -100,7 +102,7 @@ export default function CategoryDrawer({
               position: "absolute",
               inset: 0,
               border: "none",
-              background: "rgba(0, 0, 0, 0.18)",
+              background: "rgba(8, 7, 4, 0.28)",
               cursor: "pointer",
             }}
           />
@@ -119,18 +121,18 @@ export default function CategoryDrawer({
               background: "rgba(250, 248, 243, 0.92)",
               backdropFilter: "blur(10px)",
               WebkitBackdropFilter: "blur(10px)",
-              borderLeft: "1px solid rgba(26, 26, 26, 0.2)",
-              boxShadow: "-8px 0 28px rgba(0,0,0,0.16)",
+              borderLeft: "1px solid var(--gs-border)",
+              boxShadow: "var(--gs-shadow-overlay)",
               display: "flex",
               flexDirection: "column",
               transform: "translateX(0)",
-              transition: "transform 0.18s ease",
+              transition: "transform var(--gs-motion-normal) var(--gs-ease-standard)",
             }}
           >
             <div
               style={{
                 padding: "0.95rem 1rem 0.7rem",
-                borderBottom: "1px solid #d8d2c7",
+                borderBottom: "1px solid var(--gs-border)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
@@ -142,7 +144,7 @@ export default function CategoryDrawer({
                   margin: 0,
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "1rem",
-                  color: "#0d0d0d",
+                  color: "var(--gs-text)",
                 }}
               >
                 Categories
@@ -152,9 +154,10 @@ export default function CategoryDrawer({
                 type="button"
                 onClick={() => setOpen(false)}
                 style={{
-                  border: "1px solid #1a1a1a",
-                  background: "#fff",
-                  color: "#1a1a1a",
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-elevated)",
+                  color: "var(--gs-ink-strong)",
+                  borderRadius: "var(--gs-radius-pill)",
                   fontFamily: "'Playfair Display', Georgia, serif",
                   fontSize: "0.72rem",
                   letterSpacing: "0.04em",
@@ -179,21 +182,27 @@ export default function CategoryDrawer({
                 const isActive = selected === cat;
                 return (
                   <button
+                    className="gs-interactive gs-focus-ring"
                     key={cat}
                     type="button"
                     onClick={() => handleSelect(cat)}
                     style={{
                       textAlign: "left",
                       width: "100%",
-                      border: isActive ? "2px solid #1a1a1a" : "1px solid #d8d2c7",
-                      background: isActive ? "#c8a84b" : "#fff",
+                      border: isActive
+                        ? "1.5px solid var(--gs-ink-strong)"
+                        : "1px solid var(--gs-border)",
+                      background: isActive ? "#d7bb66" : "var(--gs-surface-elevated)",
                       color: "#1a1a1a",
+                      borderRadius: "var(--gs-radius-sm)",
                       padding: "0.6rem 0.65rem",
                       fontFamily: "'Playfair Display', Georgia, serif",
                       fontSize: "0.76rem",
                       letterSpacing: "0.03em",
                       textTransform: "uppercase",
                       cursor: "pointer",
+                      transition:
+                        "transform var(--gs-motion-fast) var(--gs-ease-standard), border-color var(--gs-motion-fast) var(--gs-ease-standard)",
                     }}
                   >
                     {cat}

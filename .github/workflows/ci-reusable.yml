@@ -67,6 +67,10 @@ jobs:
           # engagement-health/route imports db; job-level placeholders cover Supabase keys.
           CRON_SECRET: "placeholder-cron-secret"
       - run: npm run test:unit
+      - run: npm run test:component
+      - run: npm run test:stories
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:smoke
       - run: npm run test:integration
 
   integration:

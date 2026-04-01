@@ -21,6 +21,49 @@ function isMissingFeedSeenRpc(errorMessage: string): boolean {
   );
 }
 
+interface FeedRpcInput {
+  category: Category | typeof RECIPE_CATEGORY;
+  limit: number;
+  userId: string;
+  tagged: boolean;
+  excludeIds: string[];
+  contentKinds?: ArticleContentKind[];
+}
+
+async function callFeedRpc(input: FeedRpcInput): Promise<{
+  data: ArticleRow[] | null;
+  errorMessage: string | null;
+}> {
+  const fullArgs = {
+    p_category: input.category,
+    p_limit: input.limit,
+    p_user_id: input.userId,
+    p_tagged: input.tagged,
+    p_content_kinds:
+      input.contentKinds && input.contentKinds.length > 0
+        ? input.contentKinds
+        : null,
+    p_exclude_ids: input.excludeIds,
+  };
+  const { data, error } = await db.rpc("get_feed_articles_for_user", fullArgs);
+  if (!error) return { data: data as ArticleRow[], errorMessage: null };
+
+  // Backward compatibility: older DBs can still have the pre-contentKinds/excludeIds signature.
+  const legacyArgs = {
+    p_category: input.category,
+    p_limit: input.limit,
+    p_user_id: input.userId,
+    p_tagged: input.tagged,
+  };
+  const { data: legacyData, error: legacyError } = await db.rpc(
+    "get_feed_articles_for_user",
+    legacyArgs
+  );
+  if (!legacyError) return { data: legacyData as ArticleRow[], errorMessage: null };
+
+  return { data: null, errorMessage: legacyError.message || error.message };
+}
+
 // ─── Row shape as it comes back from Supabase ─────────────────────────────────
 interface ArticleRow {
   id: string;
@@ -537,23 +580,23 @@ export async function getArticlesForFeed(
   userId?: string
 ): Promise<StoredArticle[]> {
   if (userId && isSeenTableReadsEnabled && isFeedSeenRpcAvailable) {
-    const { data, error } = await db.rpc("get_feed_articles_for_user", {
-      p_category: category,
-      p_limit: limit,
-      p_user_id: userId,
-      p_tagged: true,
-      p_content_kinds: contentKinds && contentKinds.length > 0 ? contentKinds : null,
-      p_exclude_ids: excludeIds,
+    const { data, errorMessage } = await callFeedRpc({
+      category,
+      limit,
+      userId,
+      tagged: true,
+      contentKinds,
+      excludeIds,
     });
-    if (error) {
-      if (isMissingFeedSeenRpc(error.message)) {
+    if (errorMessage) {
+      if (isMissingFeedSeenRpc(errorMessage)) {
         isFeedSeenRpcAvailable = false;
         console.warn(
           "[getArticlesForFeed] RPC unavailable; falling back to query path: %s",
-          error.message
+          errorMessage
         );
       } else {
-        throw new Error(`getArticlesForFeed rpc: ${error.message}`);
+        throw new Error(`getArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
       return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));
@@ -597,23 +640,23 @@ export async function getUntaggedArticlesForFeed(
   userId?: string
 ): Promise<StoredArticle[]> {
   if (userId && isSeenTableReadsEnabled && isFeedSeenRpcAvailable) {
-    const { data, error } = await db.rpc("get_feed_articles_for_user", {
-      p_category: category,
-      p_limit: limit,
-      p_user_id: userId,
-      p_tagged: false,
-      p_content_kinds: contentKinds && contentKinds.length > 0 ? contentKinds : null,
-      p_exclude_ids: excludeIds,
+    const { data, errorMessage } = await callFeedRpc({
+      category,
+      limit,
+      userId,
+      tagged: false,
+      contentKinds,
+      excludeIds,
     });
-    if (error) {
-      if (isMissingFeedSeenRpc(error.message)) {
+    if (errorMessage) {
+      if (isMissingFeedSeenRpc(errorMessage)) {
         isFeedSeenRpcAvailable = false;
         console.warn(
           "[getUntaggedArticlesForFeed] RPC unavailable; falling back to query path: %s",
-          error.message
+          errorMessage
         );
       } else {
-        throw new Error(`getUntaggedArticlesForFeed rpc: ${error.message}`);
+        throw new Error(`getUntaggedArticlesForFeed rpc: ${errorMessage}`);
       }
     } else {
       return hydrateCreatorAuthorDisplay((data as ArticleRow[]).map(rowToArticle));

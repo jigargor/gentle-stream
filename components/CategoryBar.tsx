@@ -24,7 +24,7 @@ export default function CategoryBar({
     <nav
       className="hide-scrollbar"
       style={{
-        background: "#1a1a1a",
+        background: "var(--gs-ink-strong)",
         position: shouldStick ? "sticky" : "relative",
         top: shouldStick ? stickyTopPx : undefined,
         zIndex: 95,
@@ -35,7 +35,7 @@ export default function CategoryBar({
         flexWrap: "wrap",
         padding: 0,
         width: "100%",
-        boxShadow: visible && shouldStick ? "0 4px 14px rgba(0,0,0,0.16)" : "none",
+        boxShadow: visible && shouldStick ? "var(--gs-shadow-popover)" : "none",
         transform: visible ? "translateY(0)" : "translateY(-220%)",
         opacity: visible ? 1 : 0,
         transition: visible
@@ -50,11 +50,12 @@ export default function CategoryBar({
         const isLast = index === CATEGORIES.length - 1;
         return (
           <button
+            className="gs-interactive gs-focus-ring"
             key={cat}
             onClick={() => onSelect(cat)}
             style={{
               background: isActive ? "#c8a84b" : "transparent",
-              color: isActive ? "#1a1a1a" : "#d4cfc4",
+              color: isActive ? "#1a1a1a" : "#efe9dd",
               border: "none",
               padding: "0.55rem 1.1rem",
               fontFamily: "'Playfair Display', Georgia, serif",
@@ -64,8 +65,9 @@ export default function CategoryBar({
               textTransform: "uppercase",
               cursor: "pointer",
               whiteSpace: "nowrap",
-              transition: "background 0.2s ease, color 0.2s ease",
-              borderRight: isLast ? "none" : "1px solid #333",
+              transition:
+                "background var(--gs-motion-fast) var(--gs-ease-standard), color var(--gs-motion-fast) var(--gs-ease-standard)",
+              borderRight: isLast ? "none" : "1px solid rgba(234, 227, 214, 0.16)",
               flexShrink: 0,
             }}
           >

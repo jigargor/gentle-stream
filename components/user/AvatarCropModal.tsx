@@ -232,7 +232,7 @@ export function AvatarCropModal({ file, open, onClose, onConfirm }: AvatarCropMo
         position: "fixed",
         inset: 0,
         zIndex: 300,
-        background: "rgba(0,0,0,0.5)",
+        background: "rgba(9, 7, 4, 0.48)",
         display: "grid",
         placeItems: "center",
         padding: "1rem",
@@ -244,9 +244,10 @@ export function AvatarCropModal({ file, open, onClose, onConfirm }: AvatarCropMo
       <div
         style={{
           width: "min(92vw, 520px)",
-          background: "#faf8f3",
-          border: "1.5px solid #1a1a1a",
-          boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
+          background: "var(--gs-surface-elevated)",
+          border: "1px solid var(--gs-border-strong)",
+          borderRadius: "var(--gs-radius-lg)",
+          boxShadow: "var(--gs-shadow-overlay)",
           padding: "0.9rem",
         }}
       >
@@ -264,13 +265,19 @@ export function AvatarCropModal({ file, open, onClose, onConfirm }: AvatarCropMo
             onClick={onClose}
             disabled={busy}
             style={{
-              border: "none",
-              background: "transparent",
+              border: "1px solid var(--gs-border)",
+              background: "var(--gs-surface-soft)",
+              borderRadius: "var(--gs-radius-pill)",
               cursor: busy ? "wait" : "pointer",
               color: "#666",
               fontFamily: "'IM Fell English', Georgia, serif",
               fontSize: "0.9rem",
-              padding: "0.25rem 0.35rem",
+              width: "1.9rem",
+              height: "1.9rem",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
             }}
             aria-label="Close"
             title="Close"

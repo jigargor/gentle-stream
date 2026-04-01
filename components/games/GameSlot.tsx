@@ -7,6 +7,7 @@ import WordSearchCard, { type WordSearchCloudSlice } from "./WordSearchCard";
 import NonogramCard from "./NonogramCard";
 import CrosswordCard from "./CrosswordCard";
 import ConnectionsCard from "./ConnectionsCard";
+import RabbitHoleCard from "./RabbitHoleCard";
 import type {
   SudokuPuzzle,
   KillerSudokuPuzzle,
@@ -14,6 +15,7 @@ import type {
   NonogramPuzzle,
   CrosswordPuzzle,
   ConnectionsPuzzle,
+  RabbitHolePuzzle,
   Difficulty,
   GameType,
 } from "@/lib/games/types";
@@ -29,7 +31,14 @@ interface GameSlotProps {
   connectionsDaily?: boolean;
 }
 
-type AnyPuzzle = SudokuPuzzle | KillerSudokuPuzzle | WordSearchPuzzle | NonogramPuzzle | CrosswordPuzzle | ConnectionsPuzzle;
+type AnyPuzzle =
+  | SudokuPuzzle
+  | KillerSudokuPuzzle
+  | WordSearchPuzzle
+  | NonogramPuzzle
+  | CrosswordPuzzle
+  | ConnectionsPuzzle
+  | RabbitHolePuzzle;
 type PuzzleWithUniqueness = AnyPuzzle & {
   uniquenessSignature?: string;
   puzzleId?: string;
@@ -123,6 +132,7 @@ function puzzleEndpoint(
   if (gameType === "nonogram")       return `/api/game/nonogram?${params}`;
   if (gameType === "crossword")      return `/api/game/crossword?${params}`;
   if (gameType === "connections")    return `/api/game/connections?${params}`;
+  if (gameType === "rabbit_hole")    return `/api/game/rabbit-hole?${params}`;
   return `/api/game/sudoku?${params}`;
 }
 
@@ -133,6 +143,7 @@ const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
   nonogram:      "Composing the picture…",
   crossword:     "Setting the clues…",
   connections:   "Building the groups…",
+  rabbit_hole:   "Opening the rabbit hole…",
 };
 
 export default function GameSlot({
@@ -552,6 +563,17 @@ export default function GameSlot({
         metricsEnabled={metricsOn}
         puzzleSignature={puzzleSignature}
         dailyPuzzle={connectionsDaily}
+      />
+    );
+  }
+
+  if (gameType === "rabbit_hole") {
+    return (
+      <RabbitHoleCard
+        puzzle={puzzle as RabbitHolePuzzle}
+        onNewPuzzle={handleNewPuzzle}
+        metricsEnabled={metricsOn}
+        puzzleSignature={puzzleSignature}
       />
     );
   }

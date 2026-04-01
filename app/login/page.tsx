@@ -18,20 +18,21 @@ function firstParam(
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Record<string, string | string[] | undefined>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const errorParam = firstParam(searchParams.error) ?? null;
+  const resolvedSearchParams = await searchParams;
+  const errorParam = firstParam(resolvedSearchParams.error) ?? null;
   const authRedirectBase = await getAuthRedirectBaseFromRequest();
 
   return (
     <LoginForm
       authRedirectBaseFromServer={authRedirectBase}
-      initialNext={firstParam(searchParams.next) ?? null}
+      initialNext={firstParam(resolvedSearchParams.next) ?? null}
       initialAuthError={errorParam}
       initialSessionExpired={
-        firstParam(searchParams.reason) === "session_expired"
+        firstParam(resolvedSearchParams.reason) === "session_expired"
       }
-      initialMagicLinkBrowserError={errorParam === "magic_link_browser"}
+      initialOauthBrowserError={errorParam === "oauth_browser"}
     />
   );
 }

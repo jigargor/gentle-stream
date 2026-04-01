@@ -111,7 +111,7 @@ The ingest agent tracks real `usage.input_tokens` against a conservative per-min
 | **Unit / generator tests** | `scripts/test-citations.ts`, `test-sudoku.ts`, `test-word-search.ts`, `test-killer-nonogram.ts` — no DB. |
 | **DB integration** | `test-dedup.ts`, `test-url-dedup.ts` — real Supabase; tagged test rows cleaned up in `finally`. |
 | **Security weekly audits** | Scheduled GitHub workflow `/.github/workflows/security-weekly.yml` runs `npm run security:inventory`, `npm run security:rls-audit`, and `npm run security:audit` weekly. |
-| **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (integration uses **Production** environment secrets when the repo is the source — fork PRs skip DB integration). **Deploy** on `push` to `main`: same quality gates, then `vercel deploy --prod`, then **smoke tests** against live `/api/feed` and `/api/game/sudoku`. |
+| **GitHub Actions** | Reusable workflow: **CI** on pull requests and pushes to `develop` (unit + component + Storybook tests, Playwright smoke, and DB integration when secrets are available). Additional workflows run **cross-browser E2E** on `develop` pushes/manual dispatch and a **nightly full E2E matrix**. |
 | **Vercel** | `vercel.json` sets `git.deploymentEnabled: false` so **only** the deploy workflow promotes production (no duplicate Git-triggered prod builds); crons still defined for scheduler/tagger/cleanup. |
 
 ---
@@ -234,6 +234,13 @@ npx tsx scripts/test-word-search.ts
 npx tsx scripts/test-killer-nonogram.ts
 npx tsx scripts/test-dedup.ts          # Supabase secrets required
 npx tsx scripts/test-url-dedup.ts      # Supabase secrets required
+
+npm run test:unit               # vitest (node) unit/routes
+npm run test:component          # vitest + react-testing-library (jsdom)
+npm run storybook               # Storybook UI dev server
+npm run test:stories            # Storybook interaction/a11y test runner
+npm run test:e2e:smoke          # Playwright smoke (Chromium)
+npm run test:e2e:cross-browser  # Playwright Chromium + Firefox + WebKit
 ```
 
 ---
@@ -284,8 +291,9 @@ Public legal endpoints:
 
 Clickwrap / consent behavior:
 - Social sign-in (Google/Facebook) redirects to `/terms/accept` until the user scrolls through Terms and agrees (cookie-backed gate).
-- Email sign-in (`/login` → “Email me a sign-in link”) requires checking the “I have read and agree…” box (Terms + Privacy) before the link is requested.
-- When Turnstile is enabled in env vars, the `/login` page renders the Cloudflare widget and `POST /api/auth/email-link` verifies the Turnstile token (rate-limited).
+- Email auth (`/login` → email/password Sign in or Sign up) requires checking the “I have read and agree…” box (Terms + Privacy) before submission.
+- Sign up uses Supabase email verification (`signUp` + `emailRedirectTo`) before first password login.
+- When Turnstile is enabled in env vars, the `/login` page renders the Cloudflare widget and `POST /api/auth/email-password` verifies the Turnstile token (rate-limited).
 
 ---
 

@@ -19,18 +19,44 @@ html {
   color-scheme: light;
   --gs-bg: #ede9e1;
   --gs-surface: #faf8f3;
+  --gs-surface-soft: #f7f2e8;
+  --gs-surface-elevated: #fffdf8;
   --gs-text: #0d0d0d;
   --gs-muted: #6c6457;
   --gs-border: #d4cfc4;
+  --gs-border-strong: #b7ae9f;
+  --gs-ink-strong: #1a1a1a;
+  --gs-accent: #1a472a;
+  --gs-radius-xs: 4px;
+  --gs-radius-sm: 8px;
+  --gs-radius-md: 12px;
+  --gs-radius-lg: 16px;
+  --gs-radius-pill: 999px;
+  --gs-shadow-page: 0 18px 46px rgba(28, 22, 12, 0.14);
+  --gs-shadow-overlay: 0 22px 68px rgba(17, 12, 6, 0.3);
+  --gs-shadow-popover: 0 14px 40px rgba(15, 10, 6, 0.24);
+  --gs-motion-fast: 140ms;
+  --gs-motion-normal: 220ms;
+  --gs-motion-slow: 360ms;
+  --gs-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --gs-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
   --gs-bg: #121315;
   --gs-surface: #1a1c1f;
+  --gs-surface-soft: #202328;
+  --gs-surface-elevated: #242932;
   --gs-text: #f2efe8;
   --gs-muted: #b0a89b;
   --gs-border: #3d3f45;
+  --gs-border-strong: #575a64;
+  --gs-ink-strong: #f2efe8;
+  --gs-accent: #82bd95;
+  --gs-shadow-page: 0 18px 46px rgba(0, 0, 0, 0.4);
+  --gs-shadow-overlay: 0 22px 68px rgba(0, 0, 0, 0.55);
+  --gs-shadow-popover: 0 14px 40px rgba(0, 0, 0, 0.45);
 }
 
 body {
@@ -163,6 +189,77 @@ body {
 
 .animate-spin-slow {
   animation: spin 1.2s linear infinite;
+}
+
+.gs-chip-button {
+  border: 1px solid var(--gs-border);
+  background: var(--gs-surface-elevated);
+  color: var(--gs-ink-strong);
+  border-radius: var(--gs-radius-pill);
+  transition:
+    background var(--gs-motion-fast) var(--gs-ease-standard),
+    border-color var(--gs-motion-fast) var(--gs-ease-standard),
+    transform var(--gs-motion-fast) var(--gs-ease-standard),
+    box-shadow var(--gs-motion-fast) var(--gs-ease-standard);
+}
+
+.gs-chip-button:hover {
+  border-color: var(--gs-border-strong);
+  transform: translateY(-1px);
+}
+
+.gs-chip-button:focus-visible {
+  outline: 2px solid rgba(56, 103, 74, 0.55);
+  outline-offset: 1px;
+}
+
+.gs-interactive {
+  transition:
+    transform var(--gs-motion-fast) var(--gs-ease-standard),
+    box-shadow var(--gs-motion-fast) var(--gs-ease-standard),
+    filter var(--gs-motion-fast) var(--gs-ease-standard);
+  will-change: transform;
+}
+
+.gs-interactive:hover {
+  transform: translateY(-1px);
+}
+
+.gs-interactive:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.gs-card-lift {
+  transition:
+    transform var(--gs-motion-normal) var(--gs-ease-standard),
+    box-shadow var(--gs-motion-normal) var(--gs-ease-standard),
+    border-color var(--gs-motion-fast) var(--gs-ease-standard);
+}
+
+.gs-card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(18, 13, 8, 0.12);
+}
+
+.gs-soft-pulse {
+  animation: gsSoftPulse 2.8s ease-in-out infinite;
+}
+
+.gs-focus-ring:focus-visible {
+  outline: 2px solid rgba(56, 103, 74, 0.5);
+  outline-offset: 2px;
+}
+
+@keyframes gsSoftPulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow: var(--gs-shadow-popover);
+  }
+  50% {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 36px rgba(16, 11, 7, 0.28);
+  }
 }
 
 /* ─── Newspaper utilities ────────────────────────────── */
@@ -363,4 +460,27 @@ body {
     border-right: none !important;
     border-bottom: 1px solid #d4cfc4;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gs-interactive,
+  .gs-card-lift,
+  .gs-soft-pulse {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+/* In-card Wikipedia reader (Rabbit Hole): keep media inside the scroll pane */
+.wiki-rabbit-hole-html img,
+.wiki-rabbit-hole-html video {
+  max-width: 100%;
+  height: auto;
+}
+
+.wiki-rabbit-hole-html table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }

@@ -17,11 +17,16 @@ export default function NasaApodCard({ data, reason = "singleton" }: NasaApodCar
 
   return (
     <section
+      className="gs-card-lift"
       style={{
-        borderTop: "3px double #1a1a1a",
-        borderBottom: "2px solid #1a1a1a",
-        background: "#f7f3ea",
+        borderTop: "3px double var(--gs-ink-strong)",
+        borderBottom: "2px solid var(--gs-ink-strong)",
+        borderLeft: "1px solid var(--gs-border)",
+        borderRight: "1px solid var(--gs-border)",
+        borderRadius: "var(--gs-radius-sm)",
+        background: "var(--gs-surface-soft)",
         padding: "0.95rem 1rem",
+        boxShadow: "0 8px 20px rgba(20, 15, 10, 0.08)",
       }}
       aria-label="NASA Astronomy Picture of the Day"
     >
@@ -31,7 +36,7 @@ export default function NasaApodCard({ data, reason = "singleton" }: NasaApodCar
           alignItems: "baseline",
           justifyContent: "space-between",
           gap: "0.75rem",
-          borderBottom: "1px solid #d7d0c1",
+          borderBottom: "1px solid var(--gs-border)",
           paddingBottom: "0.4rem",
           marginBottom: "0.75rem",
         }}
@@ -73,7 +78,8 @@ export default function NasaApodCard({ data, reason = "singleton" }: NasaApodCar
               width: "100%",
               maxHeight: "min(52vh, 420px)",
               objectFit: "cover",
-              border: "1px solid #d7d0c1",
+              border: "1px solid var(--gs-border)",
+              borderRadius: "var(--gs-radius-sm)",
             }}
           />
         </div>

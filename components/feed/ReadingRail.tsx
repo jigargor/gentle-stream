@@ -2,17 +2,17 @@
 
 import Link from "next/link";
 import type { ReadingRailConfig, ReadingRailModule } from "@/lib/types";
-import WeatherFillerCard from "./WeatherFillerCard";
+import WeatherCard from "./WeatherCard";
 import SpotifyMoodTile from "./SpotifyMoodTile";
 import NasaApodCard from "./NasaApodCard";
 import GeneratedArtModuleCard from "./GeneratedArtModuleCard";
-import TodoFillerCard from "./TodoFillerCard";
+import TodoCard from "./TodoCard";
 
 function renderModule(mod: ReadingRailModule, key: string) {
   const reason = "singleton" as const;
   switch (mod.kind) {
     case "weather":
-      return <WeatherFillerCard key={key} data={mod.data} reason={reason} />;
+      return <WeatherCard key={key} data={mod.data} reason={reason} />;
     case "spotify":
       return <SpotifyMoodTile key={key} data={mod.data} reason={reason} />;
     case "nasa":
@@ -20,7 +20,7 @@ function renderModule(mod: ReadingRailModule, key: string) {
     case "generated_art":
       return <GeneratedArtModuleCard key={key} data={mod.data} reason={reason} />;
     case "todo":
-      return <TodoFillerCard key={key} data={mod.data} reason={reason} />;
+      return <TodoCard key={key} data={mod.data} reason={reason} />;
     default:
       return null;
   }
@@ -50,11 +50,16 @@ export default function ReadingRail({ rail }: ReadingRailProps) {
       {rail.secondary ? renderModule(rail.secondary, "rail-secondary") : null}
       {hasRelated ? (
         <section
+          className="gs-card-lift"
           style={{
-            borderTop: "3px double #1a1a1a",
-            borderBottom: "2px solid #1a1a1a",
-            background: "#f7f3ea",
+            borderTop: "3px double var(--gs-ink-strong)",
+            borderBottom: "2px solid var(--gs-ink-strong)",
+            borderLeft: "1px solid var(--gs-border)",
+            borderRight: "1px solid var(--gs-border)",
+            borderRadius: "var(--gs-radius-sm)",
+            background: "var(--gs-surface-soft)",
             padding: "0.65rem 0.75rem",
+            boxShadow: "0 8px 20px rgba(20, 15, 10, 0.08)",
           }}
         >
           <h3

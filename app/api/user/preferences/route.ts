@@ -20,6 +20,7 @@ const preferencesBodySchema = z
     gameRatio: z.number().min(0).max(1).optional(),
     enabledGameTypes: z.array(z.string()).min(1).optional(),
     themePreference: z.union([z.literal("light"), z.literal("dark"), z.null()]).optional(),
+    weatherUnitSystem: z.union([z.literal("metric"), z.literal("imperial")]).optional(),
   })
   .strict();
 
@@ -81,12 +82,13 @@ export async function POST(request: NextRequest) {
     const wantsGameRatio = body.gameRatio !== undefined;
     const wantsEnabledTypes = body.enabledGameTypes !== undefined;
     const wantsThemePreference = body.themePreference !== undefined;
-    if (!wantsGameRatio && !wantsEnabledTypes && !wantsThemePreference) {
+    const wantsWeatherUnitSystem = body.weatherUnitSystem !== undefined;
+    if (!wantsGameRatio && !wantsEnabledTypes && !wantsThemePreference && !wantsWeatherUnitSystem) {
       return apiErrorResponse({
         request,
         status: 400,
         code: API_ERROR_CODES.MISSING_FIELD,
-        message: "Provide gameRatio, enabledGameTypes, and/or themePreference",
+        message: "Provide gameRatio, enabledGameTypes, themePreference, and/or weatherUnitSystem",
       });
     }
 
@@ -147,10 +149,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let weatherUnitSystem: "metric" | "imperial" | undefined;
+    if (wantsWeatherUnitSystem) {
+      if (body.weatherUnitSystem === "metric" || body.weatherUnitSystem === "imperial") {
+        weatherUnitSystem = body.weatherUnitSystem;
+      } else {
+        return apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "weatherUnitSystem must be one of: metric, imperial",
+        });
+      }
+    }
+
     const updated = await updateUserPreferences(user.id, {
       ...(gameRatio !== undefined ? { gameRatio } : {}),
       ...(enabledGameTypes !== undefined ? { enabledGameTypes } : {}),
       ...(themePreference !== undefined ? { themePreference } : {}),
+      ...(weatherUnitSystem !== undefined ? { weatherUnitSystem } : {}),
     });
     return NextResponse.json(updated);
   } catch (error: unknown) {

@@ -34,3 +34,9 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+*storybook.log
+storybook-static
+playwright-report
+test-results
+blob-report

@@ -1,14 +1,29 @@
 import { picsumFallbackUrl, pollinationsImageUrl } from "@/lib/article-image";
 import { getEnv } from "@/lib/env";
-import type { WeatherFillerData } from "@gentle-stream/domain/types";
+import type {
+  WeatherAlertItem,
+  WeatherDailyItem,
+  WeatherFillerData,
+  WeatherHourlyItem,
+} from "@gentle-stream/domain/types";
 
 interface WeatherSnapshot {
   city: string;
+  state?: string;
   country?: string;
+  timezoneIana?: string;
   temperatureC: number;
+  feelsLikeC?: number;
   condition: string;
   humidity: number;
   windKph: number;
+  precipChancePct?: number;
+  precipAmountMm?: number;
+  visibilityKm?: number;
+  cloudCoverPct?: number;
+  alerts?: WeatherAlertItem[];
+  hourly?: WeatherHourlyItem[];
+  daily?: WeatherDailyItem[];
 }
 
 interface CachedEntry {
@@ -91,20 +106,23 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
   }
 }
 
-async function resolveCoordinates(cityQuery: string, apiKey: string): Promise<{ lat: number; lon: number; city: string; country?: string } | null> {
+async function resolveCoordinates(cityQuery: string, apiKey: string): Promise<{ lat: number; lon: number; city: string; state?: string; country?: string } | null> {
   const params = new URLSearchParams({
     q: cityQuery,
     limit: "1",
     appid: apiKey,
   });
   const url = `https://api.openweathermap.org/geo/1.0/direct?${params.toString()}`;
-  const rows = await fetchJson<Array<{ lat: number; lon: number; name: string; country?: string }>>(url, WEATHER_TIMEOUT_MS);
+  const rows = await fetchJson<
+    Array<{ lat: number; lon: number; name: string; state?: string; country?: string }>
+  >(url, WEATHER_TIMEOUT_MS);
   const first = rows[0];
   if (!first) return null;
   return {
     lat: first.lat,
     lon: first.lon,
     city: first.name,
+    state: first.state,
     country: first.country,
   };
 }
@@ -113,7 +131,7 @@ async function reverseGeocode(
   lat: number,
   lon: number,
   apiKey: string
-): Promise<{ city: string; country?: string } | null> {
+): Promise<{ city: string; state?: string; country?: string } | null> {
   const params = new URLSearchParams({
     lat: String(lat),
     lon: String(lon),
@@ -121,10 +139,13 @@ async function reverseGeocode(
     appid: apiKey,
   });
   const url = `https://api.openweathermap.org/geo/1.0/reverse?${params.toString()}`;
-  const rows = await fetchJson<Array<{ name: string; country?: string }>>(url, WEATHER_TIMEOUT_MS);
+  const rows = await fetchJson<Array<{ name: string; state?: string; country?: string }>>(
+    url,
+    WEATHER_TIMEOUT_MS
+  );
   const first = rows[0];
   if (!first) return null;
-  return { city: first.name, country: first.country };
+  return { city: first.name, state: first.state, country: first.country };
 }
 
 async function fetchOneCallWeather(lat: number, lon: number, apiKey: string): Promise<Omit<WeatherSnapshot, "city" | "country">> {
@@ -133,24 +154,114 @@ async function fetchOneCallWeather(lat: number, lon: number, apiKey: string): Pr
     lon: String(lon),
     appid: apiKey,
     units: "metric",
-    exclude: "minutely,hourly,daily,alerts",
+    exclude: "minutely",
   });
   // One Call API 3.0 provides current + hourly/daily forecasts in one response.
   const url = `https://api.openweathermap.org/data/3.0/onecall?${params.toString()}`;
   const data = await fetchJson<{
+    timezone?: string;
     current?: {
       temp?: number;
+      feels_like?: number;
       humidity?: number;
       wind_speed?: number;
+      clouds?: number;
+      visibility?: number;
+      rain?: { "1h"?: number };
+      snow?: { "1h"?: number };
       weather?: Array<{ description?: string }>;
     };
+    hourly?: Array<{
+      dt?: number;
+      temp?: number;
+      pop?: number;
+      weather?: Array<{ description?: string }>;
+    }>;
+    daily?: Array<{
+      dt?: number;
+      pop?: number;
+      temp?: { min?: number; max?: number };
+      weather?: Array<{ description?: string }>;
+    }>;
+    alerts?: Array<{
+      event?: string;
+      start?: number;
+      end?: number;
+      sender_name?: string;
+      tags?: string[];
+    }>;
   }>(url, WEATHER_TIMEOUT_MS);
   const current = data.current ?? {};
+  const hourly = (data.hourly ?? []).slice(0, 8);
+  const daily = (data.daily ?? []).slice(0, 7);
+  const alerts = (data.alerts ?? []).slice(0, 3);
+  const precipAmountMm = (current.rain?.["1h"] ?? 0) + (current.snow?.["1h"] ?? 0);
+  const precipChancePct =
+    typeof hourly[0]?.pop === "number"
+      ? Math.round(Math.max(0, Math.min(1, hourly[0].pop)) * 100)
+      : undefined;
+
   return {
+    timezoneIana: typeof data.timezone === "string" ? data.timezone : undefined,
     temperatureC: Math.round(current.temp ?? 0),
+    feelsLikeC:
+      typeof current.feels_like === "number" ? Math.round(current.feels_like) : undefined,
     condition: current.weather?.[0]?.description ?? "Clear skies",
     humidity: Math.round(current.humidity ?? 0),
     windKph: Math.round((current.wind_speed ?? 0) * 3.6),
+    precipChancePct,
+    precipAmountMm: precipAmountMm > 0 ? Math.round(precipAmountMm * 10) / 10 : 0,
+    visibilityKm:
+      typeof current.visibility === "number"
+        ? Math.round((current.visibility / 1000) * 10) / 10
+        : undefined,
+    cloudCoverPct:
+      typeof current.clouds === "number"
+        ? Math.round(Math.max(0, Math.min(100, current.clouds)))
+        : undefined,
+    alerts: alerts.map((entry) => ({
+      title: entry.event?.trim() || "Weather alert",
+      severity:
+        entry.tags && entry.tags.length > 0 ? entry.tags[0] : entry.sender_name || undefined,
+      startsAt:
+        typeof entry.start === "number" ? new Date(entry.start * 1000).toISOString() : undefined,
+      endsAt:
+        typeof entry.end === "number" ? new Date(entry.end * 1000).toISOString() : undefined,
+    })),
+    hourly: hourly
+      .filter(
+        (entry) =>
+          typeof entry.dt === "number" &&
+          typeof entry.temp === "number" &&
+          Boolean(entry.weather?.[0]?.description)
+      )
+      .map((entry) => ({
+        isoTime: new Date((entry.dt as number) * 1000).toISOString(),
+        tempC: Math.round(entry.temp as number),
+        condition: entry.weather?.[0]?.description ?? "Clear",
+        precipChancePct:
+          typeof entry.pop === "number"
+            ? Math.round(Math.max(0, Math.min(1, entry.pop)) * 100)
+            : undefined,
+      })),
+    daily: daily
+      .filter(
+        (entry) =>
+          typeof entry.dt === "number" &&
+          typeof entry.temp?.min === "number" &&
+          typeof entry.temp?.max === "number" &&
+          Boolean(entry.weather?.[0]?.description)
+      )
+      .map((entry) => ({
+        isoDate: new Date((entry.dt as number) * 1000).toISOString(),
+        minC: Math.round(entry.temp?.min as number),
+        maxC: Math.round(entry.temp?.max as number),
+        condition: entry.weather?.[0]?.description ?? "Clear",
+        precipChancePct:
+          typeof entry.pop === "number"
+            ? Math.round(Math.max(0, Math.min(1, entry.pop)) * 100)
+            : undefined,
+      })),
   };
 }
 
@@ -188,18 +299,28 @@ function fallbackArtData(input: {
 }
 
 function weatherDataToCard(snapshot: WeatherSnapshot): WeatherFillerData {
-  const locationLabel = snapshot.country
-    ? `${snapshot.city}, ${snapshot.country}`
-    : snapshot.city;
+  const labelParts = [snapshot.city, snapshot.state, snapshot.country]
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean);
+  const locationLabel = labelParts.length > 0 ? labelParts.join(", ") : "Global";
   return {
     mode: "weather",
     title: "Weather Brief",
-    subtitle: "A quick climate pulse to fill the column.",
+    subtitle: "",
     locationLabel,
+    timezoneIana: snapshot.timezoneIana,
     temperatureC: snapshot.temperatureC,
     condition: snapshot.condition,
     humidity: snapshot.humidity,
     windKph: snapshot.windKph,
+    feelsLikeC: snapshot.feelsLikeC,
+    precipChancePct: snapshot.precipChancePct,
+    precipAmountMm: snapshot.precipAmountMm,
+    visibilityKm: snapshot.visibilityKm,
+    cloudCoverPct: snapshot.cloudCoverPct,
+    alerts: snapshot.alerts,
+    hourly: snapshot.hourly,
+    daily: snapshot.daily,
   };
 }
 
@@ -213,6 +334,7 @@ async function fetchDefaultLocationWeather(input: {
   const onecall = await fetchOneCallWeather(geocoded.lat, geocoded.lon, input.apiKey);
   const snapshot: WeatherSnapshot = {
     city: geocoded.city,
+    state: geocoded.state,
     country: geocoded.country,
     ...onecall,
   };
@@ -245,6 +367,7 @@ export async function getWeatherFillerData(input: {
       ]);
       const snapshot: WeatherSnapshot = {
         city: place?.city ?? "Local",
+        state: place?.state,
         country: place?.country,
         ...onecall,
       };
@@ -272,12 +395,14 @@ export async function getWeatherFillerData(input: {
     const onecall = await fetchOneCallWeather(geocoded.lat, geocoded.lon, apiKey);
     const snapshot: WeatherSnapshot = {
       city: geocoded.city,
+      state: geocoded.state,
       country: geocoded.country,
       ...onecall,
     };
     const data = weatherDataToCard({
       ...snapshot,
       city: geocoded.city || snapshot.city,
+      state: geocoded.state || snapshot.state,
       country: geocoded.country || snapshot.country,
     });
     cache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });

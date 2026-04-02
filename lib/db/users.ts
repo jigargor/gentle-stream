@@ -47,7 +47,6 @@ const DEFAULT_ENABLED_GAME_TYPES: GameType[] = [
   "killer_sudoku",
   "nonogram",
   "connections",
-  "rabbit_hole",
 ] as const;
 const DEFAULT_WEATHER_LOCATION = "San Jose, CA, US";
 let isUserSeenArticlesTableAvailable = true;
@@ -73,7 +72,6 @@ function normalizeEnabledGameTypes(input: unknown): GameType[] {
     "nonogram",
     "crossword",
     "connections",
-    "rabbit_hole",
   ]);
   const out: GameType[] = [];
   const seen = new Set<GameType>();

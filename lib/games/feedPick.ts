@@ -29,7 +29,6 @@ export const FEED_GAME_TYPES: GameType[] = [
   "killer_sudoku",
   "nonogram",
   "connections",
-  "rabbit_hole",
 ];
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];

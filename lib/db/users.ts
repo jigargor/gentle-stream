@@ -25,6 +25,7 @@ interface UserProfileRow {
   theme_preference?: "light" | "dark" | null;
   preferred_emotions: string[];
   preferred_locales: string[];
+  terms_accepted_at?: string | null;
   seen_article_ids: string[];
   created_at: string;
   updated_at: string;
@@ -120,6 +121,7 @@ function rowToProfile(row: UserProfileRow): UserProfile {
     themePreference: row.theme_preference ?? null,
     preferredEmotions: row.preferred_emotions ?? [],
     preferredLocales: row.preferred_locales ?? ["global"],
+    termsAcceptedAt: row.terms_accepted_at ?? null,
     seenArticleIds: row.seen_article_ids ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -65,8 +65,6 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [emailMode, setEmailMode] = useState<"sign_in" | "sign_up">("sign_in");
   const [birthDate, setBirthDate] = useState("");
-  /** Clickwrap: required before OAuth or email auth (unchecked by default). */
-  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
   const [requiresEmailVerification, setRequiresEmailVerification] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
@@ -127,10 +125,6 @@ export function LoginForm({
     e.preventDefault();
     setMessage(null);
 
-    if (!legalConsentAccepted) {
-      setMessage("Please agree to the Terms and Privacy Policy before continuing.");
-      return;
-    }
     if (password.trim().length < 8) {
       setMessage("Use at least 8 characters for your password.");
       return;
@@ -292,41 +286,25 @@ export function LoginForm({
           </p>
         )}
 
-        <label
+        <p
           style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: "0.45rem",
+            margin: "0 0 1rem",
             fontFamily: "'IM Fell English', Georgia, serif",
             fontSize: "0.78rem",
             color: "#555",
             lineHeight: 1.5,
-            marginBottom: "1rem",
           }}
         >
-          <input
-            type="checkbox"
-            checked={legalConsentAccepted}
-            onChange={(e) => setLegalConsentAccepted(e.target.checked)}
-            style={{ marginTop: "0.18rem" }}
-          />
-          <span>
-            I have read and agree to the{" "}
-            <a href="/terms" style={{ color: "#5c4a32" }}>
-              Terms of service
-            </a>{" "}
-            and{" "}
-            <a href="/privacy" style={{ color: "#5c4a32" }}>
-              Privacy policy
-            </a>
-            . For email login or signup, you must agree before continuing.
-            <span style={{ display: "block", marginTop: "0.25rem", color: "#777" }}>
-              {isCreatorLogin
-                ? "Creator access uses email/password and requires verified phone + email."
-                : "Google/Facebook sign-in prompts agreement on a follow-up screen."}
-            </span>
-          </span>
-        </label>
+          By creating an account, you will review and accept our{" "}
+          <a href="/terms" style={{ color: "#5c4a32" }}>
+            Terms of service
+          </a>{" "}
+          and{" "}
+          <a href="/privacy" style={{ color: "#5c4a32" }}>
+            Privacy policy
+          </a>{" "}
+          after signup.
+        </p>
 
         <button
           type="button"
@@ -562,7 +540,7 @@ export function LoginForm({
 
             <button
               type="submit"
-              disabled={emailBusy || !legalConsentAccepted}
+              disabled={emailBusy}
               style={{
                 width: "100%",
                 padding: "0.6rem 1rem",
@@ -573,8 +551,7 @@ export function LoginForm({
                 fontSize: "0.78rem",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                cursor: emailBusy ? "wait" : !legalConsentAccepted ? "not-allowed" : "pointer",
-                opacity: legalConsentAccepted ? 1 : 0.6,
+                cursor: emailBusy ? "wait" : "pointer",
               }}
             >
               {emailBusy

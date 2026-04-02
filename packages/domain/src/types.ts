@@ -80,6 +80,7 @@ export interface UserProfile {
   seenArticleIds: string[];
   preferredEmotions: string[]; // subset of ArticleSentiment emotions
   preferredLocales: string[]; // ["global", "US"] etc.
+  termsAcceptedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

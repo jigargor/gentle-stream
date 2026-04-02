@@ -2,26 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { TERMS_ACCEPTED_COOKIE, TERMS_ACCEPTED_COOKIE_MAX_AGE_SEC } from "@/lib/legal/terms-policy";
 import { TermsOfServiceContent } from "./TermsOfServiceContent";
-
-const cookieEscape = (value: string) => value.replace(/[%]/g, encodeURIComponent("%"));
 
 function safeNextPath(raw: string | null | undefined) {
   if (!raw || typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//"))
     return "/";
   return raw;
-}
-
-function getCookieValue(cookieName: string) {
-  if (typeof document === "undefined") return null;
-  const cookieStr = document.cookie ?? "";
-  const parts = cookieStr.split(";").map((p) => p.trim());
-  for (const part of parts) {
-    const [k, v] = part.split("=");
-    if (k === cookieName) return v ?? "";
-  }
-  return null;
 }
 
 export function TermsAcceptGate({ nextPath }: { nextPath: string }) {
@@ -32,17 +18,24 @@ export function TermsAcceptGate({ nextPath }: { nextPath: string }) {
 
   const [canAgree, setCanAgree] = useState(false);
   const [checked, setChecked] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    // If they already accepted, skip the gate.
-    const accepted = getCookieValue(TERMS_ACCEPTED_COOKIE) === "1";
-    if (accepted) {
-      router.replace(sanitizedNextPath);
-      return;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void (async () => {
+      try {
+        const res = await fetch("/api/user/preferences", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { termsAcceptedAt?: string | null };
+        if (body.termsAcceptedAt) {
+          router.replace(sanitizedNextPath);
+        }
+      } catch {
+        // no-op: user can still accept below
+      }
+    })();
+  }, [router, sanitizedNextPath]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -64,11 +57,26 @@ export function TermsAcceptGate({ nextPath }: { nextPath: string }) {
     };
   }, []);
 
-  function setAcceptedCookieAndContinue() {
-    const maxAge = TERMS_ACCEPTED_COOKIE_MAX_AGE_SEC;
-    // Not HttpOnly: cookie is only used for client-side gating.
-    document.cookie = `${cookieEscape(TERMS_ACCEPTED_COOKIE)}=1; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
-    router.replace(sanitizedNextPath === "/terms/accept" ? "/" : sanitizedNextPath);
+  async function submitAcceptance() {
+    if (!canAgree || !checked || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/legal/terms-accept", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+        setError(body.message ?? body.error ?? "Could not save acceptance. Please try again.");
+        return;
+      }
+      router.replace(sanitizedNextPath === "/terms/accept" ? "/" : sanitizedNextPath);
+    } catch {
+      setError("Could not save acceptance. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -161,8 +169,8 @@ export function TermsAcceptGate({ nextPath }: { nextPath: string }) {
 
           <button
             type="button"
-            disabled={!canAgree || !checked}
-            onClick={setAcceptedCookieAndContinue}
+            disabled={!canAgree || !checked || submitting}
+            onClick={() => void submitAcceptance()}
             style={{
               width: "100%",
               marginTop: "0.9rem",
@@ -174,12 +182,24 @@ export function TermsAcceptGate({ nextPath }: { nextPath: string }) {
               fontSize: "0.78rem",
               letterSpacing: "0.06em",
               textTransform: "uppercase",
-              cursor: !canAgree || !checked ? "not-allowed" : "pointer",
-              opacity: !canAgree || !checked ? 0.65 : 1,
+              cursor: !canAgree || !checked || submitting ? "not-allowed" : "pointer",
+              opacity: !canAgree || !checked || submitting ? 0.65 : 1,
             }}
           >
-            Agree and continue
+            {submitting ? "Saving..." : "Agree and continue"}
           </button>
+          {error ? (
+            <p
+              style={{
+                margin: "0.5rem 0 0",
+                fontFamily: "'IM Fell English', Georgia, serif",
+                fontSize: "0.78rem",
+                color: "#8b4513",
+              }}
+            >
+              {error}
+            </p>
+          ) : null}
         </div>
       </div>
     </div>

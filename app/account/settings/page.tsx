@@ -10,6 +10,11 @@ export const metadata: Metadata = {
 
 const legalLinks: { href: string; label: string; description: string }[] = [
   {
+    href: "/about",
+    label: "About",
+    description: "Project background, motivation, and open-source repository.",
+  },
+  {
     href: "/privacy",
     label: "Privacy policy",
     description: "How we collect, use, and protect your data.",

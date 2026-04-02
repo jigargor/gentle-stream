@@ -208,16 +208,7 @@ export type LayoutVariant = "hero" | "wide" | "standard";
 
 export interface GameFeedSection {
   sectionType: "game";
-  gameType:
-    | "sudoku"
-    | "killer_sudoku"
-    | "word_search"
-    | "nonogram"
-    | "crossword"
-    | "connections"
-    | "rabbit_hole"
-    | "cryptic"
-    | "lateral";
+  gameType: GameType;
   difficulty: "easy" | "medium" | "hard";
   index: number;
   /** NYT-style daily Connections: fetch with ?daily=1, hide replay */

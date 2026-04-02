@@ -32,6 +32,16 @@ const config: Config = {
         parchment: "#faf8f3",
         aged: "#ede9e1",
       },
+      borderRadius: {
+        editorialSm: "8px",
+        editorialMd: "12px",
+        editorialLg: "16px",
+      },
+      boxShadow: {
+        editorialPage: "0 18px 46px rgba(28, 22, 12, 0.14)",
+        editorialOverlay: "0 22px 68px rgba(17, 12, 6, 0.3)",
+        editorialPopover: "0 14px 40px rgba(15, 10, 6, 0.24)",
+      },
       animation: {
         "fade-slide-in": "fadeSlideIn 0.5s ease forwards",
         spin: "spin 1s linear infinite",

@@ -1,4 +1,4 @@
-import type { SpotifyMoodTileData, SpotifyMoodTrack } from "@/lib/types";
+import type { SpotifyMoodTileData, SpotifyMoodTrack } from "@gentle-stream/domain/types";
 import { getEnv } from "@/lib/env";
 
 const SPOTIFY_ACCOUNTS_URL = "https://accounts.spotify.com/api/token";

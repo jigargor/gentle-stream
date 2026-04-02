@@ -4,8 +4,8 @@
  */
 
 import { db } from "./client";
-import type { Category } from "@/lib/constants";
-import { CATEGORIES } from "@/lib/constants";
+import type { Category } from "@gentle-stream/domain/constants";
+import { CATEGORIES } from "@gentle-stream/domain/constants";
 
 const FLAVOR_FALLBACK: Record<string, string> = {
   connections: "general",

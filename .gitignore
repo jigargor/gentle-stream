@@ -1,5 +1,6 @@
 # dependencies
 /node_modules
+packages/*/node_modules
 /.pnp
 .pnp.js
 
@@ -34,3 +35,9 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+*storybook.log
+storybook-static
+playwright-report
+test-results
+blob-report

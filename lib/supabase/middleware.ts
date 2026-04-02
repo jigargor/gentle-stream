@@ -16,9 +16,10 @@ import {
 
 const PUBLIC_PREFIXES = [
   "/login",
+  "/creator/login",
   "/auth/callback",
   "/auth/auth-code-error",
-  "/api/auth/email-link",
+  "/api/auth/email-password",
   "/privacy",
   "/terms",
   "/data-deletion",
@@ -146,18 +147,19 @@ export async function updateSession(request: NextRequest, traceId?: string) {
     }
     if (!isPublicPath(pathname)) {
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/login";
+      const isCreatorArea = pathname.startsWith("/creator");
+      redirectUrl.pathname = isCreatorArea ? "/creator/login" : "/login";
       redirectUrl.searchParams.set("next", pathname);
       return finish(NextResponse.redirect(redirectUrl));
     }
-  } else if (pathname === "/login") {
+  } else if (pathname === "/login" || pathname === "/creator/login") {
     const sp = request.nextUrl.searchParams;
     if (sp.has("error") || sp.has("reason")) {
       // Stay on login so we can show auth errors / session expiry; otherwise logged-in
-      // users get bounced home and never see e.g. a failed magic-link handoff message.
+      // users get bounced home and never see e.g. a failed OAuth handoff message.
     } else {
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/";
+      redirectUrl.pathname = pathname === "/creator/login" ? "/creator" : "/";
       redirectUrl.searchParams.delete("next");
       return finish(NextResponse.redirect(redirectUrl));
     }

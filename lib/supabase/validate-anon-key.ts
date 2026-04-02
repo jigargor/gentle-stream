@@ -6,7 +6,7 @@ export function rejectIfSupabaseKeyIsPlatformSecret(key: string): void {
   if (key.startsWith("sb_secret_")) {
     throw new Error(
       "NEXT_PUBLIC_SUPABASE_ANON_KEY is set to a Supabase secret API key (sb_secret_...). " +
-        "The hosted platform rejects secret keys from browsers with HTTP 401 (e.g. email magic link). " +
+        "The hosted platform rejects secret keys from browsers with HTTP 401 (e.g. email/password auth). " +
         "In Dashboard → Settings → API, use the publishable key (sb_publishable_...) or legacy anon JWT. " +
         "Keep sb_secret_ / service_role only in server env (e.g. SUPABASE_SERVICE_ROLE_KEY)."
     );

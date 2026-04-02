@@ -15,9 +15,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { CATEGORIES } from "@/lib/constants";
-import type { Category } from "@/lib/constants";
-import type { ArticleContentKind } from "@/lib/types";
+import { CATEGORIES } from "@gentle-stream/domain/constants";
+import type { Category } from "@gentle-stream/domain/constants";
+import type { ArticleContentKind } from "@gentle-stream/domain/types";
 import { getRankedFeed } from "@/lib/agents/rankerAgent";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
 import { runTaggerAgent } from "@/lib/agents/taggerAgent";

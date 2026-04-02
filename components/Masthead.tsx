@@ -29,8 +29,8 @@ export default function Masthead({ accountSlot }: MastheadProps) {
           left: 0,
           right: 0,
           zIndex: 130,
-          background: "#faf8f3",
-          borderBottom: "1px solid #1a1a1a",
+          background: "var(--gs-surface-elevated)",
+          borderBottom: "1px solid var(--gs-border-strong)",
           height: `${MASTHEAD_TOP_BAR_HEIGHT_PX}px`,
           padding: "0.3rem 1rem",
           display: "flex",
@@ -38,7 +38,7 @@ export default function Masthead({ accountSlot }: MastheadProps) {
           alignItems: "center",
           fontSize: "0.68rem",
           fontFamily: "'IM Fell English', Georgia, serif",
-          color: "#555",
+          color: "var(--gs-muted)",
           letterSpacing: "0.05em",
         }}
       >
@@ -62,12 +62,12 @@ export default function Masthead({ accountSlot }: MastheadProps) {
       <header
         className="hide-scrollbar"
         style={{
-          borderBottom: "3px double #1a1a1a",
+          borderBottom: "3px double var(--gs-ink-strong)",
           paddingTop: `${MASTHEAD_TOP_BAR_HEIGHT_PX + 8}px`,
           paddingBottom: "0.5rem",
           textAlign: "center",
-          background: "#faf8f3",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
+          background: "var(--gs-surface)",
+          boxShadow: "var(--gs-shadow-page)",
         }}
       >
         <div
@@ -87,10 +87,10 @@ export default function Masthead({ accountSlot }: MastheadProps) {
               fontSize: "clamp(2.8rem, 6vw, 5rem)",
               fontWeight: 400,
               letterSpacing: "-0.01em",
-              color: "#0d0d0d",
+              color: "var(--gs-text)",
               margin: 0,
               lineHeight: 1,
-              textShadow: "1px 1px 0 rgba(0,0,0,0.06)",
+              textShadow: "1px 1px 0 rgba(0,0,0,0.05)",
             }}
           >
             Gentle Stream
@@ -98,7 +98,7 @@ export default function Masthead({ accountSlot }: MastheadProps) {
           <div
             style={{
               height: "2px",
-              background: "#1a1a1a",
+              background: "var(--gs-ink-strong)",
               margin: "0.35rem auto 0",
               maxWidth: "620px",
             }}

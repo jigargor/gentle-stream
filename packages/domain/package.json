@@ -1,0 +1,18 @@
+{
+  "name": "@gentle-stream/domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./constants": "./src/constants.ts",
+    "./games/types": "./src/games/types.ts",
+    "./types": "./src/types.ts",
+    "./schemas/validation": "./src/schemas/validation.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

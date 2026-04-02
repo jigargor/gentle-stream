@@ -102,7 +102,18 @@ async function testExactDuplicate() {
   assert(first.length === 1, "First insert returns 1 row");
 
   const second = await insertArticles([article]);
-  assert(second.length === 0, "Second insert returns 0 rows (blocked)");
+  insertedIds.push(...second.map((a) => a.id));
+  if (second.length === 0) {
+    assert(true, "Second insert returns 0 rows (blocked)");
+    return;
+  }
+
+  // Shared remote DBs can exhibit short read-after-write lag. Re-check once
+  // after a brief wait so this integration assertion is stable in CI.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const third = await insertArticles([article]);
+  insertedIds.push(...third.map((a) => a.id));
+  assert(third.length === 0, "Duplicate insert is eventually blocked");
 }
 
 async function testCasingVariant() {

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 const appLinks = [
+  { href: "/about", label: "About" },
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
   { href: "/data-deletion", label: "Data deletion" },

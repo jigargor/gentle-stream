@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchUpliftingNews } from "@/lib/fetchNews";
-import { CATEGORIES } from "@/lib/constants";
+import { CATEGORIES } from "@gentle-stream/domain/constants";
 import {
   buildRateLimitKey,
   consumeRateLimit,

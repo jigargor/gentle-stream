@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Script from "next/script";
+import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
-import type { Provider } from "@supabase/supabase-js";
-import Script from "next/script";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -12,7 +12,7 @@ function safeNextPath(raw: string | null): string {
 }
 
 /**
- * OAuth / magic-link `redirect_to` must match this tab exactly (scheme + host + port).
+ * OAuth / email-verification `redirect_to` must match this tab exactly (scheme + host + port).
  * PKCE stores the code verifier in cookies for that origin; if `redirectTo` points elsewhere
  * (e.g. server hinted `http://localhost:3000` while you use a LAN IP), Supabase sends you
  * to the wrong host, the exchange fails, and you can end up on production with no session.
@@ -21,7 +21,8 @@ function safeNextPath(raw: string | null): string {
  */
 function resolveAuthRedirectBase(serverHint: string): string {
   if (typeof window !== "undefined") {
-    return window.location.origin.replace(/\/$/, "");
+    const origin = window.location?.origin ?? "";
+    if (origin) return origin.replace(/\/$/, "");
   }
 
   const trimmed = serverHint.trim().replace(/\/$/, "");
@@ -34,23 +35,25 @@ function resolveAuthRedirectBase(serverHint: string): string {
 }
 
 export interface LoginFormProps {
-  /** From server: OAuth/magic-link return origin (dev defaults to http://localhost:3000). */
+  /** From server: OAuth/email-verification return origin (dev defaults to http://localhost:3000). */
   authRedirectBaseFromServer?: string;
+  audience?: "subscriber" | "creator";
   /** From `?next=` — passed by the server page to avoid `useSearchParams` + Suspense chunk issues in dev. */
   initialNext?: string | null;
   initialAuthError?: string | null;
   /** From `?reason=session_expired` after max session age. */
   initialSessionExpired?: boolean;
-  /** From `?error=magic_link_browser` — PKCE verifier missing (wrong browser / app). */
-  initialMagicLinkBrowserError?: boolean;
+  /** From `?error=oauth_browser` — PKCE verifier missing (wrong browser / app). */
+  initialOauthBrowserError?: boolean;
 }
 
 export function LoginForm({
   authRedirectBaseFromServer = "",
+  audience = "subscriber",
   initialNext = null,
   initialAuthError = null,
   initialSessionExpired = false,
-  initialMagicLinkBrowserError = false,
+  initialOauthBrowserError = false,
 }: LoginFormProps) {
   const nextPath = useMemo(
     () => safeNextPath(initialNext ?? null),
@@ -59,9 +62,10 @@ export function LoginForm({
   const authError = initialAuthError;
 
   const [email, setEmail] = useState("");
-  /** Clickwrap: required before OAuth or email sign-in (unchecked by default). */
-  const [legalConsentAccepted, setLegalConsentAccepted] = useState(false);
-  const [emailSent, setEmailSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [emailMode, setEmailMode] = useState<"sign_in" | "sign_up">("sign_in");
+  const [birthDate, setBirthDate] = useState("");
+  const [requiresEmailVerification, setRequiresEmailVerification] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -71,6 +75,7 @@ export function LoginForm({
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "1" ||
     process.env.NEXT_PUBLIC_TURNSTILE_ENABLED === "true";
   const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
+  const isCreatorLogin = audience === "creator";
 
   /**
    * Do not call signOut before OAuth: signOut removes the PKCE code_verifier from
@@ -108,7 +113,7 @@ export function LoginForm({
         setOauthProvider(null);
         return;
       }
-      // Browser navigates to Google; avoid finally { setBusy(false) } racing the redirect.
+      // Browser navigates to OAuth provider; avoid racing state updates.
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Sign-in failed");
       setOauthBusy(false);
@@ -116,13 +121,15 @@ export function LoginForm({
     }
   }
 
-  async function signInWithEmail(e: React.FormEvent) {
+  async function submitEmailPassword(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setMessage(null);
-    if (!legalConsentAccepted) {
-      setMessage("Please agree to the Terms and Privacy Policy before continuing.");
+
+    if (password.trim().length < 8) {
+      setMessage("Use at least 8 characters for your password.");
       return;
     }
+
     setEmailBusy(true);
     try {
       const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
@@ -132,25 +139,37 @@ export function LoginForm({
         );
         return;
       }
-      const formData = new FormData(e.currentTarget as HTMLFormElement);
+      const formData = new FormData(e.currentTarget);
       const turnstileToken =
         (formData.get("cf-turnstile-response") as string | null)?.trim() ?? "";
       const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextPath)}`;
-      const res = await fetch("/api/auth/email-link", {
+      const res = await fetch("/api/auth/email-password", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           email: email.trim(),
+          password,
+          mode: isCreatorLogin ? "sign_in" : emailMode,
+          audience,
+          birthDate,
           redirectTo,
           turnstileToken,
         }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setMessage(body.error ?? "Could not send sign-in link.");
+        setMessage(body.error ?? "Could not continue with email/password.");
         return;
       }
-      setEmailSent(true);
+      const body = (await res.json().catch(() => ({}))) as {
+        requiresEmailVerification?: boolean;
+      };
+      if (emailMode === "sign_up" || body.requiresEmailVerification) {
+        setRequiresEmailVerification(true);
+        setPassword("");
+        return;
+      }
+      window.location.assign(nextPath);
     } finally {
       setEmailBusy(false);
     }
@@ -175,6 +194,17 @@ export function LoginForm({
     padding: "2rem 1.75rem",
   };
 
+  const emailModeButtonBase: React.CSSProperties = {
+    flex: 1,
+    border: "1px solid #1a1a1a",
+    padding: "0.45rem 0.55rem",
+    fontFamily: "'Playfair Display', Georgia, serif",
+    fontSize: "0.74rem",
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    cursor: emailBusy ? "wait" : "pointer",
+  };
+
   return (
     <div style={shell}>
       <div style={card}>
@@ -191,7 +221,7 @@ export function LoginForm({
             textAlign: "center",
           }}
         >
-          Gentle Stream
+          {isCreatorLogin ? "Creator login" : "Gentle Stream"}
         </h1>
         <p
           style={{
@@ -204,7 +234,9 @@ export function LoginForm({
             lineHeight: 1.45,
           }}
         >
-          Sign in to read your personalised feed.
+          {isCreatorLogin
+            ? "Sign in to access creator tools. Creator accounts require verified phone and email."
+            : "Sign in to read your personalised feed."}
         </p>
 
         {initialSessionExpired && (
@@ -221,7 +253,7 @@ export function LoginForm({
           </p>
         )}
 
-        {initialMagicLinkBrowserError && (
+        {initialOauthBrowserError && (
           <p
             style={{
               fontFamily: "'IM Fell English', Georgia, serif",
@@ -232,15 +264,13 @@ export function LoginForm({
               lineHeight: 1.5,
             }}
           >
-            This sign-in link must be opened in the{" "}
-            <strong>same browser</strong> where you clicked &quot;Email me a sign-in
-            link&quot; (same profile on this device). In-app mail apps often open links
-            elsewhere, which cannot complete the handoff. We signed you out here so you
-            are not left in another user&apos;s session by mistake.
+            This OAuth sign-in must be completed in the <strong>same browser</strong> where
+            you started it. In-app mail apps often open links in a different browser profile,
+            which cannot complete the secure handoff.
           </p>
         )}
 
-        {authError && !initialMagicLinkBrowserError && (
+        {authError && !initialOauthBrowserError && (
           <p
             style={{
               fontFamily: "'IM Fell English', Georgia, serif",
@@ -251,48 +281,34 @@ export function LoginForm({
             }}
           >
             {authError === "sso_email_conflict"
-              ? "This email already belongs to an existing account. For security, social sign-in is blocked for that email. Sign in with email link instead."
+              ? "This email already belongs to an existing account. For security, social sign-in is blocked for that email. Sign in with email/password instead."
               : "Sign-in did not complete. Please try again."}
           </p>
         )}
 
-        <label
+        <p
           style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: "0.45rem",
+            margin: "0 0 1rem",
             fontFamily: "'IM Fell English', Georgia, serif",
             fontSize: "0.78rem",
             color: "#555",
             lineHeight: 1.5,
-            marginBottom: "1rem",
           }}
         >
-          <input
-            type="checkbox"
-            checked={legalConsentAccepted}
-            onChange={(e) => setLegalConsentAccepted(e.target.checked)}
-            style={{ marginTop: "0.18rem" }}
-          />
-          <span>
-            I have read and agree to the{" "}
-            <a href="/terms" style={{ color: "#5c4a32" }}>
-              Terms of service
-            </a>{" "}
-            and{" "}
-            <a href="/privacy" style={{ color: "#5c4a32" }}>
-              Privacy policy
-            </a>
-            . For email sign-in, you must agree before continuing.
-            <span style={{ display: "block", marginTop: "0.25rem", color: "#777" }}>
-              Google/Facebook sign-in prompts agreement on a follow-up screen.
-            </span>
-          </span>
-        </label>
+          By creating an account, you will review and accept our{" "}
+          <a href="/terms" style={{ color: "#5c4a32" }}>
+            Terms of service
+          </a>{" "}
+          and{" "}
+          <a href="/privacy" style={{ color: "#5c4a32" }}>
+            Privacy policy
+          </a>{" "}
+          after signup.
+        </p>
 
         <button
           type="button"
-          disabled={oauthBusy}
+          disabled={oauthBusy || isCreatorLogin}
           onClick={() => void signInWithOAuth("google")}
           style={{
             width: "100%",
@@ -306,6 +322,7 @@ export function LoginForm({
             cursor: oauthBusy ? "wait" : "pointer",
             opacity: 1,
             marginBottom: "0.6rem",
+            display: isCreatorLogin ? "none" : "block",
           }}
         >
           {oauthBusy && oauthProvider === "google"
@@ -315,7 +332,7 @@ export function LoginForm({
 
         <button
           type="button"
-          disabled={oauthBusy}
+          disabled={oauthBusy || isCreatorLogin}
           onClick={() => void signInWithOAuth("facebook")}
           style={{
             width: "100%",
@@ -329,6 +346,7 @@ export function LoginForm({
             cursor: oauthBusy ? "wait" : "pointer",
             opacity: 1,
             marginBottom: "1.25rem",
+            display: isCreatorLogin ? "none" : "block",
           }}
         >
           {oauthBusy && oauthProvider === "facebook"
@@ -338,7 +356,7 @@ export function LoginForm({
 
         <div
           style={{
-            display: "flex",
+            display: isCreatorLogin ? "none" : "flex",
             alignItems: "center",
             gap: "0.75rem",
             margin: "0 0 1.25rem",
@@ -352,7 +370,7 @@ export function LoginForm({
           <span style={{ flex: 1, height: "1px", background: "#ddd" }} />
         </div>
 
-        {emailSent ? (
+        {requiresEmailVerification ? (
           <p
             style={{
               fontFamily: "'IM Fell English', Georgia, serif",
@@ -363,10 +381,43 @@ export function LoginForm({
               lineHeight: 1.5,
             }}
           >
-            Check your inbox for a sign-in link. You can close this tab.
+            Check your inbox to verify your email, then sign in with your password.
           </p>
         ) : (
-          <form onSubmit={signInWithEmail}>
+          <form onSubmit={submitEmailPassword}>
+            <div
+              style={{
+                display: "flex",
+                gap: "0.4rem",
+                marginBottom: "0.65rem",
+              }}
+            >
+              <button
+                type="button"
+                disabled={emailBusy}
+                onClick={() => setEmailMode("sign_in")}
+                style={{
+                  ...emailModeButtonBase,
+                  background: emailMode === "sign_in" ? "#1a1a1a" : "#fff",
+                  color: emailMode === "sign_in" ? "#faf8f3" : "#1a1a1a",
+                }}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                disabled={emailBusy}
+                onClick={() => setEmailMode("sign_up")}
+                style={{
+                  ...emailModeButtonBase,
+                  background: emailMode === "sign_up" ? "#1a1a1a" : "#fff",
+                  color: emailMode === "sign_up" ? "#faf8f3" : "#1a1a1a",
+                }}
+              >
+                Sign up
+              </button>
+            </div>
+
             <label
               htmlFor="login-email"
               style={{
@@ -400,6 +451,77 @@ export function LoginForm({
                 marginBottom: "0.5rem",
               }}
             />
+
+            <label
+              htmlFor="login-password"
+              style={{
+                display: "block",
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "0.72rem",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "#888",
+                marginBottom: "0.35rem",
+              }}
+            >
+              Password
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete={!isCreatorLogin && emailMode === "sign_up" ? "new-password" : "current-password"}
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 8 characters"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "0.55rem 0.65rem",
+                border: "1px solid #ccc",
+                background: "#fff",
+                fontFamily: "Georgia, serif",
+                fontSize: "0.95rem",
+                marginBottom: "0.5rem",
+              }}
+            />
+            {!isCreatorLogin && emailMode === "sign_up" ? (
+              <>
+                <label
+                  htmlFor="login-birthdate"
+                  style={{
+                    display: "block",
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "0.72rem",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "#888",
+                    marginBottom: "0.35rem",
+                  }}
+                >
+                  Birthdate
+                </label>
+                <input
+                  id="login-birthdate"
+                  type="date"
+                  required
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "0.55rem 0.65rem",
+                    border: "1px solid #ccc",
+                    background: "#fff",
+                    fontFamily: "Georgia, serif",
+                    fontSize: "0.95rem",
+                    marginBottom: "0.5rem",
+                  }}
+                />
+              </>
+            ) : null}
+
             <p
               style={{
                 margin: "0 0 0.85rem",
@@ -409,12 +531,16 @@ export function LoginForm({
                 lineHeight: 1.45,
               }}
             >
-              We will send a one-time sign-in link to this address. The link is for signing in
-              only, not marketing email.
+              {isCreatorLogin
+                ? "Creator accounts require verified email and verified phone before access."
+                : emailMode === "sign_up"
+                  ? "We will create your account and send a verification email through Supabase before your first password login."
+                  : "Use the password linked to your account."}
             </p>
+
             <button
               type="submit"
-              disabled={emailBusy || !legalConsentAccepted}
+              disabled={emailBusy}
               style={{
                 width: "100%",
                 padding: "0.6rem 1rem",
@@ -425,12 +551,18 @@ export function LoginForm({
                 fontSize: "0.78rem",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                cursor: emailBusy ? "wait" : !legalConsentAccepted ? "not-allowed" : "pointer",
-                opacity: legalConsentAccepted ? 1 : 0.6,
+                cursor: emailBusy ? "wait" : "pointer",
               }}
             >
-              {emailBusy ? "Sending…" : "Email me a sign-in link"}
+              {emailBusy
+                ? "Working…"
+                : isCreatorLogin
+                  ? "Sign in to creator account"
+                  : emailMode === "sign_up"
+                    ? "Create account"
+                    : "Sign in with email"}
             </button>
+
             {turnstileEnabled && turnstileSiteKey ? (
               <>
                 <Script
@@ -465,6 +597,7 @@ export function LoginForm({
 
         <div
           style={{
+            display: isCreatorLogin ? "none" : "block",
             margin: "1.35rem 0 0",
             paddingTop: "1.1rem",
             borderTop: "1px solid #e0dcd4",
@@ -512,7 +645,7 @@ export function LoginForm({
               ·
             </span>
             <a
-              href={`/login?next=${encodeURIComponent("/creator")}`}
+              href={`/creator/login?next=${encodeURIComponent("/creator")}`}
               style={{
                 color: "#1a472a",
                 textDecoration: "underline",
@@ -531,8 +664,8 @@ export function LoginForm({
               lineHeight: 1.45,
             }}
           >
-            This sets where you go after sign-in (Google, Facebook, or email link). Stay on
-            this page and complete sign-in above.
+            This sets where you go after sign-in (Google, Facebook, or email/password). Stay
+            on this page and complete sign-in above.
           </p>
         </div>
 
@@ -611,8 +744,8 @@ export function LoginForm({
                 lineHeight: 1.5,
               }}
             >
-              Please log into your regular account first using Google, Facebook, or an email
-              sign-in link. After login, continue to creator onboarding from your account.
+              Please log into your regular account first using Google, Facebook, or
+              email/password. After login, continue to creator onboarding from your account.
             </p>
             <button
               type="button"
@@ -639,3 +772,20 @@ export function LoginForm({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

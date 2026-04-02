@@ -3,9 +3,9 @@
  */
 
 import { db } from "@/lib/db/client";
-import type { Category } from "@/lib/constants";
-import { CATEGORIES } from "@/lib/constants";
-import type { Difficulty } from "@/lib/games/types";
+import type { Category } from "@gentle-stream/domain/constants";
+import { CATEGORIES } from "@gentle-stream/domain/constants";
+import type { Difficulty } from "@gentle-stream/domain/games/types";
 import {
   getWordSearchGridConfig,
   type WordSearchGeneratorOptions,

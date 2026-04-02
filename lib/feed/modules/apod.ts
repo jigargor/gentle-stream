@@ -1,4 +1,4 @@
-import type { NasaModuleData } from "@/lib/types";
+import type { NasaModuleData } from "@gentle-stream/domain/types";
 import { picsumFallbackUrl } from "@/lib/article-image";
 
 interface NasaApodJson {

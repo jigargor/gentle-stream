@@ -1,0 +1,29 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "feature/**"
+      - "bugfix/**"
+      - "test/**"
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Skip advanced CodeQL workflow when default setup is enabled
+        run: |
+          echo "Repository uses GitHub CodeQL default setup."
+          echo "Skipping advanced workflow upload to avoid SARIF processing conflicts."

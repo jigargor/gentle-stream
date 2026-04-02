@@ -5,7 +5,7 @@ import {
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
-import { TERMS_ACCEPTED_COOKIE } from "@/lib/legal/terms-policy";
+import { db } from "@/lib/db/client";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -32,6 +32,20 @@ function hasEmailIdentity(user: {
   identities?: Array<{ provider?: string | null }>;
 }): boolean {
   return (user.identities ?? []).some((identity) => identity.provider === "email");
+}
+
+function isFirstSignInAfterSignup(user: {
+  created_at?: string | null;
+  last_sign_in_at?: string | null;
+}): boolean {
+  const createdAt = user.created_at ?? null;
+  const lastSignInAt = user.last_sign_in_at ?? null;
+  if (!createdAt || !lastSignInAt) return false;
+  const createdMs = Date.parse(createdAt);
+  const lastMs = Date.parse(lastSignInAt);
+  if (!Number.isFinite(createdMs) || !Number.isFinite(lastMs)) return false;
+  // Supabase timestamps can differ slightly; treat very close values as first sign-in.
+  return Math.abs(lastMs - createdMs) <= 2 * 60 * 1000;
 }
 
 function createSupabaseAdminClient() {
@@ -76,6 +90,20 @@ async function isSsoEmailConflict(user: {
   });
 }
 
+async function hasAcceptedTermsServerSide(userId: string): Promise<boolean> {
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("terms_accepted_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("[/auth/callback] terms acceptance lookup failed:", error);
+    return false;
+  }
+  const acceptedAt = (data as { terms_accepted_at?: string | null } | null)?.terms_accepted_at;
+  return Boolean(acceptedAt);
+}
+
 /**
  * After a failed auth handoff, clear Supabase cookies on the response. Otherwise the
  * browser keeps the previous session and the user appears signed in as the wrong account.
@@ -96,7 +124,7 @@ async function redirectToLoginCleared(
 }
 
 /**
- * OAuth (Google/Facebook) and email magic links land here with ?code=...
+ * OAuth (Google/Facebook) and email verification links land here with ?code=...
  * Cookies must be written onto the returned redirect response (Route Handler quirk).
  *
  * Do not call signOut before exchangeCodeForSession: signOut removes the PKCE code
@@ -121,7 +149,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     const errKey = isPkceVerifierMissing(error)
-      ? "magic_link_browser"
+      ? "oauth_browser"
       : "auth";
     return redirectToLoginCleared(request, { error: errKey });
   }
@@ -138,10 +166,8 @@ export async function GET(request: NextRequest) {
     return redirectToLoginCleared(request, { error: "sso_email_conflict" });
   }
 
-  const provider = readPrimaryProvider(user);
-  const termsAccepted = request.cookies.get(TERMS_ACCEPTED_COOKIE)?.value === "1";
-  const needsTermsAccept =
-    (provider === "google" || provider === "facebook") && !termsAccepted;
+  const termsAccepted = await hasAcceptedTermsServerSide(user.id);
+  const needsTermsAccept = isFirstSignInAfterSignup(user) && !termsAccepted;
 
   if (needsTermsAccept && destination.pathname !== "/terms/accept") {
     const gateUrl = new URL("/terms/accept", request.url);

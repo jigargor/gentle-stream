@@ -1,4 +1,4 @@
-import type { Article, LayoutVariant } from "@/lib/types";
+import type { Article, LayoutVariant } from "@gentle-stream/domain/types";
 
 export interface NewspaperLayoutPlan {
   templateId:

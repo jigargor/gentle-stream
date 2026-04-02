@@ -1,6 +1,6 @@
-import type { Category } from "@/lib/constants";
-import { DEFAULT_CATEGORY_WEIGHTS } from "@/lib/constants";
-import type { StoredArticle, UserProfile } from "@/lib/types";
+import type { Category } from "@gentle-stream/domain/constants";
+import { DEFAULT_CATEGORY_WEIGHTS } from "@gentle-stream/domain/constants";
+import type { StoredArticle, UserProfile } from "@gentle-stream/domain/types";
 import type { UserAffinityRow } from "@/lib/db/engagement";
 
 export function buildAffinityIndex(rows: UserAffinityRow[]): Map<string, number> {

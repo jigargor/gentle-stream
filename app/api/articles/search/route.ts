@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { rowToArticle } from "@/lib/db/articles";
-import type { ArticleContentKind, StoredArticle } from "@/lib/types";
-import { CATEGORIES } from "@/lib/constants";
+import type { ArticleContentKind, StoredArticle } from "@gentle-stream/domain/types";
+import { CATEGORIES } from "@gentle-stream/domain/constants";
 import { getSessionUserId } from "@/lib/api/sessionUser";
 import {
   buildRateLimitKey,

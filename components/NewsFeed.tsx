@@ -7,11 +7,12 @@ import CategoryDrawer from "./CategoryDrawer";
 import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
 import GameSlot from "./games/GameSlot";
-import WeatherFillerCard from "./feed/WeatherFillerCard";
+import WeatherCard from "./feed/WeatherCard";
 import SpotifyMoodTile from "./feed/SpotifyMoodTile";
-import TodoFillerCard from "./feed/TodoFillerCard";
+import TodoCard from "./feed/TodoCard";
 import GeneratedArtModuleCard from "./feed/GeneratedArtModuleCard";
 import NasaApodCard from "./feed/NasaApodCard";
+import IconFractalCard from "./feed/IconFractalCard";
 import LoadingSection from "./LoadingSection";
 import ErrorBanner from "./ErrorBanner";
 import type { Category } from "@/lib/constants";
@@ -23,7 +24,9 @@ import type {
   GameFeedSection,
   ModuleFeedSection,
   FeedModuleData,
+  EditorialBreatherModuleData,
   GeneratedImageModuleData,
+  IconFractalModuleData,
   NasaModuleData,
   WeatherModuleData,
   SpotifyMoodTileData,
@@ -36,6 +39,7 @@ import { feedGamePickForOrdinal } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
 import { chooseNewspaperLayout } from "@/lib/feed/newspaperLayout";
 import {
+  buildIconFractalModuleData,
   buildGeneratedImageModuleData,
   chooseGapIntervalModuleType,
   chooseInlineModuleType,
@@ -114,6 +118,53 @@ interface FeedCacheEntry {
   cachedAtMs: number;
 }
 
+function spotifyContentSignature(data: SpotifyMoodTileData | null): string | null {
+  if (!data) return null;
+  const topTracks = data.tracks
+    .slice(0, 8)
+    .map((track) => `${track.id}|${track.name}|${track.artist}`)
+    .join("||");
+  return [
+    data.mode,
+    data.mood,
+    data.title,
+    data.subtitle,
+    data.playlistUrl ?? "",
+    topTracks,
+  ].join("::");
+}
+
+function buildEditorialBreatherData(input: {
+  sectionIndex: number;
+  category?: string;
+  motif?: EditorialBreatherModuleData["motif"];
+  href?: string;
+  hrefLabel?: string;
+}): EditorialBreatherModuleData {
+  const motifPool: EditorialBreatherModuleData["motif"][] = [
+    "linework",
+    "divider",
+    "stamp",
+  ];
+  const motif = input.motif ?? motifPool[Math.abs(input.sectionIndex % motifPool.length)]!;
+  const categoryLabel = input.category?.trim() || "Today";
+  const lines = [
+    "A short pause in the page rhythm, before the next column.",
+    "A quiet interlude to keep the print flow breathable.",
+    "An editorial breath between longer reads.",
+    "A subtle spacer that preserves the broadsheet cadence.",
+  ];
+  return {
+    mode: "editorial_breather",
+    title: `${categoryLabel} desk note`,
+    kicker: "Editorial pause",
+    line: lines[Math.abs(input.sectionIndex % lines.length)]!,
+    motif,
+    href: input.href,
+    hrefLabel: input.hrefLabel,
+  };
+}
+
 function readTruthyFlag(input: string | undefined, defaultValue: boolean): boolean {
   if (input == null) return defaultValue;
   const value = input.trim().toLowerCase();
@@ -147,6 +198,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   const [activeSearchQuery, setActiveSearchQuery] = useState("");
   const [liveGenerating, setLiveGenerating] = useState(false);
   const [themePreference, setThemePreference] = useState<"light" | "dark">("light");
+  const [weatherUnitSystem, setWeatherUnitSystem] = useState<"metric" | "imperial">("metric");
+  const [weatherModalOpen, setWeatherModalOpen] = useState(false);
+  const [weatherModalLoading, setWeatherModalLoading] = useState(false);
+  const [weatherModalError, setWeatherModalError] = useState<string | null>(null);
+  const [weatherModalData, setWeatherModalData] = useState<WeatherModuleData | null>(null);
   /** True once game ratio is resolved for the current session/user bootstrap. */
   const [isFeedReady, setIsFeedReady] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
@@ -192,6 +248,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     spotify: false,
     nasa: false,
   });
+  const weatherBriefLoadedRef = useRef(false);
+  const seenSpotifySignaturesRef = useRef<Set<string>>(new Set());
+  const recentBreatherMotifsRef = useRef<EditorialBreatherModuleData["motif"][]>([]);
   const fillerMetricsRef = useRef({
     gapDetected: 0,
     moduleInserted: 0,
@@ -340,6 +399,31 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     },
     [resolveBrowserGeo]
   );
+
+  const openWeatherModal = useCallback(() => {
+    setWeatherModalOpen(true);
+    setWeatherModalError(null);
+    setWeatherModalLoading(true);
+    void (async () => {
+      try {
+        const weatherData = await fetchModuleData({
+          moduleType: "weather",
+          category: activeCategoryRef.current ?? undefined,
+        });
+        if (!weatherData || weatherData.mode !== "weather") {
+          setWeatherModalError("Could not load weather details right now.");
+          setWeatherModalData(null);
+          return;
+        }
+        setWeatherModalData(weatherData as WeatherModuleData);
+      } catch {
+        setWeatherModalError("Could not load weather details right now.");
+        setWeatherModalData(null);
+      } finally {
+        setWeatherModalLoading(false);
+      }
+    })();
+  }, [fetchModuleData]);
 
   const fetchModuleSection = useCallback(
     async (input: {
@@ -514,7 +598,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         const cache = singletonFeedCacheRef.current;
         if (ar === SINGLETON_AFTER_ARTICLE_COUNT_WEATHER && !singletonPlacedRef.current.weather) {
           singletonPlacedRef.current.weather = true;
-          if (cache.weather) {
+          if (cache.weather && !weatherBriefLoadedRef.current) {
+            weatherBriefLoadedRef.current = true;
             const mod: ModuleFeedSection = {
               sectionType: "module",
               moduleType: "weather",
@@ -531,6 +616,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         if (ar === SINGLETON_AFTER_ARTICLE_COUNT_SPOTIFY && !singletonPlacedRef.current.spotify) {
           singletonPlacedRef.current.spotify = true;
           if (cache.spotify) {
+            const signature = spotifyContentSignature(cache.spotify);
+            if (signature && seenSpotifySignaturesRef.current.has(signature)) return;
+            if (signature) seenSpotifySignaturesRef.current.add(signature);
             const mod: ModuleFeedSection = {
               sectionType: "module",
               moduleType: "spotify",
@@ -721,24 +809,73 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         const preferredType = chooseInlineModuleType({
           layoutHint,
           todoEnabled: todoModuleEnabled,
+          inlineGapPx: layoutPlan.inlineGapPx,
+          residualGapPx: layoutPlan.residualGapPx,
         });
-        let inlineData = await fetchModuleData({
-          moduleType: preferredType,
-          category: data.category,
-          location: inlineLocation,
-        });
+        const totalBodyChars = orderedArticles.reduce(
+          (sum, article) =>
+            sum +
+            (typeof article.body === "string"
+              ? article.body.length
+              : 0),
+          0
+        );
+        const hasEditorialDensity = orderedArticles.length >= 2 && totalBodyChars >= 1200;
+        let inlineData: FeedModuleData | null = null;
+        if (preferredType === "editorial_breather" && hasEditorialDensity) {
+          const motifPool: EditorialBreatherModuleData["motif"][] = ["linework", "divider", "stamp"];
+          const initialMotif =
+            motifPool[Math.abs((currentIndex + orderedArticles.length) % motifPool.length)]!;
+          const previousMotifs = recentBreatherMotifsRef.current.slice(-2);
+          const motif =
+            previousMotifs.includes(initialMotif)
+              ? motifPool.find((entry) => !previousMotifs.includes(entry)) ?? initialMotif
+              : initialMotif;
+          const topArticle = orderedArticles[0];
+          const topHref =
+            topArticle &&
+            "id" in topArticle &&
+            typeof topArticle.id === "string" &&
+            topArticle.id.length > 0
+              ? `/article/${topArticle.id}`
+              : undefined;
+          inlineData = buildEditorialBreatherData({
+            sectionIndex: currentIndex,
+            category: data.category,
+            motif,
+            href: topHref,
+            hrefLabel: topHref ? "Open lead story" : undefined,
+          });
+          recentBreatherMotifsRef.current = [...recentBreatherMotifsRef.current.slice(-2), motif];
+        } else if (preferredType === "icon_fractal") {
+          inlineData = buildIconFractalModuleData({
+            seed: currentIndex * 97 + orderedArticles.length * 11,
+          });
+        } else {
+          const fetchType: "generated_art" | "todo" =
+            preferredType === "todo" ? "todo" : "generated_art";
+          inlineData = await fetchModuleData({
+            moduleType: fetchType,
+            category: data.category,
+            location: inlineLocation,
+          });
+        }
         if (!inlineData) {
           inlineData = buildGeneratedImageModuleData({
             category: data.category,
             location: inlineLocation,
           });
         }
-        const resolvedType: "generated_art" | "todo" =
+        const resolvedType: "generated_art" | "todo" | "editorial_breather" | "icon_fractal" =
           inlineData.mode === "generated_art"
             ? "generated_art"
             : inlineData.mode === "todo"
               ? "todo"
-              : "generated_art";
+              : inlineData.mode === "editorial_breather"
+                ? "editorial_breather"
+                : inlineData.mode === "icon_fractal"
+                  ? "icon_fractal"
+                  : "generated_art";
         section.newspaperLayout.inlineModule = {
           moduleType: resolvedType,
           reason: "inline",
@@ -757,12 +894,23 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         const hero = orderedArticles[0];
 
         let primary: ReadingRailModule | undefined;
-        if (cache.weather) primary = { kind: "weather", data: cache.weather };
+        if (cache.weather && !weatherBriefLoadedRef.current) {
+          primary = { kind: "weather", data: cache.weather };
+          weatherBriefLoadedRef.current = true;
+          singletonPlacedRef.current.weather = true;
+        }
         else if (cache.nasa) primary = { kind: "nasa", data: cache.nasa };
 
         let secondary: ReadingRailModule | undefined;
-        if (cache.spotify) secondary = { kind: "spotify", data: cache.spotify };
-        else {
+        const spotifySignature = spotifyContentSignature(cache.spotify);
+        if (
+          cache.spotify &&
+          (!spotifySignature || !seenSpotifySignaturesRef.current.has(spotifySignature))
+        ) {
+          secondary = { kind: "spotify", data: cache.spotify };
+          if (spotifySignature) seenSpotifySignaturesRef.current.add(spotifySignature);
+          singletonPlacedRef.current.spotify = true;
+        } else {
           const gen = await fetchModuleData({
             moduleType: "generated_art",
             category: data.category,
@@ -931,6 +1079,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       setSections([]);
       sectionCountRef.current = 0;
       singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+      weatherBriefLoadedRef.current = false;
+      seenSpotifySignaturesRef.current = new Set();
+      recentBreatherMotifsRef.current = [];
       void loadMore(overrideCategory);
     },
     [loadMore]
@@ -974,6 +1125,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     singletonPrefetchedRef.current = false;
     singletonPrefetchPromiseRef.current = null;
     singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+    weatherBriefLoadedRef.current = false;
+    seenSpotifySignaturesRef.current = new Set();
+    recentBreatherMotifsRef.current = [];
 
     const gen = ++feedBootstrapGenRef.current;
     let cancelled = false;
@@ -1030,6 +1184,20 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           } else {
             preferredWeatherLocationRef.current = null;
           }
+          if (
+            profile.weatherUnitSystem === "metric" ||
+            profile.weatherUnitSystem === "imperial"
+          ) {
+            setWeatherUnitSystem(profile.weatherUnitSystem);
+            try {
+              localStorage.setItem(
+                "gentle_stream_weather_unit_system",
+                profile.weatherUnitSystem
+              );
+            } catch {
+              /* ignore */
+            }
+          }
           if (profile.themePreference === "light" || profile.themePreference === "dark") {
             serverThemePreference = profile.themePreference;
             try {
@@ -1083,6 +1251,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         } catch {
           /* ignore */
         }
+      }
+      try {
+        const storedUnitSystem = localStorage.getItem("gentle_stream_weather_unit_system");
+        if (storedUnitSystem === "metric" || storedUnitSystem === "imperial") {
+          setWeatherUnitSystem(storedUnitSystem);
+        }
+      } catch {
+        /* ignore */
       }
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
@@ -1232,6 +1408,34 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", themePreference);
   }, [themePreference]);
+
+  useEffect(() => {
+    function onWeatherUnitSystemUpdated(e: Event) {
+      const ce = e as CustomEvent<{ weatherUnitSystem?: unknown }>;
+      const next = ce.detail?.weatherUnitSystem;
+      if (next === "metric" || next === "imperial") {
+        setWeatherUnitSystem(next);
+      }
+    }
+    window.addEventListener(
+      "gentle-stream-weather-unit-system",
+      onWeatherUnitSystemUpdated as EventListener
+    );
+    return () =>
+      window.removeEventListener(
+        "gentle-stream-weather-unit-system",
+        onWeatherUnitSystemUpdated as EventListener
+      );
+  }, []);
+
+  useEffect(() => {
+    if (!weatherModalOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setWeatherModalOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [weatherModalOpen]);
 
   useEffect(() => {
     function updateScrollTopVisibility() {
@@ -1399,15 +1603,19 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       />
 
       <div
+        className="gs-card-lift"
         style={{
           maxWidth: "1200px",
           margin: "0 auto",
-          padding: "0.55rem 0.85rem 0",
+          padding: "0.7rem 0.85rem 0.35rem",
           display: "flex",
           gap: "0.4rem",
           flexWrap: "wrap",
           alignItems: "center",
           background: "var(--gs-surface)",
+          border: "1px solid var(--gs-border)",
+          borderRadius: "0 0 var(--gs-radius-md) var(--gs-radius-md)",
+          boxShadow: "0 8px 24px rgba(22, 15, 8, 0.06)",
         }}
       >
         {(
@@ -1421,28 +1629,50 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           const active = activeKindFilter === option.value;
           return (
             <button
+              className="gs-chip-button gs-interactive gs-focus-ring"
               key={option.value}
               type="button"
               aria-pressed={active}
               onClick={() => handleKindFilterSelect(option.value)}
               style={{
-                border: active ? "2px solid #1a1a1a" : "1px solid #d8d2c7",
-                background: active ? "#c8a84b" : "#fff",
-                color: "#1a1a1a",
+                border: active ? "1.5px solid var(--gs-ink-strong)" : undefined,
+                background: active ? "#d7bb66" : "var(--gs-surface-elevated)",
+                color: "var(--gs-ink-strong)",
                 padding: "0.35rem 0.55rem",
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.7rem",
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
                 cursor: "pointer",
+                boxShadow: active ? "0 8px 18px rgba(40, 30, 18, 0.16)" : "none",
               }}
             >
               {option.label}
             </button>
           );
         })}
+        <button
+          className="gs-chip-button gs-interactive gs-focus-ring"
+          type="button"
+          onClick={openWeatherModal}
+          style={{
+            border: "1px solid #93b28a",
+            background: "#e6f2e3",
+            color: "#23402a",
+            padding: "0.35rem 0.55rem",
+            fontFamily: "'Playfair Display', Georgia, serif",
+            fontSize: "0.7rem",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            boxShadow: "0 6px 14px rgba(25, 72, 38, 0.12)",
+          }}
+        >
+          Weather
+        </button>
         <div style={{ marginLeft: "auto", display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
           <input
+            className="gs-focus-ring"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             onKeyDown={(event) => {
@@ -1454,20 +1684,22 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             placeholder="Search stories or tags..."
             aria-label="Search stories"
             style={{
-              border: "1px solid #d8d2c7",
-              padding: "0.34rem 0.45rem",
+              border: "1px solid var(--gs-border)",
+              background: "var(--gs-surface-elevated)",
+              borderRadius: "var(--gs-radius-sm)",
+              padding: "0.38rem 0.55rem",
               minWidth: "14rem",
               fontSize: "0.75rem",
             }}
           />
           <button
+            className="gs-chip-button gs-interactive gs-focus-ring"
             type="button"
             onClick={applySearch}
             style={{
-              border: "1px solid #1a1a1a",
-              background: "#fff",
-              color: "#1a1a1a",
-              padding: "0.32rem 0.55rem",
+              background: "var(--gs-surface-elevated)",
+              color: "var(--gs-ink-strong)",
+              padding: "0.35rem 0.62rem",
               fontFamily: "'Playfair Display', Georgia, serif",
               fontSize: "0.7rem",
               cursor: "pointer",
@@ -1477,6 +1709,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           </button>
           {activeSearchQuery ? (
             <button
+              className="gs-chip-button gs-interactive gs-focus-ring"
               type="button"
               onClick={() => {
                 setSearchInput("");
@@ -1485,10 +1718,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 resetFeedAndLoad();
               }}
               style={{
-                border: "1px solid #888",
-                background: "#faf8f3",
+                background: "var(--gs-surface-elevated)",
                 color: "#333",
-                padding: "0.32rem 0.55rem",
+                padding: "0.35rem 0.62rem",
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "0.7rem",
                 cursor: "pointer",
@@ -1524,8 +1756,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         style={{
           maxWidth: "1200px",
           margin: "0 auto",
-            background: "var(--gs-surface)",
-          boxShadow: "0 0 60px rgba(0,0,0,0.13)",
+          background: "var(--gs-surface)",
+          boxShadow: "var(--gs-shadow-page)",
+          borderRadius: "0 0 var(--gs-radius-md) var(--gs-radius-md)",
+          overflow: "hidden",
         }}
       >
         {sections.length === 0 && !loading && !error && (
@@ -1565,7 +1799,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             }
             if (section.moduleType === "todo") {
               return (
-                <TodoFillerCard
+                <TodoCard
                   key={`module-${section.index}-todo`}
                   data={section.data as TodoModuleData}
                   reason={section.reason}
@@ -1581,6 +1815,14 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
                 />
               );
             }
+            if (section.moduleType === "icon_fractal") {
+              return (
+                <IconFractalCard
+                  key={`module-${section.index}-icon-fractal`}
+                  data={section.data as IconFractalModuleData}
+                />
+              );
+            }
             if (section.moduleType === "nasa") {
               return (
                 <NasaApodCard
@@ -1591,10 +1833,11 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               );
             }
             return (
-              <WeatherFillerCard
+              <WeatherCard
                 key={`module-${section.index}-weather`}
                 data={section.data as WeatherModuleData}
                 reason={section.reason}
+                weatherUnitSystem={weatherUnitSystem}
               />
             );
           }
@@ -1661,6 +1904,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       </main>
       {showScrollTopButton ? (
         <button
+          className="gs-interactive gs-soft-pulse gs-focus-ring"
           type="button"
           onClick={scrollToTop}
           aria-label="Scroll to top"
@@ -1671,10 +1915,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
             width: "2.45rem",
             height: "2.45rem",
             borderRadius: "999px",
-            border: "1px solid #1a1a1a",
-            background: "#faf8f3",
-            color: "#1a1a1a",
-            boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+            border: "1px solid var(--gs-border-strong)",
+            background: "var(--gs-surface-elevated)",
+            color: "var(--gs-ink-strong)",
+            boxShadow: "var(--gs-shadow-popover)",
             cursor: "pointer",
             zIndex: 250,
             fontSize: "1.1rem",
@@ -1686,6 +1930,94 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         >
           ↑
         </button>
+      ) : null}
+      {weatherModalOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Comprehensive weather"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setWeatherModalOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(9, 7, 4, 0.46)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.2rem",
+          }}
+        >
+          <div
+            className="gs-card-lift"
+            style={{
+              width: "min(760px, 96vw)",
+              background: "var(--gs-surface-elevated)",
+              border: "1px solid var(--gs-border-strong)",
+              borderRadius: "var(--gs-radius-lg)",
+              boxShadow: "var(--gs-shadow-overlay)",
+              padding: "1rem 1rem 0.9rem",
+              maxHeight: "min(88vh, 820px)",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <button
+                className="gs-interactive gs-focus-ring"
+                type="button"
+                onClick={() => setWeatherModalOpen(false)}
+                style={{
+                  border: "1px solid var(--gs-border-strong)",
+                  background: "var(--gs-surface-soft)",
+                  width: "1.85rem",
+                  height: "1.85rem",
+                  borderRadius: "var(--gs-radius-pill)",
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  color: "var(--gs-ink-strong)",
+                  fontSize: "1.05rem",
+                  lineHeight: 1,
+                  cursor: "pointer",
+                }}
+                aria-label="Close weather modal"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            {weatherModalLoading ? (
+              <p
+                style={{
+                  margin: "0.4rem 0 0",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                  fontStyle: "italic",
+                  color: "#888",
+                  fontSize: "0.82rem",
+                }}
+              >
+                Loading weather...
+              </p>
+            ) : weatherModalError ? (
+              <p style={{ color: "#8b4513", fontSize: "0.78rem", margin: 0 }}>
+                {weatherModalError}
+              </p>
+            ) : weatherModalData ? (
+              <WeatherCard
+                data={weatherModalData}
+                reason="singleton"
+                weatherUnitSystem={weatherUnitSystem}
+                embedded
+              />
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </div>
   );

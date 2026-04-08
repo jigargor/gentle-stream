@@ -11,6 +11,7 @@ export interface RawArticle {
   body: string;
   pullQuote: string;
   imagePrompt: string;
+  sourcePublishedAt?: string | null; // original source publish timestamp (if known)
   sourceUrls: string[]; // normalized URLs extracted from web search result blocks
 }
 
@@ -20,6 +21,8 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   category: ArticleStorageCategory;
   id: string;
   fetchedAt: string; // ISO timestamp
+  ingestedAt?: string; // alias of fetchedAt for explicit UI labeling
+  sourcePublishedAt?: string | null;
   expiresAt: string; // ISO timestamp (fetchedAt + 7 days)
   source?: ArticleSource;
   contentKind?: ArticleContentKind;

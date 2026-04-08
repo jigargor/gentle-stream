@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { getAvailableStockSnapshotByCategory } from "@/lib/db/articles";
+import { getPreferredLocaleDemand } from "@/lib/db/users";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
 import {
   appendCronIngestCategoryLogs,
@@ -103,6 +104,7 @@ export async function GET(request: NextRequest) {
       requested: number;
       ingested: number;
       newestFetchedAt: string | null;
+      targetLocale: string;
       reason: "threshold" | "freshness" | "none";
       error?: string;
     }
@@ -120,6 +122,8 @@ export async function GET(request: NextRequest) {
   let totalExpansions = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let totalPolicyRejected = 0;
+  let totalBatchFallbacks = 0;
   let categoriesChecked = 0;
   let remainingExpansionBudget = readPositiveInt(
     process.env.CRON_INGEST_MAX_EXPANSIONS_PER_RUN,
@@ -135,6 +139,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const snapshot = await getAvailableStockSnapshotByCategory();
+    const localeDemand = await getPreferredLocaleDemand(12);
+    const localeCycle = localeDemand.map((entry) => entry.locale).filter(Boolean);
+    let localeIndex = 0;
     const nowMs = Date.now();
 
     for (const cat of CATEGORIES) {
@@ -160,6 +167,7 @@ export async function GET(request: NextRequest) {
         requested: 0,
         ingested: 0,
         newestFetchedAt,
+        targetLocale: "global",
         reason: "none",
       };
 
@@ -210,7 +218,11 @@ export async function GET(request: NextRequest) {
       }
 
       const cappedIngestCount = Math.min(ingestCount, remainingExpansionBudget);
+      const targetLocale =
+        localeCycle.length > 0 ? localeCycle[localeIndex % localeCycle.length] ?? "global" : "global";
+      localeIndex += 1;
       report[cat].requested = cappedIngestCount;
+      report[cat].targetLocale = targetLocale;
 
       console.log(
         reason === "threshold"
@@ -226,6 +238,7 @@ export async function GET(request: NextRequest) {
           pipeline,
           maxExpansionCalls: cappedIngestCount,
           softDeadlineMs: remainingRuntimeMs,
+          targetLocale,
         });
         const insertedCount = result.inserted.length;
         const warningFlag =
@@ -246,6 +259,8 @@ export async function GET(request: NextRequest) {
         totalExpansions += result.expansionCount;
         totalInputTokens += result.inputTokens;
         totalOutputTokens += result.outputTokens;
+        totalPolicyRejected += result.policyRejectedCount;
+        totalBatchFallbacks += result.batchFallbackCount;
         remainingExpansionBudget = Math.max(0, remainingExpansionBudget - result.expansionCount);
 
         if (result.errorSummary) {
@@ -374,6 +389,8 @@ export async function GET(request: NextRequest) {
         hadErrors,
         totalInserted,
         totalFailed,
+        totalPolicyRejected,
+        totalBatchFallbacks,
         warningCount,
         durationMs: Date.now() - runStartedAt,
       },
@@ -383,6 +400,7 @@ export async function GET(request: NextRequest) {
       hadErrors,
       totalInserted,
       totalFailed,
+      totalPolicyRejected,
       warningCount,
     });
     await flushOnShutdown();
@@ -400,6 +418,8 @@ export async function GET(request: NextRequest) {
       warnings: warningCount,
       candidates: totalCandidates,
       precheckRejected: totalPrecheckRejected,
+      policyRejected: totalPolicyRejected,
+      batchFallbacks: totalBatchFallbacks,
       expansions: totalExpansions,
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,

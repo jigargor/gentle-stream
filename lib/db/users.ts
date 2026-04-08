@@ -183,6 +183,11 @@ export interface AuthorDisplayFields {
   username: string | null;
 }
 
+export interface LocaleDemandRow {
+  locale: string;
+  weight: number;
+}
+
 /** Batch read avatar + @username for bylines (creator articles). */
 export async function getAuthorDisplayByUserIds(
   userIds: string[]
@@ -204,6 +209,31 @@ export async function getAuthorDisplayByUserIds(
     });
   }
   return map;
+}
+
+export async function getPreferredLocaleDemand(limit = 8): Promise<LocaleDemandRow[]> {
+  const { data, error } = await db
+    .from("user_profiles")
+    .select("preferred_locales");
+  if (error) throw new Error(`getPreferredLocaleDemand: ${error.message}`);
+
+  const scoreByLocale = new Map<string, number>();
+  for (const row of data ?? []) {
+    const locales = ((row as { preferred_locales?: string[] | null }).preferred_locales ?? [])
+      .map((locale) => locale.trim())
+      .filter(Boolean);
+    if (locales.length === 0) continue;
+    const perLocaleWeight = 1 / locales.length;
+    for (const locale of locales) {
+      scoreByLocale.set(locale, (scoreByLocale.get(locale) ?? 0) + perLocaleWeight);
+    }
+  }
+
+  const sorted = Array.from(scoreByLocale.entries())
+    .map(([locale, weight]) => ({ locale, weight: Number(weight.toFixed(4)) }))
+    .sort((a, b) => b.weight - a.weight);
+  if (sorted.length === 0) return [{ locale: "global", weight: 1 }];
+  return sorted.slice(0, Math.max(1, Math.trunc(limit)));
 }
 
 /** Read-only profile lookup (no insert). Used for public creator pages. */

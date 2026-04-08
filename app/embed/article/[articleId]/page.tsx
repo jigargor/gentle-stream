@@ -15,6 +15,17 @@ function excerptFromBody(text: string): string {
   return `${oneLine.slice(0, 360).trim()}...`;
 }
 
+function formatDateLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default async function EmbedArticlePage({
   params,
 }: {
@@ -28,6 +39,8 @@ export default async function EmbedArticlePage({
 
   const isRecipe = article.contentKind === "recipe";
   const excerpt = excerptFromBody(article.body ?? "");
+  const publishedLabel = formatDateLabel(article.sourcePublishedAt ?? null);
+  const ingestedLabel = formatDateLabel(article.ingestedAt ?? article.fetchedAt);
 
   return (
     <main
@@ -93,6 +106,12 @@ export default async function EmbedArticlePage({
             {article.byline}
             {article.location ? ` · ${article.location}` : ""}
           </p>
+          {article.source === "ingest" && article.contentKind === "news" ? (
+            <p style={{ margin: "0.28rem 0 0", color: "#6a6a6a", fontSize: "0.69rem" }}>
+              {publishedLabel ? `Published ${publishedLabel}` : "Published date unavailable"}
+              {ingestedLabel ? ` · Ingested ${ingestedLabel}` : ""}
+            </p>
+          ) : null}
           {excerpt ? (
             <p style={{ margin: "0.7rem 0 0", color: "#2b2b2b", lineHeight: 1.45, fontSize: "0.9rem" }}>
               {excerpt}

@@ -17,6 +17,11 @@ import {
   pollMessageBatchUntilEnded,
 } from "@/lib/anthropic/messageBatch";
 import { captureException, captureMessage, startSpan } from "@/lib/observability";
+import { checkUpliftPolicy } from "@/lib/agents/upliftPolicyFilter";
+import {
+  resolveIngestDiscoveryProvider,
+  type IngestDiscoveryProvider,
+} from "@/lib/agents/ingestDiscoveryProvider";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const env = getEnv();
@@ -25,6 +30,7 @@ const env = getEnv();
 
 interface IngestResult {
   category: Category;
+  targetLocale: string;
   inserted: StoredArticle[];
   attemptedCount: number;
   skippedCount: number;
@@ -37,6 +43,10 @@ interface IngestResult {
   outputTokens: number;
   insertPer1kTokens: number;
   duplicateSkipRate: number;
+  policyRejectedCount: number;
+  policyRejectReasons: Record<string, number>;
+  batchFallbackCount: number;
+  discoveryProvider: IngestDiscoveryProvider;
   stoppedEarly: boolean;
   pipelineMode: "legacy" | "overhaul";
   durationMs: number;
@@ -65,6 +75,7 @@ interface DiscoveryResult {
   candidates: DiscoveryCandidate[];
   usage: ClaudeUsage;
   retryCount: number;
+  provider: IngestDiscoveryProvider;
 }
 
 interface TokenBudget {
@@ -80,6 +91,7 @@ interface RunIngestAgentOptions {
   inputTokenCap?: number;
   outputTokenCap?: number;
   softDeadlineMs?: number;
+  targetLocale?: string;
 }
 
 // ─── Content block types from the raw Claude response ─────────────────────────
@@ -110,12 +122,13 @@ export async function runIngestAgent(
   total: number = INGEST_BATCH_SIZE,
   options: RunIngestAgentOptions = {}
 ): Promise<IngestResult> {
-  const span = startSpan("agent.ingest", { category, total });
+  const targetLocale = resolveTargetLocale(options.targetLocale);
+  const span = startSpan("agent.ingest", { category, total, targetLocale });
   const pipeline = resolvePipelineMode(category, options.pipeline);
   try {
     const result =
       pipeline === "legacy"
-        ? await runLegacyIngest(category, total)
+        ? await runLegacyIngest(category, total, targetLocale)
         : await runOverhaulIngest(category, total, options);
     span.end({
       category,
@@ -149,8 +162,13 @@ async function runOverhaulIngest(
   let candidateCount = 0;
   let precheckRejectedCount = 0;
   let expansionCount = 0;
+  let policyRejectedCount = 0;
+  let batchFallbackCount = 0;
+  const policyRejectReasons: Record<string, number> = {};
   let stoppedEarly = false;
   const startedAt = Date.now();
+  const targetLocale = resolveTargetLocale(options.targetLocale);
+  const discoveryProvider = resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER);
 
   const [seenHeadlines, seenUrls] = await Promise.all([
     getRecentHeadlines(category, 60),
@@ -162,7 +180,8 @@ async function runOverhaulIngest(
     Math.min(options.maxExpansionCalls ?? total, total)
   );
   const softDeadlineMs = options.softDeadlineMs ?? Number(env.INGEST_SOFT_DEADLINE_MS ?? 55_000);
-  const useMessageBatch = Boolean(env.INGEST_MESSAGE_BATCH);
+  const useMessageBatch = env.INGEST_MESSAGE_BATCH == null ? true : env.INGEST_MESSAGE_BATCH;
+  const batchSyncFallbackLimit = Math.max(1, Number(env.INGEST_BATCH_SYNC_FALLBACK_LIMIT ?? 3));
   const batchMaxWaitMs = Math.max(
     60_000,
     env.INGEST_BATCH_MAX_WAIT_MS ?? 3_600_000
@@ -206,6 +225,8 @@ async function runOverhaulIngest(
       discovery = await fetchDiscoveryCandidates(
         apiKey,
         category,
+        targetLocale,
+        discoveryProvider,
         discoveryTarget,
         seenHeadlines,
         seenUrls
@@ -229,6 +250,17 @@ async function runOverhaulIngest(
     const accepted: DiscoveryCandidate[] = [];
     for (const candidate of discovery.candidates) {
       if (accepted.length >= expansionsRemaining) break;
+      const policyCheck = checkUpliftPolicy({
+        headline: candidate.headline,
+        rationale: candidate.rationale,
+      });
+      if (!policyCheck.accepted) {
+        policyRejectedCount += 1;
+        skippedCount += 1;
+        const reason = policyCheck.reason ?? "unknown";
+        policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
+        continue;
+      }
       const precheck = await precheckIngestCandidate({
         headline: candidate.headline,
         category,
@@ -265,13 +297,25 @@ async function runOverhaulIngest(
     }
 
     const processExpansionResult = async (expanded: FetchResult) => {
+      const policyCheck = checkUpliftPolicy({
+        headline: expanded.article.headline,
+        subheadline: expanded.article.subheadline,
+        body: expanded.article.body,
+      });
+      if (!policyCheck.accepted) {
+        policyRejectedCount += 1;
+        skippedCount += 1;
+        const reason = policyCheck.reason ?? "unknown";
+        policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
+        return;
+      }
       const toInsert = {
         ...expanded.article,
         category,
         tags: [],
         sentiment: "uplifting" as const,
         emotions: [],
-        locale: "global",
+        locale: targetLocale,
         readingTimeSecs: estimateReadingTime(expanded.article.body),
         qualityScore: 0.5,
       };
@@ -290,6 +334,7 @@ async function runOverhaulIngest(
         const batchRows = await expandAcceptedViaMessageBatch({
           apiKey,
           category,
+          targetLocale,
           accepted,
           seenHeadlines,
           seenUrls,
@@ -320,6 +365,7 @@ async function runOverhaulIngest(
             const expanded = await fetchExpandedArticle(
               apiKey,
               category,
+              targetLocale,
               row.candidate,
               seenHeadlines,
               seenUrls
@@ -347,6 +393,7 @@ async function runOverhaulIngest(
         }
       } catch (batchErr) {
         const msg = batchErr instanceof Error ? batchErr.message : "Message batch failed";
+        batchFallbackCount += 1;
         captureException(batchErr, {
           agent: "ingest",
           category,
@@ -354,7 +401,16 @@ async function runOverhaulIngest(
         });
         console.error("[IngestAgent:overhaul] Message batch error, falling back to sync: %s", msg);
         if (errors.length < 8) errors.push(msg);
-        for (const candidate of accepted) {
+        const fallbackCandidates = accepted.slice(0, batchSyncFallbackLimit);
+        if (accepted.length > fallbackCandidates.length) {
+          batchFallbackCount += 1;
+          skippedCount += accepted.length - fallbackCandidates.length;
+          if (errors.length < 8)
+            errors.push(
+              `Batch fallback capped to ${fallbackCandidates.length}/${accepted.length} expansions`
+            );
+        }
+        for (const candidate of fallbackCandidates) {
           if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
           if (Date.now() >= hardDeadlineAt) {
             stoppedEarly = true;
@@ -370,6 +426,7 @@ async function runOverhaulIngest(
             const expanded = await fetchExpandedArticle(
               apiKey,
               category,
+              targetLocale,
               candidate,
               seenHeadlines,
               seenUrls
@@ -414,6 +471,7 @@ async function runOverhaulIngest(
           const expanded = await fetchExpandedArticle(
             apiKey,
             category,
+            targetLocale,
             candidate,
             seenHeadlines,
             seenUrls
@@ -450,12 +508,13 @@ async function runOverhaulIngest(
     candidateCount > 0 ? Number((precheckRejectedCount / candidateCount).toFixed(4)) : 0;
 
   console.log(
-    '[IngestAgent:overhaul] "%s" inserted=%s/%s, candidates=%s, precheckRejected=%s, inputTokens=%s, outputTokens=%s',
+    '[IngestAgent:overhaul] "%s" inserted=%s/%s, candidates=%s, precheckRejected=%s, policyRejected=%s, inputTokens=%s, outputTokens=%s',
     category,
     String(allInserted.length),
     String(total),
     String(candidateCount),
     String(precheckRejectedCount),
+    String(policyRejectedCount),
     String(inputTokens),
     String(outputTokens)
   );
@@ -470,11 +529,16 @@ async function runOverhaulIngest(
       failedCount,
       stoppedEarly,
       candidateCount,
+      targetLocale,
+      policyRejectedCount,
+      batchFallbackCount,
+      discoveryProvider,
     },
   });
 
   return {
     category,
+    targetLocale,
     inserted: allInserted,
     attemptedCount,
     skippedCount,
@@ -487,6 +551,10 @@ async function runOverhaulIngest(
     outputTokens,
     insertPer1kTokens,
     duplicateSkipRate,
+    policyRejectedCount,
+    policyRejectReasons,
+    batchFallbackCount,
+    discoveryProvider,
     stoppedEarly,
     pipelineMode: "overhaul",
     durationMs: Date.now() - startedAt,
@@ -496,7 +564,8 @@ async function runOverhaulIngest(
 
 async function runLegacyIngest(
   category: Category,
-  total: number
+  total: number,
+  targetLocale: string
 ): Promise<IngestResult> {
   const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
@@ -507,6 +576,8 @@ async function runLegacyIngest(
   let skippedCount = 0;
   let failedCount = 0;
   let retryCount = 0;
+  let policyRejectedCount = 0;
+  const policyRejectReasons: Record<string, number> = {};
   const startedAt = Date.now();
 
   const [seenHeadlines, seenUrls] = await Promise.all([
@@ -519,11 +590,23 @@ async function runLegacyIngest(
   for (let i = 0; i < total; i++) {
     attemptedCount += 1;
     try {
-      const result = await fetchOneArticle(apiKey, category, seenHeadlines, seenUrls);
+      const result = await fetchOneArticle(apiKey, category, targetLocale, seenHeadlines, seenUrls);
       retryCount += result.retryCount;
       inputTokens += result.usage.input_tokens ?? 0;
       outputTokens += result.usage.output_tokens ?? 0;
       const article = result.article;
+      const policyCheck = checkUpliftPolicy({
+        headline: article.headline,
+        subheadline: article.subheadline,
+        body: article.body,
+      });
+      if (!policyCheck.accepted) {
+        skippedCount += 1;
+        policyRejectedCount += 1;
+        const reason = policyCheck.reason ?? "unknown";
+        policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
+        continue;
+      }
 
       const toInsert = {
         ...article,
@@ -531,7 +614,7 @@ async function runLegacyIngest(
         tags: [],
         sentiment: "uplifting" as const,
         emotions: [],
-        locale: "global",
+        locale: targetLocale,
         readingTimeSecs: estimateReadingTime(article.body),
         qualityScore: 0.5,
       };
@@ -553,6 +636,7 @@ async function runLegacyIngest(
     inputTokens > 0 ? Number(((allInserted.length * 1000) / inputTokens).toFixed(3)) : 0;
   return {
     category,
+    targetLocale,
     inserted: allInserted,
     attemptedCount,
     skippedCount,
@@ -565,6 +649,10 @@ async function runLegacyIngest(
     outputTokens,
     insertPer1kTokens,
     duplicateSkipRate: attemptedCount > 0 ? Number((skippedCount / attemptedCount).toFixed(4)) : 0,
+    policyRejectedCount,
+    policyRejectReasons,
+    batchFallbackCount: 0,
+    discoveryProvider: "anthropic_web_search",
     stoppedEarly: false,
     pipelineMode: "legacy",
     durationMs: Date.now() - startedAt,
@@ -586,6 +674,7 @@ export async function runFullIngest(): Promise<IngestResult[]> {
 async function fetchOneArticle(
   apiKey: string,
   category: string,
+  targetLocale: string,
   seenHeadlines: string[],
   seenUrls: string[]
 ): Promise<FetchResult> {
@@ -593,14 +682,14 @@ async function fetchOneArticle(
   const avoidUrls = seenUrls.slice(-20).join(", ");
 
   const prompt =
-    `Search the web for 1 real, recent, uplifting news story in: "${category}". ` +
-    `Positive only — no deaths, crimes, or disasters.\n` +
+    `Search the web for 1 real, recent, uplifting news story in: "${category}" for locale "${targetLocale}". ` +
+    `Positive only — no political stories, no solemn stories, no deaths, crimes, wars, or disasters.\n` +
     (avoidHeadlines ? `Do not repeat these stories: ${avoidHeadlines}.\n` : "") +
     (avoidUrls ? `Do not use content from these URLs: ${avoidUrls}.\n` : "") +
     `\nIMPORTANT: Write body in plain prose. No <cite> tags, reference numbers, or source links in the text.\n\n` +
     `Return ONLY a single raw JSON object — no array, no markdown, no preamble:\n` +
     `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country",` +
-    `"category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string"}`;
+    `"category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string","sourcePublishedAt":"ISO-8601 string or null"}`;
 
   const { data, retryCount } = await callClaudeWithWebSearch({
     apiKey,
@@ -720,6 +809,7 @@ function parseArticleFromText(
         category
       )
     ),
+    sourcePublishedAt: parseSourcePublishedAt(a.sourcePublishedAt ?? a.source_published_at),
     sourceUrls,
   };
 }
@@ -728,6 +818,22 @@ function parseArticleFromText(
 
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);
+}
+
+function resolveTargetLocale(inputLocale?: string): string {
+  const fallback = (env.INGEST_AUTO_LOCALE ?? "global").trim();
+  const requested = inputLocale?.trim();
+  if (!requested) return fallback || "global";
+  return requested.slice(0, 48);
+}
+
+function parseSourcePublishedAt(value: unknown): string | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw || raw.toLowerCase() === "null" || raw.toLowerCase() === "unknown") return null;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString();
 }
 
 function stripCitations(text: string): string {
@@ -803,21 +909,31 @@ function spendTokens(budget: TokenBudget, usage: ClaudeUsage): void {
 async function fetchDiscoveryCandidates(
   apiKey: string,
   category: Category,
+  targetLocale: string,
+  discoveryProvider: IngestDiscoveryProvider,
   targetCount: number,
   seenHeadlines: string[],
   seenUrls: string[]
 ): Promise<DiscoveryResult> {
+  if (discoveryProvider === "rss_seed_only")
+    return {
+      candidates: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
+      retryCount: 0,
+      provider: discoveryProvider,
+    };
+
   const avoidHeadlines = seenHeadlines.slice(-30).join("; ");
   const avoidUrls = seenUrls.slice(-60).join(", ");
   const prompt =
-    `Search the web for ${targetCount} recent uplifting stories in category "${category}".\n` +
+    `Search the web for ${targetCount} recent uplifting stories in category "${category}" for locale "${targetLocale}".\n` +
     `Return ONLY a raw JSON object with shape {"candidates":[{"headline":"string","sourceUrl":"https://...","rationale":"string"}]}.\n` +
     `Rules:\n` +
     `- sourceUrl must be the canonical article URL for each story.\n` +
     `- unique stories only; avoid similar rewrites of the same event.\n` +
     (avoidHeadlines ? `- never repeat these headlines: ${avoidHeadlines}\n` : "") +
     (avoidUrls ? `- never use these source URLs: ${avoidUrls}\n` : "") +
-    `- positive stories only; no war, death, crime, or disasters.\n`;
+    `- positive stories only; no political stories, solemn stories, war, death, crime, or disasters.\n`;
 
   const { data, retryCount } = await callClaudeWithWebSearch({
     apiKey,
@@ -834,7 +950,7 @@ async function fetchDiscoveryCandidates(
   const rawCandidates =
     (Array.isArray(parsed) ? parsed : (parsed as { candidates?: unknown } | null)?.candidates) ?? [];
   const candidates = normalizeDiscoveryCandidates(rawCandidates);
-  return { candidates, usage, retryCount };
+  return { candidates, usage, retryCount, provider: discoveryProvider };
 }
 
 function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
@@ -872,6 +988,7 @@ function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
 
 function buildExpansionPrompt(
   category: Category,
+  targetLocale: string,
   candidate: DiscoveryCandidate,
   seenHeadlines: string[],
   seenUrls: string[]
@@ -881,13 +998,15 @@ function buildExpansionPrompt(
   return (
     `You are expanding one discovered story into a publishable article.\n` +
     `Target category: "${category}".\n` +
+    `Target locale: "${targetLocale}".\n` +
     `Priority candidate headline: "${candidate.headline}".\n` +
     `Priority source URL: "${candidate.sourceUrl}".\n` +
     `Candidate rationale: "${candidate.rationale}".\n` +
     `\nUse web search to verify details and return ONLY one JSON object:\n` +
-    `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country","category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string"}\n` +
+    `{"headline":"string","subheadline":"string","byline":"By Name","location":"City, Country","category":"${category}","body":"paragraph1\\n\\nparagraph2\\n\\nparagraph3","pullQuote":"string","imagePrompt":"string","sourcePublishedAt":"ISO-8601 string or null"}\n` +
     `\nHard requirements:\n` +
     `- Use the same underlying story/event as the candidate.\n` +
+    `- Must be uplifting and non-solemn; avoid politics, elections, conflict, crime, death, and disasters.\n` +
     `- Body must be clean prose with no source links, no citations, no markdown links.\n` +
     `- imagePrompt must describe a concrete, story-specific editorial scene with people/place/action when applicable.\n` +
     `- imagePrompt must avoid generic stock wording and must not request text overlays, logos, or watermarks.\n` +
@@ -934,6 +1053,7 @@ interface BatchExpansionRow {
 async function expandAcceptedViaMessageBatch(input: {
   apiKey: string;
   category: Category;
+  targetLocale: string;
   accepted: DiscoveryCandidate[];
   seenHeadlines: string[];
   seenUrls: string[];
@@ -944,6 +1064,7 @@ async function expandAcceptedViaMessageBatch(input: {
   const {
     apiKey,
     category,
+    targetLocale,
     accepted,
     seenHeadlines,
     seenUrls,
@@ -955,7 +1076,7 @@ async function expandAcceptedViaMessageBatch(input: {
   const requests = accepted.map((candidate, i) => ({
     custom_id: `exp-${i}`,
     params: buildClaudeWebSearchMessageParams({
-      prompt: buildExpansionPrompt(category, candidate, seenHeadlines, seenUrls),
+      prompt: buildExpansionPrompt(category, targetLocale, candidate, seenHeadlines, seenUrls),
       maxTokens: 1200,
     }),
   }));
@@ -1004,11 +1125,18 @@ async function expandAcceptedViaMessageBatch(input: {
 async function fetchExpandedArticle(
   apiKey: string,
   category: Category,
+  targetLocale: string,
   candidate: DiscoveryCandidate,
   seenHeadlines: string[],
   seenUrls: string[]
 ): Promise<FetchResult> {
-  const prompt = buildExpansionPrompt(category, candidate, seenHeadlines, seenUrls);
+  const prompt = buildExpansionPrompt(
+    category,
+    targetLocale,
+    candidate,
+    seenHeadlines,
+    seenUrls
+  );
 
   const { data, retryCount } = await callClaudeWithWebSearch({
     apiKey,

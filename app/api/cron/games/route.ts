@@ -39,6 +39,12 @@ const MAX_CONNECTIONS_IN_POOL = 300;
 /** Below this, run a second ingest pass in the same cron if still under cap (recovers from partial failures). */
 const CONNECTIONS_POOL_CRITICAL_LOW = 24;
 
+function isTruthy(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
 async function growConnectionsPool(): Promise<{
   before: number;
   inserted: number;
@@ -106,6 +112,10 @@ export async function GET(request: NextRequest) {
   }
 
   const results: Record<string, unknown> = {};
+  const llmGamesEnabled =
+    process.env.CRON_GAMES_LLM_ENABLED == null
+      ? false
+      : isTruthy(process.env.CRON_GAMES_LLM_ENABLED);
   const span = startSpan("cron.games", {
     traceId: request.headers.get("x-trace-id") ?? undefined,
   });
@@ -123,34 +133,52 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Connections ──────────────────────────────────────────────────────────────
-  try {
-    const r = await growConnectionsPool();
+  if (!llmGamesEnabled) {
     results.connections = {
-      ...r,
+      skipped: true,
+      reason: "CRON_GAMES_LLM_ENABLED is off",
       cap: MAX_CONNECTIONS_IN_POOL,
     };
-  } catch (e) {
-    captureException(e, { route: "cron.games", pool: "connections" });
-    results.connections = { error: e instanceof Error ? e.message : "failed" };
+  } else {
+    try {
+      const r = await growConnectionsPool();
+      results.connections = {
+        ...r,
+        cap: MAX_CONNECTIONS_IN_POOL,
+      };
+    } catch (e) {
+      captureException(e, { route: "cron.games", pool: "connections" });
+      results.connections = { error: e instanceof Error ? e.message : "failed" };
+    }
   }
 
   // ── Word-search word pool ────────────────────────────────────────────────────
-  try {
-    const r = await growWordPool();
+  if (!llmGamesEnabled) {
     results.wordPool = {
-      ...r,
+      skipped: true,
+      reason: "CRON_GAMES_LLM_ENABLED is off",
       minTarget: MIN_WORD_POOL_TOTAL,
       cap: MAX_WORD_POOL_TOTAL,
     };
-  } catch (e) {
-    captureException(e, { route: "cron.games", pool: "word_pool" });
-    results.wordPool = { error: e instanceof Error ? e.message : "failed" };
+  } else {
+    try {
+      const r = await growWordPool();
+      results.wordPool = {
+        ...r,
+        minTarget: MIN_WORD_POOL_TOTAL,
+        cap: MAX_WORD_POOL_TOTAL,
+      };
+    } catch (e) {
+      captureException(e, { route: "cron.games", pool: "word_pool" });
+      results.wordPool = { error: e instanceof Error ? e.message : "failed" };
+    }
   }
 
   span.end({ ok: true });
   await flushOnShutdown();
   return NextResponse.json({
     message: "Games cron complete",
+    llmGamesEnabled,
     ranAt: new Date().toISOString(),
     results,
   });

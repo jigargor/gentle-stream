@@ -10,7 +10,7 @@
   "crons": [
     {
       "path": "/api/cron/scheduler",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/tagger",
@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/games",
-      "schedule": "0 * * * *"
+      "schedule": "0 */6 * * *"
     },
     {
       "path": "/api/cron/engagement-health",

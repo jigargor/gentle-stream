@@ -11,6 +11,17 @@ import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 import { CreatorBylineLink } from "@/components/articles/CreatorBylineLink";
 import { ShareMenu } from "@/components/articles/ShareMenu";
 
+function formatDateLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 interface SavedArticleReaderProps {
   article: StoredArticle;
   /** URL stored when the user saved (external source), if any */
@@ -24,6 +35,8 @@ export function SavedArticleReader({
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
   const bylineAccent =
     CATEGORY_COLORS[article.category as keyof typeof CATEGORY_COLORS] ?? "#1a472a";
+  const publishedLabel = formatDateLabel(article.sourcePublishedAt ?? null);
+  const ingestedLabel = formatDateLabel(article.ingestedAt ?? article.fetchedAt);
 
   const wrap: CSSProperties = {
     maxWidth: "42rem",
@@ -82,6 +95,20 @@ export function SavedArticleReader({
           />
           {article.location ? <span> · {article.location}</span> : null}
         </div>
+        {article.source === "ingest" && article.contentKind === "news" ? (
+          <div
+            style={{
+              marginTop: "0.3rem",
+              fontSize: "0.72rem",
+              fontFamily: "Georgia, serif",
+              color: "#777",
+              letterSpacing: "0.03em",
+            }}
+          >
+            {publishedLabel ? `Published ${publishedLabel}` : "Published date unavailable"}
+            {ingestedLabel ? ` · Ingested ${ingestedLabel}` : ""}
+          </div>
+        ) : null}
         <div style={{ marginTop: "0.65rem" }}>
           <ShareMenu
             articleId={article.id}

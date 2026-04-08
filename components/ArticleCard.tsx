@@ -41,6 +41,17 @@ const isScrollDepthTelemetryEnabled =
 const HERO_VERTICAL_GAP_PX = 280;
 let userApiAllowed = true;
 
+function formatDateLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function BookmarkOutlineIcon() {
   return (
     <svg
@@ -284,6 +295,20 @@ export default function ArticleCard({
   const sourceUrls = uniqueSourceUrls(article.sourceUrls);
   const primarySourceHref =
     sourceUrls[0] ? toClickableSourceUrl(sourceUrls[0]) : "";
+  const isIngestedNews =
+    "source" in article &&
+    article.source === "ingest" &&
+    (!("contentKind" in article) || article.contentKind === "news");
+  const publishedLabel = formatDateLabel(
+    "sourcePublishedAt" in article ? article.sourcePublishedAt ?? null : null
+  );
+  const ingestedLabel = formatDateLabel(
+    "ingestedAt" in article
+      ? article.ingestedAt ?? null
+      : "fetchedAt" in article
+        ? article.fetchedAt ?? null
+        : null
+  );
 
   const canSave = "id" in article && Boolean(article.id);
   const articleId = "id" in article && article.id ? article.id : null;
@@ -902,6 +927,19 @@ export default function ArticleCard({
         />
         {article.location && <span>&middot; {article.location}</span>}
       </div>
+      {isIngestedNews && (publishedLabel || ingestedLabel) ? (
+        <div
+          style={{
+            fontSize: "0.6rem",
+            fontFamily: "Georgia, serif",
+            color: "#777",
+            letterSpacing: "0.04em",
+          }}
+        >
+          {publishedLabel ? `Published ${publishedLabel}` : "Published date unavailable"}
+          {ingestedLabel ? ` · Ingested ${ingestedLabel}` : ""}
+        </div>
+      ) : null}
 
       {(canSave || articleId) && (
         <div

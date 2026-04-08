@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS articles (
 
   -- Timestamps
   fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  source_published_at TIMESTAMPTZ,
   expires_at      TIMESTAMPTZ NOT NULL DEFAULT '2100-01-01T00:00:00.000Z',
 
   -- Enrichment (from tagger agent)

@@ -76,6 +76,7 @@ interface ArticleRow {
   pull_quote: string;
   image_prompt: string;
   fetched_at: string;
+  source_published_at?: string | null;
   expires_at: string;
   tags: string[];
   sentiment: string;
@@ -178,6 +179,8 @@ export function rowToArticle(row: ArticleRow): StoredArticle {
     pullQuote: row.pull_quote,
     imagePrompt: row.image_prompt,
     fetchedAt: row.fetched_at,
+    ingestedAt: row.fetched_at,
+    sourcePublishedAt: row.source_published_at ?? null,
     expiresAt: row.expires_at,
     tags: row.tags ?? [],
     sentiment: (row.sentiment ?? "uplifting") as StoredArticle["sentiment"],
@@ -439,6 +442,7 @@ export async function insertArticles(
     pull_quote: a.pullQuote,
     image_prompt: a.imagePrompt,
     fetched_at: now.toISOString(),
+    source_published_at: a.sourcePublishedAt ?? null,
     // Keep a far-future expiry so legacy schema constraints remain valid while
     // article TTL cleanup is disabled.
     expires_at: NON_EXPIRING_EXPIRES_AT,

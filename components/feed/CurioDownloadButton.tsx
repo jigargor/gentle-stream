@@ -66,25 +66,30 @@ export default function CurioDownloadButton({
     <button
       type="button"
       disabled={disabled}
-      title={sourceUrl ? "Download this image" : "No image to download"}
+      title={
+        !sourceUrl
+          ? "No image to download"
+          : busy
+            ? "Downloading…"
+            : "Download this image"
+      }
       aria-label="Download Daily Curio image"
+      aria-busy={busy}
       onClick={() => void handleClick()}
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: "0.28rem",
-        padding: isCompact ? "0.18rem 0.38rem" : "0.32rem 0.55rem",
-        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        fontSize: isCompact ? "0.62rem" : "0.68rem",
-        fontWeight: 600,
-        letterSpacing: "0.04em",
-        textTransform: "uppercase",
-        color: disabled ? "#a39a8a" : "#4c463d",
-        background: "color-mix(in srgb, var(--gs-surface) 92%, #f0ebe0)",
-        border: "1px solid var(--gs-border)",
+        justifyContent: "center",
+        gap: 0,
+        padding: isCompact ? "0.22rem" : "0.28rem",
+        color: disabled ? "#a39a8a" : "#3a352c",
+        background: "color-mix(in srgb, var(--gs-surface-elevated) 22%, transparent)",
+        border: "1px solid color-mix(in srgb, var(--gs-border) 45%, transparent)",
         borderRadius: "var(--gs-radius-xs)",
         cursor: disabled ? "not-allowed" : "pointer",
-        boxShadow: disabled ? "none" : "0 1px 2px rgba(20, 15, 10, 0.06)",
+        boxShadow: disabled ? "none" : "0 1px 3px rgba(20, 15, 10, 0.04)",
+        backdropFilter: "blur(6px)",
+        opacity: busy ? 0.75 : 1,
       }}
     >
       <svg
@@ -102,7 +107,6 @@ export default function CurioDownloadButton({
         <polyline points="7 10 12 15 17 10" />
         <line x1="12" y1="15" x2="12" y2="3" />
       </svg>
-      {busy ? "…" : "Save"}
     </button>
   );
 }

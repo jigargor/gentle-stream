@@ -70,6 +70,10 @@ interface DiscoveryCandidate {
   headline: string;
   sourceUrl: string;
   rationale: string;
+  sourcePublishedAt?: string | null;
+  summary?: string | null;
+  body?: string | null;
+  imageUrl?: string | null;
 }
 
 interface DiscoveryResult {
@@ -89,6 +93,8 @@ interface TokenBudget {
 interface RunIngestAgentOptions {
   pipeline?: "legacy" | "overhaul";
   discoveryProvider?: IngestDiscoveryProvider;
+  /** Rewrite discovered stories with Claude expansion. Defaults false when unset. */
+  rewriteEnabled?: boolean;
   maxExpansionCalls?: number;
   inputTokenCap?: number;
   outputTokenCap?: number;
@@ -152,8 +158,9 @@ async function runOverhaulIngest(
   total: number,
   options: RunIngestAgentOptions
 ): Promise<IngestResult> {
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  const apiKey = env.ANTHROPIC_API_KEY?.trim() || null;
+  const rewriteEnabled = options.rewriteEnabled ?? (env.INGEST_REWRITE_ENABLED ?? false);
+  if (rewriteEnabled && !apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const allInserted: StoredArticle[] = [];
   const errors: string[] = [];
@@ -254,16 +261,26 @@ async function runOverhaulIngest(
     const accepted: DiscoveryCandidate[] = [];
     for (const candidate of discovery.candidates) {
       if (accepted.length >= expansionsRemaining) break;
-      const policyCheck = checkUpliftPolicy({
-        headline: candidate.headline,
-        rationale: candidate.rationale,
-      });
-      if (!policyCheck.accepted) {
-        policyRejectedCount += 1;
-        skippedCount += 1;
-        const reason = policyCheck.reason ?? "unknown";
-        policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
-        continue;
+      const candidateHasRssContent = Boolean(
+        (candidate.body && candidate.body.trim().length > 0) ||
+        (candidate.summary && candidate.summary.trim().length > 0)
+      );
+      const shouldUseRssNativePolicyPhase =
+        !rewriteEnabled &&
+        candidateHasRssContent &&
+        (discoveryProvider === "rss_seed_only" || discoveryProvider === "rss_seeded_primary");
+      if (!shouldUseRssNativePolicyPhase) {
+        const policyCheck = checkUpliftPolicy({
+          headline: candidate.headline,
+          rationale: candidate.rationale,
+        });
+        if (!policyCheck.accepted) {
+          policyRejectedCount += 1;
+          skippedCount += 1;
+          const reason = policyCheck.reason ?? "unknown";
+          policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
+          continue;
+        }
       }
       const precheck = await precheckIngestCandidate({
         headline: candidate.headline,
@@ -333,13 +350,60 @@ async function runOverhaulIngest(
       }
     };
 
-    if (useMessageBatch && accepted.length > 0) {
+    const acceptedForRewrite: DiscoveryCandidate[] = [];
+    for (const candidate of accepted) {
+      const rssArticle =
+        rewriteEnabled ? null : buildArticleFromRssCandidate(candidate, category, targetLocale);
+      if (!rssArticle) {
+        acceptedForRewrite.push(candidate);
+        continue;
+      }
+      if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
+      attemptedCount += 1;
+      expansionCount += 1;
+      try {
+        const toInsert = {
+          ...rssArticle,
+          category,
+          tags: [],
+          sentiment: "uplifting" as const,
+          emotions: [],
+          locale: targetLocale,
+          readingTimeSecs: estimateReadingTime(rssArticle.body),
+          qualityScore: 0.5,
+        };
+        const inserted = await insertArticles([toInsert]);
+        if (inserted.length > 0) {
+          allInserted.push(inserted[0]);
+          seenHeadlines.push(rssArticle.headline);
+          seenUrls.push(...rssArticle.sourceUrls);
+        } else {
+          skippedCount += 1;
+        }
+      } catch (error) {
+        failedCount += 1;
+        const message = error instanceof Error ? error.message : "RSS-native insert failed";
+        if (errors.length < 8) errors.push(message);
+      }
+    }
+
+    const expansionApiKey = apiKey;
+    if (acceptedForRewrite.length > 0 && !expansionApiKey) {
+      failedCount += 1;
+      const message =
+        "ANTHROPIC_API_KEY not set but rewrite path required (rss_seeded_primary fallback or rewrite enabled).";
+      if (errors.length < 8) errors.push(message);
+      stoppedEarly = true;
+      break;
+    }
+
+    if (useMessageBatch && acceptedForRewrite.length > 0) {
       try {
         const batchRows = await expandAcceptedViaMessageBatch({
-          apiKey,
+          apiKey: expansionApiKey!,
           category,
           targetLocale,
-          accepted,
+          accepted: acceptedForRewrite,
           seenHeadlines,
           seenUrls,
           budget,
@@ -367,7 +431,7 @@ async function runOverhaulIngest(
           }
           try {
             const expanded = await fetchExpandedArticle(
-              apiKey,
+              expansionApiKey!,
               category,
               targetLocale,
               row.candidate,
@@ -405,13 +469,13 @@ async function runOverhaulIngest(
         });
         console.error("[IngestAgent:overhaul] Message batch error, falling back to sync: %s", msg);
         if (errors.length < 8) errors.push(msg);
-        const fallbackCandidates = accepted.slice(0, batchSyncFallbackLimit);
-        if (accepted.length > fallbackCandidates.length) {
+        const fallbackCandidates = acceptedForRewrite.slice(0, batchSyncFallbackLimit);
+        if (acceptedForRewrite.length > fallbackCandidates.length) {
           batchFallbackCount += 1;
-          skippedCount += accepted.length - fallbackCandidates.length;
+          skippedCount += acceptedForRewrite.length - fallbackCandidates.length;
           if (errors.length < 8)
             errors.push(
-              `Batch fallback capped to ${fallbackCandidates.length}/${accepted.length} expansions`
+              `Batch fallback capped to ${fallbackCandidates.length}/${acceptedForRewrite.length} expansions`
             );
         }
         for (const candidate of fallbackCandidates) {
@@ -428,7 +492,7 @@ async function runOverhaulIngest(
           expansionCount += 1;
           try {
             const expanded = await fetchExpandedArticle(
-              apiKey,
+              expansionApiKey!,
               category,
               targetLocale,
               candidate,
@@ -458,7 +522,7 @@ async function runOverhaulIngest(
         }
       }
     } else {
-      for (const candidate of accepted) {
+      for (const candidate of acceptedForRewrite) {
         if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
         if (Date.now() >= hardDeadlineAt) {
           stoppedEarly = true;
@@ -473,7 +537,7 @@ async function runOverhaulIngest(
         expansionCount += 1;
         try {
           const expanded = await fetchExpandedArticle(
-            apiKey,
+            expansionApiKey!,
             category,
             targetLocale,
             candidate,
@@ -820,6 +884,55 @@ function parseArticleFromText(
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
+function trimToLength(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+function firstSentence(value: string): string {
+  const match = value.match(/^[^.!?]+[.!?]?/);
+  return (match?.[0] ?? value).trim();
+}
+
+function buildArticleFromRssCandidate(
+  candidate: DiscoveryCandidate,
+  category: Category,
+  targetLocale: string
+): RawArticle | null {
+  const summary = candidate.summary?.trim() ?? "";
+  const bodyFromFeed = candidate.body?.trim() ?? "";
+  const content = bodyFromFeed || summary;
+  if (!content) return null;
+
+  const feedLabel = candidate.rationale.replace(/^RSS feed:\s*/i, "").trim();
+  const cleanHeadline = stripCitations(candidate.headline).trim() || "Untitled";
+  const subheadline = trimToLength(firstSentence(summary || content), 220);
+  const paragraphOne = trimToLength(content, 1200);
+  const paragraphTwo =
+    candidate.sourceUrl.trim().length > 0
+      ? "This report is sourced directly from the original RSS item and preserved without a full AI rewrite."
+      : "This report is sourced directly from the original RSS item.";
+  const body = `${paragraphOne}\n\n${paragraphTwo}`;
+  const pullQuote = trimToLength(firstSentence(summary || content), 240);
+  const imageSeed = candidate.imageUrl?.trim();
+  const imagePrompt = imageSeed
+    ? `Editorial illustration inspired by "${cleanHeadline}". Reflect the source imagery mood and scene without logos or text overlays.`
+    : composeImagePromptFallback(cleanHeadline, targetLocale || "Global", category);
+
+  return {
+    headline: cleanHeadline,
+    subheadline: stripCitations(subheadline),
+    byline: feedLabel ? `By ${feedLabel}` : "By RSS Desk",
+    location: targetLocale && targetLocale.toLowerCase() !== "global" ? targetLocale : "Global",
+    category,
+    body: stripCitations(body),
+    pullQuote: stripCitations(pullQuote),
+    imagePrompt: stripCitations(imagePrompt),
+    sourcePublishedAt: parseSourcePublishedAt(candidate.sourcePublishedAt),
+    sourceUrls: [normaliseUrl(candidate.sourceUrl)],
+  };
+}
+
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);
 }
@@ -911,7 +1024,7 @@ function spendTokens(budget: TokenBudget, usage: ClaudeUsage): void {
 }
 
 async function fetchDiscoveryCandidates(
-  apiKey: string,
+  apiKey: string | null,
   category: Category,
   targetLocale: string,
   discoveryProvider: IngestDiscoveryProvider,
@@ -923,6 +1036,7 @@ async function fetchDiscoveryCandidates(
     const rssCandidates = await discoverCandidatesFromRss({
       categoryHint: category,
       targetLocale,
+      discoveryProvider,
       targetCount,
       seenUrls,
       seenHeadlines,
@@ -943,6 +1057,7 @@ async function fetchDiscoveryCandidates(
         retryCount: 0,
         provider: discoveryProvider,
       };
+    if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set for rss_seeded_primary fallback discovery.");
     const webFallback = await fetchDiscoveryCandidatesAnthropic(
       apiKey,
       category,
@@ -962,6 +1077,7 @@ async function fetchDiscoveryCandidates(
     };
   }
 
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set for anthropic_web_search discovery.");
   const webOnly = await fetchDiscoveryCandidatesAnthropic(
     apiKey,
     category,
@@ -1025,6 +1141,12 @@ function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
       sourceUrl?: string;
       source_url?: string;
       rationale?: string;
+      sourcePublishedAt?: string | null;
+      source_published_at?: string | null;
+      summary?: string | null;
+      body?: string | null;
+      imageUrl?: string | null;
+      image_url?: string | null;
     } | null;
     const headline = candidate?.headline?.trim() ?? "";
     const sourceUrl = (candidate?.sourceUrl ?? candidate?.source_url ?? "").trim();
@@ -1043,6 +1165,11 @@ function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
       headline,
       sourceUrl: parsedUrl.toString(),
       rationale: candidate?.rationale?.trim() ?? "",
+      sourcePublishedAt:
+        (candidate?.sourcePublishedAt ?? candidate?.source_published_at ?? null) || null,
+      summary: candidate?.summary?.trim() || null,
+      body: candidate?.body?.trim() || null,
+      imageUrl: (candidate?.imageUrl ?? candidate?.image_url ?? null) || null,
     });
   }
   return out;

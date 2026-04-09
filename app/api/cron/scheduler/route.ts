@@ -419,8 +419,14 @@ export async function GET(request: NextRequest) {
         totalFailed,
         totalPolicyRejected,
         totalBatchFallbacks,
-      discoveryRunsByProvider,
-      insertedByProvider,
+        discoveryRunsByProvider:
+          Object.keys(discoveryRunsByProvider).length > 0
+            ? JSON.stringify(discoveryRunsByProvider)
+            : undefined,
+        insertedByProvider:
+          Object.keys(insertedByProvider).length > 0
+            ? JSON.stringify(insertedByProvider)
+            : undefined,
         warningCount,
         durationMs: Date.now() - runStartedAt,
       },

@@ -55,6 +55,8 @@ const envSchema = z.object({
   INGEST_BATCH_SYNC_FALLBACK_LIMIT: optionalNumberString,
   INGEST_AUTO_LOCALE: optionalTrimmedString,
   INGEST_DISCOVERY_PROVIDER: optionalTrimmedString,
+  /** Rewrite discovered stories with LLM expansion. Defaults false when unset. */
+  INGEST_REWRITE_ENABLED: optionalBooleanString,
   RSS_FEED_AUTO_DISABLE_FAILURES: optionalNumberString,
   RSS_DISCOVERY_MAX_FEEDS: optionalNumberString,
   RSS_DISCOVERY_ITEMS_PER_FEED: optionalNumberString,

@@ -252,6 +252,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     spotify: false,
     nasa: false,
   });
+  /** Full-width NASA row or reading-rail NASA — at most one per feed view so APOD never stacks back-to-back. */
+  const nasaSurfaceUsedRef = useRef(false);
   const weatherBriefLoadedRef = useRef(false);
   const seenSpotifySignaturesRef = useRef<Set<string>>(new Set());
   const recentBreatherMotifsRef = useRef<EditorialBreatherModuleData["motif"][]>([]);
@@ -640,7 +642,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         }
         if (ar === SINGLETON_AFTER_ARTICLE_COUNT_NASA && !singletonPlacedRef.current.nasa) {
           singletonPlacedRef.current.nasa = true;
-          if (cache.nasa) {
+          if (cache.nasa && !nasaSurfaceUsedRef.current) {
+            nasaSurfaceUsedRef.current = true;
             const mod: ModuleFeedSection = {
               sectionType: "module",
               moduleType: "nasa",
@@ -904,8 +907,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           primary = { kind: "weather", data: cache.weather };
           weatherBriefLoadedRef.current = true;
           singletonPlacedRef.current.weather = true;
+        } else if (cache.nasa && !nasaSurfaceUsedRef.current) {
+          primary = { kind: "nasa", data: cache.nasa };
+          nasaSurfaceUsedRef.current = true;
         }
-        else if (cache.nasa) primary = { kind: "nasa", data: cache.nasa };
 
         let secondary: ReadingRailModule | undefined;
         const spotifySignature = spotifyContentSignature(cache.spotify);
@@ -1148,6 +1153,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       setSections([]);
       sectionCountRef.current = 0;
       singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+      nasaSurfaceUsedRef.current = false;
       weatherBriefLoadedRef.current = false;
       seenSpotifySignaturesRef.current = new Set();
       recentBreatherMotifsRef.current = [];
@@ -1194,6 +1200,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     singletonPrefetchedRef.current = false;
     singletonPrefetchPromiseRef.current = null;
     singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+    nasaSurfaceUsedRef.current = false;
     weatherBriefLoadedRef.current = false;
     seenSpotifySignaturesRef.current = new Set();
     recentBreatherMotifsRef.current = [];

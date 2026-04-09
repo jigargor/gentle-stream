@@ -1,21 +1,30 @@
 import { listEnabledRssFeeds, recordRssFeedHealth } from "@/lib/db/rssFeeds";
 import { normaliseUrl } from "@/lib/db/articles";
+import { captureMessage } from "@/lib/observability";
 
 export interface RssDiscoveryCandidate {
   headline: string;
   sourceUrl: string;
   rationale: string;
+  sourcePublishedAt?: string | null;
+  summary?: string | null;
+  body?: string | null;
+  imageUrl?: string | null;
 }
 
 interface RssItem {
   title: string;
   link: string;
   publishedAt: string | null;
+  summary: string | null;
+  body: string | null;
+  imageUrl: string | null;
 }
 
 interface DiscoverFromRssInput {
   categoryHint?: string;
   targetLocale?: string;
+  discoveryProvider?: string;
   targetCount: number;
   seenUrls: string[];
   seenHeadlines: string[];
@@ -35,9 +44,37 @@ function cleanXmlText(value: string): string {
     .trim();
 }
 
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function cleanXmlHtml(value: string): string {
+  const raw = value
+    .replace(/^<!\[CDATA\[/, "")
+    .replace(/\]\]>$/, "");
+  const withBreaks = raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "- ");
+  const withoutTags = withBreaks.replace(/<[^>]+>/g, " ");
+  return decodeXmlEntities(withoutTags).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function extractTag(block: string, tagName: string): string | null {
   const match = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i").exec(block);
   if (match?.[1]) return cleanXmlText(match[1]);
+  return null;
+}
+
+function extractTagHtml(block: string, tagName: string): string | null {
+  const match = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i").exec(block);
+  if (match?.[1]) return cleanXmlHtml(match[1]);
   return null;
 }
 
@@ -45,6 +82,24 @@ function extractAtomLink(entry: string): string | null {
   const m = /<link[^>]+href=["']([^"']+)["'][^>]*>/i.exec(entry);
   if (!m?.[1]) return null;
   return m[1].trim();
+}
+
+function extractMediaUrl(block: string, baseUrl: string): string | null {
+  const patterns = [
+    /<enclosure[^>]+url=["']([^"']+)["'][^>]*>/i,
+    /<media:content[^>]+url=["']([^"']+)["'][^>]*>/i,
+    /<media:thumbnail[^>]+url=["']([^"']+)["'][^>]*>/i,
+  ];
+  for (const pattern of patterns) {
+    const m = pattern.exec(block);
+    if (!m?.[1]) continue;
+    try {
+      return new URL(m[1], baseUrl).toString();
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 function parseRssItems(xml: string): RssItem[] {
@@ -55,7 +110,10 @@ function parseRssItems(xml: string): RssItem[] {
         const title = extractTag(item, "title") ?? "";
         const link = extractTag(item, "link") ?? "";
         const publishedAt = extractTag(item, "pubDate");
-        return { title, link, publishedAt };
+        const summary = extractTagHtml(item, "description");
+        const body = extractTagHtml(item, "content:encoded") ?? summary;
+        const imageUrl = extractMediaUrl(item, link);
+        return { title, link, publishedAt, summary, body, imageUrl };
       })
       .filter((item) => item.title && item.link);
   }
@@ -66,7 +124,10 @@ function parseRssItems(xml: string): RssItem[] {
       const title = extractTag(entry, "title") ?? "";
       const link = extractAtomLink(entry) ?? "";
       const publishedAt = extractTag(entry, "updated") ?? extractTag(entry, "published");
-      return { title, link, publishedAt };
+      const summary = extractTagHtml(entry, "summary");
+      const body = extractTagHtml(entry, "content") ?? summary;
+      const imageUrl = extractMediaUrl(entry, link);
+      return { title, link, publishedAt, summary, body, imageUrl };
     })
     .filter((item) => item.title && item.link);
 }
@@ -157,6 +218,7 @@ function isRecentEnough(isoLike: string | null): boolean {
 }
 
 export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Promise<RssDiscoveryCandidate[]> {
+  const startedAtMs = Date.now();
   const maxFeeds = Math.max(1, Math.min(20, Number(process.env.RSS_DISCOVERY_MAX_FEEDS ?? DEFAULT_MAX_FEEDS)));
   const itemsPerFeed = Math.max(
     1,
@@ -170,21 +232,37 @@ export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Pr
   const seenUrlSet = new Set(input.seenUrls.map((url) => normaliseUrl(url)));
   const seenHeadlineSet = new Set(input.seenHeadlines.map((headline) => headline.trim().toLowerCase()));
   const candidates: RssDiscoveryCandidate[] = [];
+  let feedsAttempted = 0;
+  let filteredByRecency = 0;
+  let filteredByDedup = 0;
+  let filteredByInvalid = 0;
+  let itemsParsed = 0;
 
   for (const feed of feeds) {
     if (candidates.length >= input.targetCount) break;
+    feedsAttempted += 1;
     try {
       const feedEndpoint = await resolveFeedEndpoint(feed.feedUrl);
       const xml = await fetchText(feedEndpoint);
       const items = parseRssItems(xml).slice(0, itemsPerFeed);
+      itemsParsed += items.length;
       let acceptedFromFeed = 0;
       for (const item of items) {
         if (acceptedFromFeed >= itemsPerFeed || candidates.length >= input.targetCount) break;
-        if (!isRecentEnough(item.publishedAt)) continue;
+        if (!isRecentEnough(item.publishedAt)) {
+          filteredByRecency += 1;
+          continue;
+        }
         const normalizedUrl = normaliseUrl(item.link);
         const normalizedHeadline = item.title.trim().toLowerCase();
-        if (!normalizedUrl || !normalizedHeadline) continue;
-        if (seenUrlSet.has(normalizedUrl) || seenHeadlineSet.has(normalizedHeadline)) continue;
+        if (!normalizedUrl || !normalizedHeadline) {
+          filteredByInvalid += 1;
+          continue;
+        }
+        if (seenUrlSet.has(normalizedUrl) || seenHeadlineSet.has(normalizedHeadline)) {
+          filteredByDedup += 1;
+          continue;
+        }
         seenUrlSet.add(normalizedUrl);
         seenHeadlineSet.add(normalizedHeadline);
         acceptedFromFeed += 1;
@@ -192,6 +270,10 @@ export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Pr
           headline: item.title.trim(),
           sourceUrl: item.link.trim(),
           rationale: `RSS feed: ${feed.publisher || feed.label || feed.feedUrl}`,
+          sourcePublishedAt: item.publishedAt,
+          summary: item.summary,
+          body: item.body,
+          imageUrl: item.imageUrl,
         });
       }
       await recordRssFeedHealth({ id: feed.id, ok: true });
@@ -204,6 +286,25 @@ export async function discoverCandidatesFromRss(input: DiscoverFromRssInput): Pr
     }
   }
 
-  return candidates.slice(0, input.targetCount);
+  const out = candidates.slice(0, input.targetCount);
+  captureMessage({
+    level: "info",
+    message: "rss.discovery.summary",
+    context: {
+      discoveryProvider: input.discoveryProvider ?? "unknown",
+      categoryHint: input.categoryHint ?? "none",
+      targetLocale: input.targetLocale ?? "global",
+      targetCount: input.targetCount,
+      feedCountSelected: feeds.length,
+      feedCountAttempted: feedsAttempted,
+      feedItemsParsed: itemsParsed,
+      candidateCount: out.length,
+      filteredByRecency,
+      filteredByDedup,
+      filteredByInvalid,
+      durationMs: Date.now() - startedAtMs,
+    },
+  });
+  return out;
 }
 

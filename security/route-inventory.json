@@ -236,6 +236,15 @@
       "p0Flags": []
     },
     {
+      "route": "/api/user/spotify-mood-feedback",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "session_user",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
       "route": "/api/user/article-likes",
       "methods": [
         "GET",

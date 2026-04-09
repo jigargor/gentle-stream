@@ -69,6 +69,8 @@ const envSchema = z.object({
   NEXT_PUBLIC_GOOGLE_PLACES_AUTOFILL_ENABLED: optionalBooleanString,
   NEXT_PUBLIC_FEED_FILLER_FALLBACK: optionalTrimmedString,
   NEXT_PUBLIC_ENGAGEMENT_SCROLL_DEPTH_ENABLED: optionalBooleanString,
+  /** Max age (hours) of newest article `fetched_at` before engagement-health alerts (catalog ingest freshness). Default 336 (14d) if unset. */
+  ENGAGEMENT_HEALTH_MAX_FRESHNESS_HOURS: optionalNumberString,
   SPOTIFY_CLIENT_ID: optionalTrimmedString,
   SPOTIFY_CLIENT_SECRET: optionalTrimmedString,
   SPOTIFY_MODULE_ENABLED: optionalBooleanString,

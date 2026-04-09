@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { SpotifyMoodTileData } from "@/lib/types";
 
 interface SpotifyMoodTileProps {
@@ -8,6 +9,33 @@ interface SpotifyMoodTileProps {
 }
 
 export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) {
+  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [pending, setPending] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+
+  async function sendVote(next: "up" | "down") {
+    if (pending || vote) return;
+    setPending(true);
+    setHint(null);
+    try {
+      const res = await fetch("/api/user/spotify-mood-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mood: data.mood, vote: next }),
+      });
+      if (res.status === 401) {
+        setHint("Sign in to save mood preferences.");
+        return;
+      }
+      if (!res.ok) {
+        setHint("Could not save. Try again later.");
+        return;
+      }
+      setVote(next);
+    } finally {
+      setPending(false);
+    }
+  }
   const reasonLabel =
     reason === "singleton"
       ? null
@@ -121,6 +149,88 @@ export default function SpotifyMoodTile({ data, reason }: SpotifyMoodTileProps) 
           >
             Open top track
           </a>
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          marginBottom: "0.55rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+            fontSize: "0.68rem",
+            color: "#665d4f",
+          }}
+        >
+          This mood:
+        </span>
+        <button
+          type="button"
+          disabled={pending || Boolean(vote)}
+          onClick={() => void sendVote("up")}
+          aria-label="More like this mood"
+          aria-pressed={vote === "up"}
+          style={{
+            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+            fontSize: "0.75rem",
+            padding: "0.2rem 0.45rem",
+            borderRadius: "4px",
+            border: "1px solid var(--gs-border)",
+            background:
+              vote === "up" ? "rgba(26, 71, 42, 0.12)" : "var(--gs-surface-soft)",
+            cursor: pending || vote ? "default" : "pointer",
+            opacity: vote && vote !== "up" ? 0.45 : 1,
+          }}
+        >
+          👍 More
+        </button>
+        <button
+          type="button"
+          disabled={pending || Boolean(vote)}
+          onClick={() => void sendVote("down")}
+          aria-label="Less of this mood"
+          aria-pressed={vote === "down"}
+          style={{
+            fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+            fontSize: "0.75rem",
+            padding: "0.2rem 0.45rem",
+            borderRadius: "4px",
+            border: "1px solid var(--gs-border)",
+            background:
+              vote === "down" ? "rgba(120, 60, 40, 0.1)" : "var(--gs-surface-soft)",
+            cursor: pending || vote ? "default" : "pointer",
+            opacity: vote && vote !== "down" ? 0.45 : 1,
+          }}
+        >
+          👎 Less
+        </button>
+        {hint ? (
+          <span
+            style={{
+              fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+              fontSize: "0.68rem",
+              color: "#8b5a2b",
+            }}
+          >
+            {hint}
+          </span>
+        ) : null}
+        {vote ? (
+          <span
+            style={{
+              fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+              fontSize: "0.68rem",
+              color: "#4f6b4a",
+            }}
+          >
+            Saved for your feed.
+          </span>
         ) : null}
       </div>
 

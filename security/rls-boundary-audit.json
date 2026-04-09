@@ -98,6 +98,12 @@
       ]
     },
     {
+      "route": "/api/user/spotify-mood-feedback",
+      "authSignals": [
+        "session_user"
+      ]
+    },
+    {
       "route": "/api/user/article-likes",
       "authSignals": [
         "session_user"

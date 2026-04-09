@@ -120,6 +120,17 @@ CREATE INDEX IF NOT EXISTS idx_user_seen_articles_user_seen_at
 CREATE INDEX IF NOT EXISTS idx_user_seen_articles_article_id
   ON user_seen_articles (article_id);
 
+CREATE TABLE IF NOT EXISTS user_spotify_mood_feedback (
+  user_id    TEXT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
+  mood       TEXT NOT NULL,
+  score      SMALLINT NOT NULL DEFAULT 0 CHECK (score >= -20 AND score <= 20),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, mood)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_spotify_mood_feedback_user
+  ON user_spotify_mood_feedback (user_id);
+
 -- ─── Creator publishing ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS creator_profiles (
   user_id                    TEXT PRIMARY KEY REFERENCES user_profiles (user_id) ON DELETE CASCADE,

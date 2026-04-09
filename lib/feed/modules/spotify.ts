@@ -56,6 +56,42 @@ function randomFrom<T>(values: T[]): T {
   return values[idx]!;
 }
 
+/** Exported for tests: pick a mood using per-user score weights (higher → more likely). */
+export function weightedPickMood(
+  candidates: string[],
+  scores: Record<string, number> | null | undefined
+): string {
+  if (candidates.length === 0) return "chill";
+  if (!scores || Object.keys(scores).length === 0) return randomFrom(candidates).toLowerCase();
+  const weights = candidates.map((m) => {
+    const key = m.trim().toLowerCase();
+    const s = scores[key] ?? 0;
+    return Math.max(0.05, 1 + 0.2 * s);
+  });
+  const sum = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * sum;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i]!;
+    if (r <= 0) return candidates[i]!.trim().toLowerCase();
+  }
+  return candidates[candidates.length - 1]!.trim().toLowerCase();
+}
+
+let cachedFeedbackMoods: Set<string> | null = null;
+
+/** Moods we accept for thumbs feedback (genre map + category defaults + configured defaults). */
+export function getSpotifyFeedbackValidMoods(): Set<string> {
+  if (cachedFeedbackMoods) return cachedFeedbackMoods;
+  const s = new Set<string>();
+  for (const k of Object.keys(MOOD_GENRE_MAP)) s.add(k.toLowerCase());
+  for (const arr of Object.values(CATEGORY_MOOD_MAP)) {
+    for (const m of arr) s.add(m.trim().toLowerCase());
+  }
+  for (const m of normalizeMoodList(env.SPOTIFY_MODULE_DEFAULT_MOODS)) s.add(m.toLowerCase());
+  cachedFeedbackMoods = s;
+  return s;
+}
+
 function normalizeMoodList(value: string | undefined): string[] {
   if (!value) return ["chill", "focus", "uplifting"];
   return value
@@ -64,14 +100,19 @@ function normalizeMoodList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function pickMood(input: { category?: string | null; mood?: string | null }): string {
+function pickMood(input: {
+  category?: string | null;
+  mood?: string | null;
+  moodScores?: Record<string, number> | null;
+}): string {
   const explicitMood = (input.mood ?? "").trim();
-  if (explicitMood.length > 0) return explicitMood;
+  if (explicitMood.length > 0) return explicitMood.toLowerCase();
   const categoryKey = (input.category ?? "").trim().toLowerCase();
   const categoryMoods = CATEGORY_MOOD_MAP[categoryKey];
-  if (categoryMoods && categoryMoods.length > 0) return randomFrom(categoryMoods);
   const defaults = normalizeMoodList(env.SPOTIFY_MODULE_DEFAULT_MOODS);
-  return randomFrom(defaults);
+  const candidates =
+    categoryMoods && categoryMoods.length > 0 ? categoryMoods : defaults;
+  return weightedPickMood(candidates, input.moodScores ?? null);
 }
 
 function normalizeMarket(input: string | null | undefined): string {
@@ -275,12 +316,18 @@ export async function getSpotifyMoodTileData(input: {
   category?: string | null;
   mood?: string | null;
   market?: string | null;
+  /** Per-mood scores from `user_spotify_mood_feedback`; biases automatic mood choice. */
+  moodScores?: Record<string, number> | null;
 }): Promise<SpotifyMoodTileData> {
   const enabledRaw = env.SPOTIFY_MODULE_ENABLED;
   const isEnabled =
     enabledRaw === undefined ||
     enabledRaw === true;
-  const mood = pickMood({ category: input.category, mood: input.mood });
+  const mood = pickMood({
+    category: input.category,
+    mood: input.mood,
+    moodScores: input.moodScores ?? null,
+  });
   const genre = pickGenreForMood(mood);
   const market = normalizeMarket(input.market);
   const cacheKey = `${mood}|${genre}|${market}`;

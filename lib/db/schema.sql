@@ -295,6 +295,17 @@ CREATE INDEX IF NOT EXISTS idx_rss_feeds_enabled_locale_category
   ON rss_feeds (is_enabled, locale_hint, category_hint)
   WHERE is_enabled = TRUE;
 
+-- ─── RSS discovery cursor state (round-robin feed fairness) ──────────────────
+CREATE TABLE IF NOT EXISTS rss_discovery_state (
+  id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id = TRUE),
+  cursor_position INT NOT NULL DEFAULT 0 CHECK (cursor_position >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO rss_discovery_state (id, cursor_position)
+VALUES (TRUE, 0)
+ON CONFLICT (id) DO NOTHING;
+
 -- ─── LLM provider call audit ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS llm_provider_calls (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -410,6 +421,25 @@ DROP TRIGGER IF EXISTS set_updated_at_on_rss_feeds ON rss_feeds;
 CREATE TRIGGER set_updated_at_on_rss_feeds
   BEFORE UPDATE ON rss_feeds
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS set_updated_at_on_rss_discovery_state ON rss_discovery_state;
+CREATE TRIGGER set_updated_at_on_rss_discovery_state
+  BEFORE UPDATE ON rss_discovery_state
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ─── Site feedback (widget submissions) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS site_feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  message TEXT NOT NULL CHECK (char_length(message) >= 1 AND char_length(message) <= 8000),
+  page_url TEXT,
+  contact_email TEXT,
+  user_agent TEXT,
+  user_id UUID REFERENCES auth.users (id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'read', 'archived'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_feedback_created_at ON site_feedback (created_at DESC);
 
 -- ─── Cleanup (TTL disabled) ────────────────────────────────────────────────────
 -- Article TTL expiry is disabled; keep this note so old runbooks do not attempt

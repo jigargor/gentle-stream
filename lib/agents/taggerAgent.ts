@@ -10,12 +10,32 @@
  * Called by: app/api/cron/tagger/route.ts
  */
 
-import { getUntaggedArticles, updateArticleTags } from "../db/articles";
+import { getArticleById, getUntaggedArticles, updateArticleTags } from "../db/articles";
 import type { StoredArticle } from "../types";
 import { captureException, startSpan } from "@/lib/observability";
 import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+
+function messageLooksLikeCreditExhaustion(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("insufficient credits") ||
+    lower.includes("credit balance") ||
+    lower.includes("credits exhausted") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("billing")
+  );
+}
+
+/** Outcome of classifying a single article (exported for ingest CLI sequencing). */
+export type TagSingleOutcome =
+  | "tagged"
+  | "skipped_already_tagged"
+  | "not_found"
+  | "api_error"
+  | "credits_exhausted"
+  | "parse_error";
 
 interface TaggerEnrichment {
   tags: string[];
@@ -40,14 +60,14 @@ export async function runTaggerAgent(limit = 20): Promise<void> {
 
   console.log(`[TaggerAgent] Tagging ${articles.length} articles...`);
 
-  // Process in parallel — no web search, so rate limits are relaxed
-  await Promise.allSettled(articles.map(tagSingleArticle));
+  await Promise.allSettled(articles.map((a) => tagSingleArticle(a)));
   span.end({ processed: articles.length });
 }
 
-async function tagSingleArticle(article: StoredArticle): Promise<void> {
+async function tagSingleArticle(article: StoredArticle): Promise<TagSingleOutcome> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  if (article.tagged) return "skipped_already_tagged";
 
   const prompt = buildTaggerPrompt(article);
   const startedAt = Date.now();
@@ -68,6 +88,8 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
 
   if (!response.ok) {
     const responseText = await response.text();
+    const creditsExhausted =
+      response.status === 429 && messageLooksLikeCreditExhaustion(responseText);
     await logLlmProviderCall({
       provider: "anthropic",
       callKind: "tagger_classification",
@@ -88,7 +110,7 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
       articleId: article.id,
       status: response.status,
     });
-    return;
+    return creditsExhausted ? "credits_exhausted" : "api_error";
   }
 
   const data = await response.json();
@@ -108,7 +130,7 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
     correlationId: article.id,
   });
   const textBlock = data.content?.find((b: { type: string }) => b.type === "text");
-  if (!textBlock?.text) return;
+  if (!textBlock?.text) return "parse_error";
 
   try {
     const raw = textBlock.text.replace(/```json|```/g, "").trim();
@@ -126,10 +148,23 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
     });
 
     console.log(`[TaggerAgent] Tagged article ${article.id}: score=${enrichment.qualityScore}`);
+    return "tagged";
   } catch (e) {
     console.error(`[TaggerAgent] Parse error for article ${article.id}:`, e);
     captureException(e, { agent: "tagger", articleId: article.id, phase: "parse" });
+    return "parse_error";
   }
+}
+
+/**
+ * Load one article by id and run the tagger (sequential ingest scripts).
+ * Does not batch; use this when you must tag before the next ingest step.
+ */
+export async function tagArticleById(articleId: string): Promise<TagSingleOutcome> {
+  const article = await getArticleById(articleId);
+  if (!article) return "not_found";
+  if (article.tagged) return "skipped_already_tagged";
+  return tagSingleArticle(article);
 }
 
 function buildTaggerPrompt(article: StoredArticle): string {

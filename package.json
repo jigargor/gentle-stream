@@ -19,6 +19,8 @@
     "ingest": "tsx scripts/ingest/run.ts",
     "ingest:all": "tsx scripts/ingest/run.ts --all",
     "ingest:tag": "tsx scripts/ingest/run.ts --tag-only",
+    "ingest:sequential": "tsx scripts/ingest/sequential-run.ts",
+    "rss:bulk-upsert": "tsx scripts/rss/bulk-upsert-feeds.ts",
     "articles:dedup-cleanup": "tsx -r dotenv/config scripts/articles-dedup-cleanup.ts dotenv_config_path=.env.local",
     "articles:remove-test-dedup": "tsx -r dotenv/config scripts/cleanup-test-dedup-articles.ts dotenv_config_path=.env.local",
     "validate:supabase-key": "tsx scripts/validate-supabase-public-key.ts",

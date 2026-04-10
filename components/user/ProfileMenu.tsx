@@ -854,6 +854,15 @@ export function ProfileMenu({
             >
               <li>
                 <Link
+                  href="/about"
+                  onClick={() => setOpen(false)}
+                  style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+                >
+                  About
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/privacy"
                   onClick={() => setOpen(false)}
                   style={{ color: "#1a472a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
@@ -1557,6 +1566,23 @@ export function ProfileMenu({
                   }}
                 >
                   Manage RSS feeds
+                </Link>
+              </div>
+              <div style={{ marginTop: "0.35rem" }}>
+                <Link
+                  href="/admin/feedback"
+                  onClick={() => setOpen(false)}
+                  style={{
+                    display: "inline-block",
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    color: "#1a472a",
+                    textDecoration: "underline",
+                    textUnderlineOffset: "3px",
+                  }}
+                >
+                  Site feedback inbox
                 </Link>
               </div>
             </section>

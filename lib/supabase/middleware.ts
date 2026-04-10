@@ -15,20 +15,36 @@ import {
 } from "./validate-anon-key";
 
 const PUBLIC_PREFIXES = [
+  "/",
   "/login",
   "/creator/login",
   "/auth/callback",
   "/auth/auth-code-error",
   "/api/auth/email-password",
+  "/api/auth/email-link",
   "/privacy",
+  "/about",
   "/terms",
   "/data-deletion",
   "/sms-consent",
   "/sms-consent-screen",
 ];
 
+const PUBLIC_API_PREFIXES = [
+  "/api/feed",
+  "/api/feed/related",
+  "/api/feed/modules",
+  "/api/feedback",
+];
+
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`)
+  );
+}
+
+function isPublicApiPath(pathname: string): boolean {
+  return PUBLIC_API_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`)
   );
 }
@@ -134,7 +150,12 @@ export async function updateSession(request: NextRequest, traceId?: string) {
     }
     // Puzzle generators are public — no user data; route handlers must still run (not 401).
     const isPublicGameApi = pathname.startsWith("/api/game");
-    if (pathname.startsWith("/api") && !isPublicGameApi && !isPublicPath(pathname)) {
+    if (
+      pathname.startsWith("/api") &&
+      !isPublicGameApi &&
+      !isPublicApiPath(pathname) &&
+      !isPublicPath(pathname)
+    ) {
       return finish(
         apiErrorResponse({
           request,

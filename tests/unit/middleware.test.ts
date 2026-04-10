@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { GUEST_ACCESS_COOKIE } from "@/lib/auth/guest-access";
 
 const getUserMock = vi.fn();
 const signOutMock = vi.fn();
@@ -62,6 +63,39 @@ describe("updateSession middleware", () => {
     delete mutableEnv.AUTH_DISABLED;
     const { updateSession } = await import("@/lib/supabase/middleware");
     const req = new NextRequest("http://localhost:3000/api/cron/scheduler");
+    const res = await updateSession(req);
+    expect(res.status).toBe(200);
+  });
+
+  it("redirects anonymous root visits to login without guest cookie", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    getUserMock.mockResolvedValueOnce({ data: { user: null } });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/");
+    const res = await updateSession(req);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/login?next=%2F");
+  });
+
+  it("allows anonymous feed api when guest cookie is present", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    getUserMock.mockResolvedValueOnce({ data: { user: null } });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/api/feed", {
+      headers: {
+        cookie: `${GUEST_ACCESS_COOKIE}=1`,
+      },
+    });
     const res = await updateSession(req);
     expect(res.status).toBe(200);
   });

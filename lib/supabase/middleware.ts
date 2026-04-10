@@ -13,6 +13,7 @@ import {
   rejectIfSupabaseKeyIsPlatformSecret,
   rejectIfSupabaseKeyIsServiceRole,
 } from "./validate-anon-key";
+import { GUEST_ACCESS_COOKIE, hasGuestAccessCookie } from "@/lib/auth/guest-access";
 
 const PUBLIC_PREFIXES = [
   "/",
@@ -22,6 +23,7 @@ const PUBLIC_PREFIXES = [
   "/auth/auth-code-error",
   "/api/auth/email-password",
   "/api/auth/email-link",
+  "/api/auth/guest-access",
   "/privacy",
   "/about",
   "/terms",
@@ -65,6 +67,12 @@ export async function updateSession(request: NextRequest, traceId?: string) {
   }
 
   const { pathname } = request.nextUrl;
+  const hasGuestAccess = hasGuestAccessCookie(
+    request.cookies.get(GUEST_ACCESS_COOKIE)?.value ?? null
+  );
+  const allowsAnonymousPage =
+    pathname !== "/" ? isPublicPath(pathname) : hasGuestAccess;
+  const allowsAnonymousFeedApi = hasGuestAccess && isPublicApiPath(pathname);
   // Scheduled jobs use CRON_SECRET, not browser cookies
   if (pathname.startsWith("/api/cron")) {
     return finish(NextResponse.next({ request }));
@@ -153,7 +161,7 @@ export async function updateSession(request: NextRequest, traceId?: string) {
     if (
       pathname.startsWith("/api") &&
       !isPublicGameApi &&
-      !isPublicApiPath(pathname) &&
+      !allowsAnonymousFeedApi &&
       !isPublicPath(pathname)
     ) {
       return finish(
@@ -166,7 +174,7 @@ export async function updateSession(request: NextRequest, traceId?: string) {
         })
       );
     }
-    if (!isPublicPath(pathname)) {
+    if (!pathname.startsWith("/api") && !allowsAnonymousPage) {
       const redirectUrl = request.nextUrl.clone();
       const isCreatorArea = pathname.startsWith("/creator");
       redirectUrl.pathname = isCreatorArea ? "/creator/login" : "/login";

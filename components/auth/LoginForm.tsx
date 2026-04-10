@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
-import Link from "next/link";
 import type { Provider } from "@supabase/supabase-js";
 import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
@@ -95,6 +94,7 @@ export function LoginForm({
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<Provider | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
+  const [guestBusy, setGuestBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? "";
   const turnstileEnabled =
@@ -276,6 +276,33 @@ export function LoginForm({
       window.location.assign(nextPath);
     } finally {
       setEmailBusy(false);
+    }
+  }
+
+  async function continueAsGuest() {
+    setMessage(null);
+    if (needsTurnstileChallenge && !turnstileToken) {
+      setMessage("Please complete the security verification below.");
+      return;
+    }
+    setGuestBusy(true);
+    try {
+      const res = await fetch("/api/auth/guest-access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          turnstileToken: turnstileToken ?? "",
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage(body.error ?? "Could not unlock guest browsing.");
+        resetTurnstileWidget();
+        return;
+      }
+      window.location.assign("/");
+    } finally {
+      setGuestBusy(false);
     }
   }
 
@@ -511,8 +538,12 @@ export function LoginForm({
             : `Continue with ${providerLabel("facebook")}`}
         </button>
 
-        <Link
-          href="/?guest=1"
+        <button
+          type="button"
+          onClick={() => void continueAsGuest()}
+          disabled={
+            guestBusy || (needsTurnstileChallenge && !turnstileToken)
+          }
           style={{
             display: isCreatorLogin ? "none" : "block",
             width: "100%",
@@ -527,11 +558,20 @@ export function LoginForm({
             fontSize: "0.78rem",
             letterSpacing: "0.05em",
             textTransform: "uppercase",
-            textDecoration: "none",
+            cursor:
+              guestBusy
+                ? "wait"
+                : needsTurnstileChallenge && !turnstileToken
+                  ? "not-allowed"
+                  : "pointer",
+            opacity:
+              needsTurnstileChallenge && !turnstileToken && !guestBusy
+                ? 0.55
+                : 1,
           }}
         >
-          Continue as guest
-        </Link>
+          {guestBusy ? "Verifying…" : "Continue as guest"}
+        </button>
 
         <div
           style={{

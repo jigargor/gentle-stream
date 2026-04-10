@@ -8,6 +8,9 @@ import { AppLogo } from "@/components/brand/AppLogo";
 import { createClient } from "@/lib/supabase/client";
 import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
 
+/** Secondary text on login shell `#faf8f3` — WCAG AA for normal-sized copy (contrast ≥ 4.5:1). */
+const LOGIN_TEXT_MUTED = "#454545";
+
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
   return raw;
@@ -536,7 +539,7 @@ export function LoginForm({
             alignItems: "center",
             gap: "0.75rem",
             margin: "0 0 1.25rem",
-            color: "#aaa",
+            color: LOGIN_TEXT_MUTED,
             fontSize: "0.7rem",
             fontFamily: "'IM Fell English', Georgia, serif",
           }}
@@ -626,7 +629,7 @@ export function LoginForm({
                 fontSize: "0.72rem",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                color: "#888",
+                color: LOGIN_TEXT_MUTED,
                 marginBottom: "0.35rem",
               }}
             >
@@ -660,7 +663,7 @@ export function LoginForm({
                 fontSize: "0.72rem",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                color: "#888",
+                color: LOGIN_TEXT_MUTED,
                 marginBottom: "0.35rem",
               }}
             >
@@ -731,7 +734,7 @@ export function LoginForm({
                     fontSize: "0.72rem",
                     letterSpacing: "0.06em",
                     textTransform: "uppercase",
-                    color: "#888",
+                    color: LOGIN_TEXT_MUTED,
                     marginBottom: "0.35rem",
                   }}
                 >
@@ -762,7 +765,7 @@ export function LoginForm({
                 margin: "0 0 0.85rem",
                 fontFamily: "'IM Fell English', Georgia, serif",
                 fontSize: "0.72rem",
-                color: "#777",
+                color: LOGIN_TEXT_MUTED,
                 lineHeight: 1.45,
               }}
             >
@@ -786,7 +789,7 @@ export function LoginForm({
                     margin: "0 0 0.5rem",
                     fontFamily: "'IM Fell English', Georgia, serif",
                     fontSize: "0.72rem",
-                    color: "#666",
+                    color: LOGIN_TEXT_MUTED,
                     lineHeight: 1.45,
                   }}
                 >
@@ -868,7 +871,7 @@ export function LoginForm({
               fontSize: "0.68rem",
               letterSpacing: "0.08em",
               textTransform: "uppercase",
-              color: "#888",
+              color: LOGIN_TEXT_MUTED,
             }}
           >
             Creators
@@ -898,7 +901,7 @@ export function LoginForm({
             >
               Creator access (work in progress)
             </button>
-            <span style={{ color: "#bbb", margin: "0 0.35rem" }} aria-hidden>
+            <span style={{ color: LOGIN_TEXT_MUTED, margin: "0 0.35rem" }} aria-hidden>
               ·
             </span>
             <a
@@ -917,7 +920,7 @@ export function LoginForm({
               margin: "0.4rem 0 0",
               fontFamily: "'IM Fell English', Georgia, serif",
               fontSize: "0.72rem",
-              color: "#999",
+              color: LOGIN_TEXT_MUTED,
               lineHeight: 1.45,
             }}
           >
@@ -932,24 +935,24 @@ export function LoginForm({
             textAlign: "center",
             fontFamily: "'IM Fell English', Georgia, serif",
             fontSize: "0.72rem",
-            color: "#999",
+            color: LOGIN_TEXT_MUTED,
           }}
         >
-          <a href="/about" style={{ color: "#777", textDecoration: "underline" }}>
+          <a href="/about" style={{ color: LOGIN_TEXT_MUTED, textDecoration: "underline" }}>
             About
           </a>
           {" · "}
-          <a href="/privacy" style={{ color: "#777", textDecoration: "underline" }}>
+          <a href="/privacy" style={{ color: LOGIN_TEXT_MUTED, textDecoration: "underline" }}>
             Privacy
           </a>
           {" · "}
-          <a href="/terms" style={{ color: "#777", textDecoration: "underline" }}>
+          <a href="/terms" style={{ color: LOGIN_TEXT_MUTED, textDecoration: "underline" }}>
             Terms
           </a>
           {" · "}
           <a
             href="/data-deletion"
-            style={{ color: "#777", textDecoration: "underline" }}
+            style={{ color: LOGIN_TEXT_MUTED, textDecoration: "underline" }}
           >
             Data deletion
           </a>

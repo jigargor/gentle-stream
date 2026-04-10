@@ -1,5 +1,6 @@
 export {
   getGameFromPool,
+  getGameFromPoolUnseenThenReuse,
   getDailyConnectionsGameRow,
   markGameUsed,
   countGamePool,

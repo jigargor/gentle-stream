@@ -436,6 +436,17 @@ body {
   }
 }
 
+/* Feed band: subtle top highlight + no double vertical rules inside multi-column grids */
+.news-section-pro {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+@media (min-width: 769px) {
+  .news-section-pro .news-grid article.gs-card-lift {
+    border-right: none !important;
+  }
+}
+
 /* Single-hero + optional reading rail (lg+): story + aside */
 .news-section--single-hero {
   display: grid;

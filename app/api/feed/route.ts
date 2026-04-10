@@ -20,7 +20,9 @@ import type { Category } from "@gentle-stream/domain/constants";
 import type { ArticleContentKind } from "@gentle-stream/domain/types";
 import { getRankedFeed } from "@/lib/agents/rankerAgent";
 import { runIngestAgent } from "@/lib/agents/ingestAgent";
+import { resolveIngestDiscoveryProvider } from "@/lib/agents/ingestDiscoveryProvider";
 import { runTaggerAgent } from "@/lib/agents/taggerAgent";
+import { getEnv } from "@/lib/env";
 import {
   appendCronIngestCategoryLogs,
   createCronIngestRun,
@@ -36,6 +38,7 @@ import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 
 const ANONYMOUS_USER_ID = "anonymous";
 const COLD_START_DEDUPE_MS = 45_000;
+const env = getEnv();
 
 type ColdStartPromiseMap = Map<string, Promise<void>>;
 
@@ -54,19 +57,25 @@ function isDevLight(): boolean {
   return v === "1" || v === "true";
 }
 
-function parseContentKinds(searchParams: URLSearchParams): ArticleContentKind[] | null {
+function parseContentKinds(
+  searchParams: URLSearchParams,
+  includeUserSubmitted: boolean
+): ArticleContentKind[] | null {
   const single = searchParams.get("contentKind");
   const multi = searchParams.get("contentKinds");
   const raw = `${single ?? ""},${multi ?? ""}`
     .split(",")
     .map((v) => v.trim())
     .filter(Boolean);
-  if (raw.length === 0) return null;
+  if (raw.length === 0) return includeUserSubmitted ? null : ["news", "recipe"];
   const allowed = raw.filter(
     (v): v is ArticleContentKind =>
       v === "news" || v === "user_article" || v === "recipe"
   );
-  return allowed.length > 0 ? Array.from(new Set(allowed)) : null;
+  const uniqueAllowed = Array.from(new Set(allowed));
+  if (includeUserSubmitted) return uniqueAllowed.length > 0 ? uniqueAllowed : null;
+  const filtered = uniqueAllowed.filter((kind) => kind !== "user_article");
+  return filtered.length > 0 ? filtered : ["news", "recipe"];
 }
 
 function buildColdStartKey(params: {
@@ -103,7 +112,12 @@ function startColdStartInBackground(input: {
     let ingestResult: Awaited<ReturnType<typeof runIngestAgent>> | null = null;
     let coldStartError: string | null = null;
     try {
-      ingestResult = await runIngestAgent(input.category, ingestCount);
+      ingestResult = await runIngestAgent(input.category, ingestCount, {
+        pipeline: "overhaul",
+        discoveryProvider: resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER),
+        rewriteEnabled: env.INGEST_REWRITE_ENABLED ?? false,
+        ingestRunId: runId ?? undefined,
+      });
       await runTaggerAgent(Math.min(20, ingestCount + 5));
 
       if (runId) {
@@ -200,7 +214,8 @@ export async function GET(request: NextRequest) {
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const categoryParam = searchParams.get("category");
-  const contentKinds = parseContentKinds(searchParams);
+  const includeUserSubmitted = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
+  const contentKinds = parseContentKinds(searchParams, includeUserSubmitted);
   const sectionIndex = parseInt(searchParams.get("sectionIndex") || "0", 10);
   const pageSize = parseInt(searchParams.get("pageSize") || "3", 10);
   const excludeIdsParam = searchParams.get("excludeIds") || "";

@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import ArticleCard from "./ArticleCard";
 import type { Article, ArticleFeedSection } from "@/lib/types";
@@ -35,6 +36,17 @@ const borderStyles = {
   background: "var(--gs-surface)",
 };
 
+/** Hairline gutters between cells (background shows through as rules). */
+const hairlineGrid: CSSProperties = {
+  gap: "1px",
+  background: "var(--gs-border)",
+};
+
+const columnShell: CSSProperties = {
+  background: "var(--gs-surface)",
+  minWidth: 0,
+};
+
 export default function NewsSection({
   articles,
   sectionIndex,
@@ -57,7 +69,7 @@ export default function NewsSection({
       Boolean(rail?.primary || rail?.secondary || (rail?.relatedHeadlines?.length ?? 0) > 0);
     return (
       <div
-        className={`news-grid news-section--single-hero${showRail ? " news-section--with-rail" : ""}`}
+        className={`news-section-pro news-grid news-section--single-hero${showRail ? " news-section--with-rail" : ""}`}
         style={borderStyles}
       >
         <div style={{ minWidth: 0 }}>
@@ -70,25 +82,27 @@ export default function NewsSection({
 
   if (plan.templateId === "two-columns") {
     return (
-      <div
-        className="news-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          ...borderStyles,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 0 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 1 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
+      <div className="news-section-pro" style={{ ...borderStyles, padding: 0 }}>
+        <div
+          className="news-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            ...hairlineGrid,
+          }}
+        >
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 0 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 1 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -96,31 +110,33 @@ export default function NewsSection({
 
   if (plan.templateId === "hero-left") {
     return (
-      <div
-        className="news-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.6fr 1fr 1fr",
-          ...borderStyles,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 0 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 1 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 2 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
+      <div className="news-section-pro" style={{ ...borderStyles, padding: 0 }}>
+        <div
+          className="news-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.6fr 1fr 1fr",
+            ...hairlineGrid,
+          }}
+        >
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 0 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 1 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 2 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -128,31 +144,33 @@ export default function NewsSection({
 
   if (plan.templateId === "middle-wide") {
     return (
-      <div
-        className="news-grid"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.2fr 1fr",
-          ...borderStyles,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 0 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "wide"} index={1} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 1 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
-          {inlineModule && inlineModule.targetColumn === 2 ? (
-            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-          ) : null}
+      <div className="news-section-pro" style={{ ...borderStyles, padding: 0 }}>
+        <div
+          className="news-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1.2fr 1fr",
+            ...hairlineGrid,
+          }}
+        >
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "standard"} index={0} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 0 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "wide"} index={1} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 1 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
+          <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+            <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+            {inlineModule && inlineModule.targetColumn === 2 ? (
+              <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -160,27 +178,29 @@ export default function NewsSection({
 
   // Hero + sidebar stack
   return (
-    <div
-      className="news-grid"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "2fr 1fr",
-        ...borderStyles,
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
-        {inlineModule && inlineModule.targetColumn === 0 ? (
-          <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-        ) : null}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
-        <div style={{ borderTop: "1px solid var(--gs-border)" }} />
-        <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
-        {inlineModule && inlineModule.targetColumn === 1 ? (
-          <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
-        ) : null}
+    <div className="news-section-pro" style={{ ...borderStyles, padding: 0 }}>
+      <div
+        className="news-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          ...hairlineGrid,
+        }}
+      >
+        <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[0]} layout={plan.layouts[0] ?? "hero"} index={0} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 0 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
+        <div style={{ ...columnShell, display: "flex", flexDirection: "column" }}>
+          <ArticleCard article={articles[1]} layout={plan.layouts[1] ?? "standard"} index={1} sectionIndex={sectionIndex} />
+          <div style={{ height: "1px", background: "var(--gs-border)", flexShrink: 0 }} />
+          <ArticleCard article={articles[2]} layout={plan.layouts[2] ?? "standard"} index={2} sectionIndex={sectionIndex} />
+          {inlineModule && inlineModule.targetColumn === 1 ? (
+            <InlineModuleCard moduleType={inlineModule.moduleType} data={inlineModule.data} />
+          ) : null}
+        </div>
       </div>
     </div>
   );

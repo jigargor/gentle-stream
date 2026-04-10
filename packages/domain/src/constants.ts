@@ -44,10 +44,13 @@ export const INGEST_BATCH_SIZE = 6; // fetched 1 at a time, token-aware
 export const STOCK_TARGET = 60;
 
 /** Max articles to ingest per category in a single scheduler run. */
-export const STOCK_TOP_UP_MAX_PER_RUN = 18;
+export const STOCK_TOP_UP_MAX_PER_RUN = 24;
 
 /** If latest tagged article is older than this, ingest a freshness refill. */
 export const FRESHNESS_INGEST_HOURS = 3;
+
+/** Default number of articles to ingest when only staleness triggers refill. */
+export const STALENESS_REFILL_COUNT = 2;
 
 // ─── Default user profile ─────────────────────────────────────────────────────
 

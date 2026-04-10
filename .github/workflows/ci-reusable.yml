@@ -100,5 +100,6 @@ jobs:
           npm ci || npm ci --legacy-peer-deps
       - run: npx tsx scripts/test-dedup.ts
       - run: npx tsx scripts/test-url-dedup.ts
+      - run: npx tsx scripts/test-moderation-gating.ts
       - run: npx tsx scripts/test-article-engagement-db.ts
       - run: npx tsx scripts/test-recommendation-e2e.ts

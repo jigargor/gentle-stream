@@ -3,6 +3,7 @@ import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { db } from "@/lib/db/client";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
+import { getEnv } from "@/lib/env";
 
 const WINDOW_HOURS = 24;
 const MIN_EVENT_ACCEPT_RATE = 0.95;
@@ -16,7 +17,10 @@ interface HealthStatus {
   checkedAt: string;
 }
 
-async function getEventMetrics(sinceIso: string): Promise<Record<string, number>> {
+async function getEventMetrics(
+  sinceIso: string,
+  maxCatalogFreshnessHours: number
+): Promise<Record<string, number>> {
   const { count: totalEvents, error: totalErr } = await db
     .from("article_engagement_events")
     .select("id", { count: "exact", head: true })
@@ -54,14 +58,19 @@ async function getEventMetrics(sinceIso: string): Promise<Record<string, number>
     affinityRows24h: affinityRows ?? 0,
     uniqueCategoriesAvailable: uniqueCats,
     repeatExposureRate: repeatRate,
-    freshnessHours,
+    /** Age in hours of the newest `articles.fetched_at` in the catalog (ingest freshness, not engagement quality). */
+    catalogFreshnessHours: freshnessHours,
+    maxCatalogFreshnessHours: maxCatalogFreshnessHours,
     diversityPer10: uniqueCats, // proxy when per-feed sampling telemetry is absent
     eventAcceptRate: 1, // endpoint currently returns accepted insert count only
     feedApiP95Ms: 0, // placeholder until request timing metrics are persisted
   };
 }
 
-function evaluateAlerts(metrics: Record<string, number>): string[] {
+function evaluateAlerts(
+  metrics: Record<string, number>,
+  maxCatalogFreshnessHours: number
+): string[] {
   const alerts: string[] = [];
   if ((metrics.eventAcceptRate ?? 0) < MIN_EVENT_ACCEPT_RATE) {
     alerts.push(
@@ -84,11 +93,10 @@ function evaluateAlerts(metrics: Record<string, number>): string[] {
       )} > ${MAX_FEED_P95_MS})`
     );
   }
-  if ((metrics.freshnessHours ?? 0) > WINDOW_HOURS) {
+  const catalogFresh = metrics.catalogFreshnessHours ?? 0;
+  if (catalogFresh > maxCatalogFreshnessHours) {
     alerts.push(
-      `freshnessHours stale (${metrics.freshnessHours.toFixed(
-        1
-      )}h > ${WINDOW_HOURS}h)`
+      `catalogFreshnessHours high (${catalogFresh.toFixed(1)}h > ${maxCatalogFreshnessHours}h)`
     );
   }
   return alerts;
@@ -111,8 +119,10 @@ export async function GET(request: NextRequest) {
     const sinceIso = new Date(
       Date.now() - WINDOW_HOURS * 60 * 60 * 1000
     ).toISOString();
-    const metrics = await getEventMetrics(sinceIso);
-    const alerts = evaluateAlerts(metrics);
+    const maxCatalogFreshnessHours =
+      getEnv().ENGAGEMENT_HEALTH_MAX_FRESHNESS_HOURS ?? 336;
+    const metrics = await getEventMetrics(sinceIso, maxCatalogFreshnessHours);
+    const alerts = evaluateAlerts(metrics, maxCatalogFreshnessHours);
     const status: HealthStatus = {
       ok: alerts.length === 0,
       alerts,

@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS articles (
   -- Feed mechanics
   used_count      INT     NOT NULL DEFAULT 0,
   tagged          BOOLEAN NOT NULL DEFAULT FALSE,
+  moderation_status TEXT  NOT NULL DEFAULT 'approved'
+                    CHECK (moderation_status IN ('pending', 'approved', 'flagged', 'rejected')),
+  moderation_reason TEXT,
+  moderation_confidence FLOAT,
+  moderation_labels JSONB NOT NULL DEFAULT '{}'::jsonb,
+  moderated_at TIMESTAMPTZ,
+  moderated_by_user_id TEXT,
+  deleted_at TIMESTAMPTZ,
+  deleted_by_user_id TEXT,
+  delete_reason TEXT,
 
   -- Source metadata
   source          TEXT    NOT NULL DEFAULT 'ingest'
@@ -68,6 +78,12 @@ CREATE INDEX IF NOT EXISTS idx_articles_source_tagged
 
 CREATE INDEX IF NOT EXISTS idx_articles_content_kind_category_tagged
   ON articles (content_kind, category, tagged);
+
+CREATE INDEX IF NOT EXISTS idx_articles_moderation_status
+  ON articles (moderation_status);
+
+CREATE INDEX IF NOT EXISTS idx_articles_feed_visibility
+  ON articles (category, moderation_status, tagged, deleted_at);
 
 -- ─── User profiles ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_profiles (
@@ -119,6 +135,17 @@ CREATE INDEX IF NOT EXISTS idx_user_seen_articles_user_seen_at
 
 CREATE INDEX IF NOT EXISTS idx_user_seen_articles_article_id
   ON user_seen_articles (article_id);
+
+CREATE TABLE IF NOT EXISTS user_spotify_mood_feedback (
+  user_id    TEXT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
+  mood       TEXT NOT NULL,
+  score      SMALLINT NOT NULL DEFAULT 0 CHECK (score >= -20 AND score <= 20),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, mood)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_spotify_mood_feedback_user
+  ON user_spotify_mood_feedback (user_id);
 
 -- ─── Creator publishing ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS creator_profiles (
@@ -284,6 +311,45 @@ CREATE INDEX IF NOT EXISTS idx_rss_feeds_enabled_locale_category
   ON rss_feeds (is_enabled, locale_hint, category_hint)
   WHERE is_enabled = TRUE;
 
+-- ─── RSS discovery cursor state (round-robin feed fairness) ──────────────────
+CREATE TABLE IF NOT EXISTS rss_discovery_state (
+  id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id = TRUE),
+  cursor_position INT NOT NULL DEFAULT 0 CHECK (cursor_position >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO rss_discovery_state (id, cursor_position)
+VALUES (TRUE, 0)
+ON CONFLICT (id) DO NOTHING;
+
+-- ─── LLM provider call audit ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS llm_provider_calls (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  provider TEXT NOT NULL,
+  call_kind TEXT NOT NULL,
+  route TEXT,
+  agent TEXT,
+  category TEXT,
+  model TEXT,
+  input_tokens INT NOT NULL DEFAULT 0,
+  output_tokens INT NOT NULL DEFAULT 0,
+  duration_ms INT,
+  http_status INT,
+  success BOOLEAN NOT NULL,
+  error_code TEXT,
+  error_message TEXT,
+  correlation_id TEXT,
+  ingest_run_id UUID,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_calls_created_at
+  ON llm_provider_calls (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_calls_provider_kind_created
+  ON llm_provider_calls (provider, call_kind, created_at DESC);
+
 -- ─── Distributed API rate limiting ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rate_limit_windows (
   policy_id TEXT NOT NULL,
@@ -371,6 +437,25 @@ DROP TRIGGER IF EXISTS set_updated_at_on_rss_feeds ON rss_feeds;
 CREATE TRIGGER set_updated_at_on_rss_feeds
   BEFORE UPDATE ON rss_feeds
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS set_updated_at_on_rss_discovery_state ON rss_discovery_state;
+CREATE TRIGGER set_updated_at_on_rss_discovery_state
+  BEFORE UPDATE ON rss_discovery_state
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ─── Site feedback (widget submissions) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS site_feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  message TEXT NOT NULL CHECK (char_length(message) >= 1 AND char_length(message) <= 8000),
+  page_url TEXT,
+  contact_email TEXT,
+  user_agent TEXT,
+  user_id UUID REFERENCES auth.users (id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'read', 'archived'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_feedback_created_at ON site_feedback (created_at DESC);
 
 -- ─── Cleanup (TTL disabled) ────────────────────────────────────────────────────
 -- Article TTL expiry is disabled; keep this note so old runbooks do not attempt

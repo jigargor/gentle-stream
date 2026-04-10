@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BackButton } from "@/components/legal/BackButton";
 
 const appLinks = [
   { href: "/about", label: "About" },
@@ -32,6 +33,9 @@ export function LegalDocumentShell({
       }}
     >
       <div style={{ maxWidth: "42rem", margin: "0 auto" }}>
+        <div style={{ marginBottom: "0.85rem" }}>
+          <BackButton />
+        </div>
         <h1
           style={{
             fontFamily: "'Playfair Display', Georgia, serif",

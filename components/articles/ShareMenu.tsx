@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 interface ShareMenuProps {
   articleId: string;
@@ -76,6 +77,9 @@ export function ShareMenu({ articleId, headline, byline, body }: ShareMenuProps)
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number } | null>(null);
 
   const origin =
     typeof window !== "undefined"
@@ -98,18 +102,56 @@ export function ShareMenu({ articleId, headline, byline, body }: ShareMenuProps)
     return `<blockquote class="gentle-stream-embed" data-article-id="${articleId}"><a href="${articleUrl}">${headline}</a></blockquote>\n<script async src="${origin}/embed/script" charset="utf-8"></script>`;
   }, [articleId, articleUrl, headline, origin]);
 
+  const recomputeMenuPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const menuWidth = menuRef.current?.offsetWidth ?? 220;
+    const menuHeight = menuRef.current?.offsetHeight ?? 180;
+    const viewportPad = 10;
+
+    let left = rect.right - menuWidth;
+    if (left < viewportPad) left = viewportPad;
+    if (left + menuWidth > viewportWidth - viewportPad) {
+      left = Math.max(viewportPad, viewportWidth - viewportPad - menuWidth);
+    }
+
+    let top = rect.bottom + 6;
+    const overflowsBottom = top + menuHeight > viewportHeight - viewportPad;
+    if (overflowsBottom) {
+      const above = rect.top - menuHeight - 6;
+      top = above >= viewportPad ? above : Math.max(viewportPad, viewportHeight - viewportPad - menuHeight);
+    }
+
+    setMenuStyle({ top, left });
+  }, []);
+
   useEffect(() => {
     if (!open) return;
+    recomputeMenuPosition();
     const onDocClick = (evt: MouseEvent) => {
-      if (!rootRef.current) return;
-      if (rootRef.current.contains(evt.target as Node)) return;
+      const target = evt.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
       setOpen(false);
     };
+    const onKeyDown = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") setOpen(false);
+    };
+    const onWindowChange = () => recomputeMenuPosition();
     document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onWindowChange, true);
+    window.addEventListener("resize", onWindowChange);
     return () => {
       document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onWindowChange, true);
+      window.removeEventListener("resize", onWindowChange);
     };
-  }, [open]);
+  }, [open, recomputeMenuPosition]);
 
   async function runCopy(value: string, successMessage: string) {
     const ok = await copyText(value);
@@ -123,6 +165,7 @@ export function ShareMenu({ articleId, headline, byline, body }: ShareMenuProps)
   return (
     <div ref={rootRef} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
@@ -157,57 +200,62 @@ export function ShareMenu({ articleId, headline, byline, body }: ShareMenuProps)
           {status}
         </span>
       ) : null}
-      {open ? (
-        <div
-          role="menu"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 0.3rem)",
-            right: 0,
-            zIndex: 60,
-            minWidth: "220px",
-            background: "#fff",
-            border: "1px solid #d8d2c7",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-            padding: "0.35rem",
-            display: "grid",
-            gap: "0.2rem",
-          }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void runCopy(payloadText, "Text copied")}
-            style={menuButtonStyle}
-          >
-            Copy text
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void runCopy(articleUrl, "Link copied")}
-            style={menuButtonStyle}
-          >
-            Copy link
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void runCopy(iframeEmbed, "Iframe embed copied")}
-            style={menuButtonStyle}
-          >
-            Create embed (iframe)
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void runCopy(scriptEmbed, "Script embed copied")}
-            style={menuButtonStyle}
-          >
-            Create embed (script)
-          </button>
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="menu"
+              style={{
+                position: "fixed",
+                top: menuStyle?.top ?? 12,
+                left: menuStyle?.left ?? 12,
+                zIndex: 1300,
+                minWidth: "220px",
+                background: "#fff",
+                border: "1px solid #d8d2c7",
+                borderRadius: "6px",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                padding: "0.35rem",
+                display: "grid",
+                gap: "0.2rem",
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void runCopy(payloadText, "Text copied")}
+                style={menuButtonStyle}
+              >
+                Copy text
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void runCopy(articleUrl, "Link copied")}
+                style={menuButtonStyle}
+              >
+                Copy link
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void runCopy(iframeEmbed, "Iframe embed copied")}
+                style={menuButtonStyle}
+              >
+                Create embed (iframe)
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void runCopy(scriptEmbed, "Script embed copied")}
+                style={menuButtonStyle}
+              >
+                Create embed (script)
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

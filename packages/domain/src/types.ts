@@ -45,6 +45,12 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   // Feed mechanics
   usedCount: number; // how many feed responses included this article
   tagged: boolean; // false until tagger agent has run
+  moderationStatus?: ArticleModerationStatus;
+  moderationReason?: string | null;
+  moderationConfidence?: number | null;
+  moderationLabels?: Record<string, unknown> | null;
+  moderatedAt?: string | null;
+  moderatedByUserId?: string | null;
 
   // Recipe-specific fields (contentKind='recipe')
   recipeServings?: number | null;
@@ -56,6 +62,7 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
 }
 
 export type ArticleSentiment = "uplifting" | "inspiring" | "heartwarming" | "triumphant";
+export type ArticleModerationStatus = "pending" | "approved" | "flagged" | "rejected";
 
 export type ArticleSource = "ingest" | "creator";
 export type ArticleContentKind = "news" | "user_article" | "recipe";

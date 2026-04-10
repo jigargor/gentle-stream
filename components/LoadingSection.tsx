@@ -4,10 +4,11 @@ export default function LoadingSection() {
   return (
     <div
       style={{
+        minHeight: "7.5rem",
         padding: "2rem 1rem 1.75rem",
         textAlign: "center",
-        borderTop: "1px solid #d4cfc4",
-        background: "#faf8f3",
+        borderTop: "1px solid var(--gs-border)",
+        background: "var(--gs-surface)",
       }}
     >
       <div

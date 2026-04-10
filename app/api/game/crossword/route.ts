@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getGameFromPool, markGameUsed } from "@/lib/db/games";
+import { getGameFromPool, getGameFromPoolUnseenThenReuse, markGameUsed } from "@/lib/db/games";
 import { getPromptThemeForGameType } from "@/lib/db/gameFlavorDefaults";
 import {
   allCrosswordSlotsHaveRealClues,
@@ -53,6 +53,13 @@ function slotsWithClues(
 }
 
 const MAX_POOL_ATTEMPTS = 10;
+
+function isLlmGameGenerationEnabled(): boolean {
+  const raw = process.env.CRON_GAMES_LLM_ENABLED;
+  if (raw == null) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
 
 /** Validated pool payload — real clues only; signature matches grid+answers. */
 function buildPoolResponse(puzzle: {
@@ -167,6 +174,7 @@ export async function GET(request: NextRequest) {
   const excludeSignatures = parseExcludeSignatures(
     searchParams.get("excludeSignatures")
   );
+  const llmGameGenerationEnabled = isLlmGameGenerationEnabled();
 
   const skipSignatures = new Set(excludeSignatures);
 
@@ -227,6 +235,53 @@ export async function GET(request: NextRequest) {
     }
   } catch (e) {
     console.warn("[/api/game/crossword] Pool fetch failed:", e);
+  }
+
+  // Phase B: allow controlled reuse only after strict unseen was exhausted.
+  try {
+    const poolPick = await getGameFromPoolUnseenThenReuse("crossword", undefined, {
+      randomTieBreak: true,
+      excludeSignatures: Array.from(skipSignatures),
+    });
+    if (poolPick.row && poolPick.reusedExcluded) {
+      const poolPuzzle = poolPick.row.payload as {
+        grid: string[][];
+        slots: (CrosswordSlot & { clue?: string })[];
+        category: string;
+        difficulty: "medium";
+      };
+      const slotsWithStrings = poolPuzzle.slots.map((s) => ({
+        ...s,
+        clue: typeof s.clue === "string" ? s.clue : "",
+      })) as TypedCrosswordSlot[];
+      if (allCrosswordSlotsHaveRealClues(slotsWithStrings)) {
+        void markGameUsed(poolPick.row.id);
+        return NextResponse.json({
+          ...buildPoolResponse({
+            grid: poolPuzzle.grid,
+            slots: slotsWithStrings,
+            category: poolPuzzle.category,
+            difficulty: "medium",
+          }),
+          reusedExcluded: true,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[/api/game/crossword] Pool reuse fetch failed:", e);
+  }
+
+  if (!llmGameGenerationEnabled) {
+    const status = excludeSignatures.length > 0 ? 409 : 503;
+    return apiErrorResponse({
+      request,
+      status,
+      code: status === 409 ? API_ERROR_CODES.NOT_FOUND : API_ERROR_CODES.BAD_GATEWAY,
+      message:
+        status === 409
+          ? "No unseen Crossword puzzle available right now."
+          : "Crossword pool is empty while generation is paused.",
+    });
   }
 
   console.log(

@@ -115,6 +115,7 @@ export async function GET(request: NextRequest) {
       .from("articles")
       .select("*")
       .eq("tagged", true)
+      .eq("moderation_status", "approved")
       .is("deleted_at", null)
       .order("fetched_at", { ascending: false })
       .limit(Math.min(160, limit * 8));
@@ -124,7 +125,24 @@ export async function GET(request: NextRequest) {
     query = query.or(
       `headline.ilike.%${escaped}%,subheadline.ilike.%${escaped}%,body.ilike.%${escaped}%`
     );
-    const { data, error } = await query;
+    let { data, error } = await query;
+    if (error && error.message.includes("moderation_status")) {
+      let fallbackQuery = db
+        .from("articles")
+        .select("*")
+        .eq("tagged", true)
+        .is("deleted_at", null)
+        .order("fetched_at", { ascending: false })
+        .limit(Math.min(160, limit * 8));
+      if (category) fallbackQuery = fallbackQuery.eq("category", category);
+      if (contentKinds && contentKinds.length > 0) fallbackQuery = fallbackQuery.in("content_kind", contentKinds);
+      fallbackQuery = fallbackQuery.or(
+        `headline.ilike.%${escaped}%,subheadline.ilike.%${escaped}%,body.ilike.%${escaped}%`
+      );
+      const fallback = await fallbackQuery;
+      data = fallback.data;
+      error = fallback.error;
+    }
     if (error) throw new Error(error.message);
 
     const rows = (data ?? []) as Parameters<typeof rowToArticle>[0][];

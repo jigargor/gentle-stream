@@ -27,6 +27,7 @@ import {
   CATEGORIES,
   FRESHNESS_INGEST_HOURS,
   INGEST_BATCH_SIZE,
+  STALENESS_REFILL_COUNT,
   STOCK_TARGET,
   STOCK_THRESHOLD,
   STOCK_TOP_UP_MAX_PER_RUN,
@@ -39,12 +40,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const DEFAULT_RUNTIME_BUDGET_MS = 240_000;
-const DEFAULT_MAX_EXPANSIONS_PER_RUN = 20;
+const DEFAULT_RUNTIME_BUDGET_MS = 270_000;
+const DEFAULT_MAX_EXPANSIONS_PER_RUN = 60;
 /**
- * Manual rollout switch:
- * - "anthropic_web_search" for baseline checks
- * - "rss_seeded_primary" for RSS-first rollout
+ * Default when `INGEST_DISCOVERY_PROVIDER` is unset. Override via env:
+ * - `rss_seeded_primary` — RSS first, Anthropic web search fills the gap
+ * - `rss_seed_only` — RSS only
+ * - `anthropic_web_search` — legacy web-search discovery
+ *
+ * Ingest runs on **tagged article stock per category** (and catalog freshness), not on
+ * “user has seen everything.” If you expect new articles but see none, check: Vercel
+ * cron hitting `/api/cron/scheduler`, `rss_feeds` health, API keys, and dedup — not feed scroll state.
  */
 const MANUAL_DISCOVERY_PROVIDER: IngestDiscoveryProvider = "rss_seeded_primary";
 
@@ -75,7 +81,8 @@ function resolveIngestPipeline(category: Category): "legacy" | "overhaul" {
 }
 
 function resolveDiscoveryProviderForManualRollout(): IngestDiscoveryProvider {
-  return resolveIngestDiscoveryProvider(MANUAL_DISCOVERY_PROVIDER);
+  const fromEnv = process.env.INGEST_DISCOVERY_PROVIDER?.trim();
+  return resolveIngestDiscoveryProvider(fromEnv || MANUAL_DISCOVERY_PROVIDER);
 }
 
 export async function GET(request: NextRequest) {
@@ -138,12 +145,21 @@ export async function GET(request: NextRequest) {
   let totalOutputTokens = 0;
   let totalPolicyRejected = 0;
   let totalBatchFallbacks = 0;
+  let totalAnthropicExhausted = 0;
   const discoveryRunsByProvider: Record<string, number> = {};
   const insertedByProvider: Record<string, number> = {};
   let categoriesChecked = 0;
   let remainingExpansionBudget = readPositiveInt(
     process.env.CRON_INGEST_MAX_EXPANSIONS_PER_RUN,
     DEFAULT_MAX_EXPANSIONS_PER_RUN
+  );
+  const stalenessHours = readPositiveInt(
+    process.env.INGEST_STALENESS_HOURS,
+    FRESHNESS_INGEST_HOURS
+  );
+  const stalenessRefillCount = readPositiveInt(
+    process.env.INGEST_STALENESS_REFILL_COUNT,
+    STALENESS_REFILL_COUNT
   );
   const runtimeBudgetMs = readPositiveInt(
     process.env.CRON_INGEST_RUNTIME_BUDGET_MS,
@@ -191,7 +207,7 @@ export async function GET(request: NextRequest) {
       const freshnessStale =
         newestFetchedAt == null ||
         nowMs - Date.parse(newestFetchedAt) >
-          FRESHNESS_INGEST_HOURS * 60 * 60 * 1000;
+          stalenessHours * 60 * 60 * 1000;
 
       let ingestCount = 0;
       let reason: "threshold" | "freshness" | "none" = "none";
@@ -200,7 +216,7 @@ export async function GET(request: NextRequest) {
         ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, deficitToTarget);
         reason = "threshold";
       } else if (freshnessStale) {
-        ingestCount = 2;
+        ingestCount = Math.min(STOCK_TOP_UP_MAX_PER_RUN, Math.max(1, stalenessRefillCount));
         reason = "freshness";
       }
 
@@ -244,7 +260,7 @@ export async function GET(request: NextRequest) {
       console.log(
         reason === "threshold"
           ? `[Scheduler] "${cat}" has ${available} articles (threshold: ${STOCK_THRESHOLD}, target: ${STOCK_TARGET}) — ingesting ${cappedIngestCount}`
-          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${FRESHNESS_INGEST_HOURS}h) — ingesting freshness refill (${cappedIngestCount})`
+          : `[Scheduler] "${cat}" stock is healthy (${available}) but stale (>${stalenessHours}h) — ingesting freshness refill (${cappedIngestCount})`
       );
 
       const categoryStartedAt = Date.now();
@@ -254,6 +270,7 @@ export async function GET(request: NextRequest) {
         const result = await runIngestAgent(cat as Category, cappedIngestCount, {
           pipeline,
           discoveryProvider,
+          ingestRunId: runId,
           maxExpansionCalls: cappedIngestCount,
           softDeadlineMs: remainingRuntimeMs,
           targetLocale,
@@ -287,6 +304,12 @@ export async function GET(request: NextRequest) {
 
         if (result.errorSummary) {
           errorSummaryParts.push(`${cat}: ${result.errorSummary}`);
+          if (
+            result.errorSummary.toLowerCase().includes("anthropic_credits_exhausted") ||
+            result.errorSummary.toLowerCase().includes("credits exhausted")
+          ) {
+            totalAnthropicExhausted += 1;
+          }
         }
 
         categoryLogs.push({
@@ -413,8 +436,15 @@ export async function GET(request: NextRequest) {
         totalFailed,
         totalPolicyRejected,
         totalBatchFallbacks,
-      discoveryRunsByProvider,
-      insertedByProvider,
+        totalAnthropicExhausted,
+        discoveryRunsByProvider:
+          Object.keys(discoveryRunsByProvider).length > 0
+            ? JSON.stringify(discoveryRunsByProvider)
+            : undefined,
+        insertedByProvider:
+          Object.keys(insertedByProvider).length > 0
+            ? JSON.stringify(insertedByProvider)
+            : undefined,
         warningCount,
         durationMs: Date.now() - runStartedAt,
       },
@@ -444,6 +474,7 @@ export async function GET(request: NextRequest) {
       precheckRejected: totalPrecheckRejected,
       policyRejected: totalPolicyRejected,
       batchFallbacks: totalBatchFallbacks,
+      anthropicExhaustedRuns: totalAnthropicExhausted,
       discoveryRunsByProvider,
       insertedByProvider,
       expansions: totalExpansions,
@@ -452,6 +483,8 @@ export async function GET(request: NextRequest) {
     },
     budget: {
       runtimeMs: runtimeBudgetMs,
+      stalenessHours,
+      stalenessRefillCount,
       stoppedByRuntimeBudget,
       stoppedByExpansionBudget,
       remainingExpansionBudget,

@@ -118,9 +118,13 @@ export async function collectAcrossBuckets(
     excludeIds: string[],
     contentKinds: ArticleContentKind[] | undefined,
     userId: string
-  ) => Promise<StoredArticle[]>
+  ) => Promise<StoredArticle[]>,
+  bucketOrderOverride?: (Category | typeof RECIPE_CATEGORY)[]
 ): Promise<StoredArticle[]> {
-  const order = feedBucketsForTraversal(profile, sectionIndex, contentKinds);
+  const order =
+    bucketOrderOverride && bucketOrderOverride.length > 0
+      ? bucketOrderOverride
+      : feedBucketsForTraversal(profile, sectionIndex, contentKinds);
   const collected: StoredArticle[] = [];
   const collectedIds = new Set<string>();
 
@@ -143,6 +147,31 @@ export async function collectAcrossBuckets(
   }
 
   return collected;
+}
+
+function buildAffinityBucketOrder(
+  profile: UserProfile,
+  sectionIndex: number,
+  contentKinds: ArticleContentKind[] | undefined,
+  affinityIndex: Map<string, number>
+): (Category | typeof RECIPE_CATEGORY)[] {
+  const base = feedBucketsForTraversal(profile, sectionIndex, contentKinds);
+  if (affinityIndex.size === 0) return base;
+
+  const affinityByCategory = new Map<string, number>();
+  for (const [key, score] of affinityIndex.entries()) {
+    const [category] = key.split("|");
+    if (!category) continue;
+    const prev = affinityByCategory.get(category);
+    if (prev == null || score > prev) affinityByCategory.set(category, score);
+  }
+
+  return [...base].sort((a, b) => {
+    const aScore = affinityByCategory.get(a) ?? Number.NEGATIVE_INFINITY;
+    const bScore = affinityByCategory.get(b) ?? Number.NEGATIVE_INFINITY;
+    if (aScore === bScore) return 0;
+    return bScore - aScore;
+  });
 }
 
 /**
@@ -204,6 +233,15 @@ export async function getRankedFeed(
 
   // Label for this section (single category when filtered; primary pick when mixed)
   const resolvedCategory = category ?? pickCategory(profile, sectionIndex);
+  const affinityBucketOrder =
+    category == null
+      ? buildAffinityBucketOrder(
+          profile,
+          sectionIndex,
+          contentKinds ?? undefined,
+          affinityIndex
+        )
+      : undefined;
 
   // Fetch a candidate pool (fetch more than needed so we can rank and trim)
   const poolSize = pageSize * 5;
@@ -222,7 +260,8 @@ export async function getRankedFeed(
         poolSize,
         effectiveExcludeIds,
         contentKinds ?? undefined,
-        getArticlesForFeed
+        getArticlesForFeed,
+        affinityBucketOrder
       );
 
   // If nothing is tagged yet (tagger backlog / 429), still show fresh ingested rows
@@ -242,7 +281,8 @@ export async function getRankedFeed(
           poolSize,
           effectiveExcludeIds,
           contentKinds ?? undefined,
-          getUntaggedArticlesForFeed
+          getUntaggedArticlesForFeed,
+          affinityBucketOrder
         );
   }
 

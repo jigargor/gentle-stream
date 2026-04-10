@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Masthead, { MASTHEAD_TOP_BAR_HEIGHT_PX } from "./Masthead";
 import { ProfileMenu } from "./user/ProfileMenu";
+import { GuestProfileMenu } from "./user/GuestProfileMenu";
 import CategoryDrawer from "./CategoryDrawer";
 import { MfaChallengeGate } from "./auth/mfa/MfaChallengeGate";
 import NewsSection from "./NewsSection";
@@ -84,13 +85,16 @@ function shouldBeGame(sectionIndex: number, gameRatio: number): boolean {
 }
 
 const FEED_FETCH_TIMEOUT_MS = 90_000;
-const SENTINEL_PREFETCH_PX = 900;
-const MIN_LOAD_GAP_MS = 650;
-const REACHED_END_COOLDOWN_MS = 20_000;
+/** Load the next section before the user reaches the bottom (viewport extension below fold). */
+const SENTINEL_PREFETCH_PX = 1600;
+/** Short gap between sequential /prefetch loads so the stream feels continuous. */
+const MIN_LOAD_GAP_MS = 380;
+const REACHED_END_COOLDOWN_MS = 10_000;
 const FORCE_INGEST_RETRY_DELAY_MS = 1_200;
 const FORCE_INGEST_CLIENT_COOLDOWN_MS = 8_000;
 const FEED_CACHE_TTL_MS = 35_000;
 const FEED_STALE_TTL_MS = 120_000;
+const GUEST_USER_ID = "anonymous";
 const DEFAULT_GAP_MIN_PX = 180;
 const DEFAULT_INLINE_GAP_MIN_PX = 140;
 const DEFAULT_FILLER_INTERVAL = 4;
@@ -190,7 +194,8 @@ export interface NewsFeedProps {
 }
 
 export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFeedProps) {
-  const [mfaPassed, setMfaPassed] = useState(userId === "dev-local");
+  const isGuestUser = userId === GUEST_USER_ID;
+  const [mfaPassed, setMfaPassed] = useState(userId === "dev-local" || isGuestUser);
   const [sections, setSections] = useState<FeedSection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -250,6 +255,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     spotify: false,
     nasa: false,
   });
+  /** Full-width NASA row or reading-rail NASA — at most one per feed view so APOD never stacks back-to-back. */
+  const nasaSurfaceUsedRef = useRef(false);
   const weatherBriefLoadedRef = useRef(false);
   const seenSpotifySignaturesRef = useRef<Set<string>>(new Set());
   const recentBreatherMotifsRef = useRef<EditorialBreatherModuleData["motif"][]>([]);
@@ -638,7 +645,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
         }
         if (ar === SINGLETON_AFTER_ARTICLE_COUNT_NASA && !singletonPlacedRef.current.nasa) {
           singletonPlacedRef.current.nasa = true;
-          if (cache.nasa) {
+          if (cache.nasa && !nasaSurfaceUsedRef.current) {
+            nasaSurfaceUsedRef.current = true;
             const mod: ModuleFeedSection = {
               sectionType: "module",
               moduleType: "nasa",
@@ -902,8 +910,10 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           primary = { kind: "weather", data: cache.weather };
           weatherBriefLoadedRef.current = true;
           singletonPlacedRef.current.weather = true;
+        } else if (cache.nasa && !nasaSurfaceUsedRef.current) {
+          primary = { kind: "nasa", data: cache.nasa };
+          nasaSurfaceUsedRef.current = true;
         }
-        else if (cache.nasa) primary = { kind: "nasa", data: cache.nasa };
 
         let secondary: ReadingRailModule | undefined;
         const spotifySignature = spotifyContentSignature(cache.spotify);
@@ -1146,6 +1156,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
       setSections([]);
       sectionCountRef.current = 0;
       singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+      nasaSurfaceUsedRef.current = false;
       weatherBriefLoadedRef.current = false;
       seenSpotifySignaturesRef.current = new Set();
       recentBreatherMotifsRef.current = [];
@@ -1192,6 +1203,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     singletonPrefetchedRef.current = false;
     singletonPrefetchPromiseRef.current = null;
     singletonPlacedRef.current = { weather: false, spotify: false, nasa: false };
+    nasaSurfaceUsedRef.current = false;
     weatherBriefLoadedRef.current = false;
     seenSpotifySignaturesRef.current = new Set();
     recentBreatherMotifsRef.current = [];
@@ -1362,8 +1374,8 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
   }, [userId, mfaPassed, loadMore, ensureSingletonFeedCached]);
 
   useEffect(() => {
-    setMfaPassed(userId === "dev-local");
-  }, [userId]);
+    setMfaPassed(userId === "dev-local" || isGuestUser);
+  }, [isGuestUser, userId]);
 
   useEffect(() => {
     function onEnabledTypesUpdated(e: Event) {
@@ -1660,7 +1672,9 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
               onThemePreferenceToggle={toggleThemePreference}
               isAdmin={isAdmin}
             />
-          ) : undefined
+          ) : (
+            <GuestProfileMenu />
+          )
         }
       />
       <CategoryDrawer

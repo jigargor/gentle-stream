@@ -201,6 +201,33 @@ export async function getGameFromPool(
   return pickFromRows(rows as GameRow[]);
 }
 
+export async function getGameFromPoolUnseenThenReuse(
+  type: string,
+  flavorOverride?: string | null,
+  options?: {
+    randomTieBreak?: boolean;
+    excludeSignatures?: string[];
+  }
+): Promise<{ row: GameRow | null; reusedExcluded: boolean }> {
+  const strictUnseenRow = await getGameFromPool(type, flavorOverride, {
+    randomTieBreak: options?.randomTieBreak,
+    excludeSignatures: options?.excludeSignatures,
+    allowExcludedFallback: false,
+  });
+  if (strictUnseenRow) return { row: strictUnseenRow, reusedExcluded: false };
+
+  const hasExcludes = (options?.excludeSignatures?.length ?? 0) > 0;
+  if (!hasExcludes) return { row: null, reusedExcluded: false };
+
+  const reusedRow = await getGameFromPool(type, flavorOverride, {
+    randomTieBreak: options?.randomTieBreak,
+    excludeSignatures: options?.excludeSignatures,
+    allowExcludedFallback: true,
+  });
+  if (!reusedRow) return { row: null, reusedExcluded: false };
+  return { row: reusedRow, reusedExcluded: true };
+}
+
 /**
  * Increment used_count for a game after it's been served.
  * Non-fatal on failure — we'd rather serve a duplicate than error.

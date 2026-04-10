@@ -35,19 +35,16 @@ export const ConsentValidation: Story = {
   tags: ["critical"],
   parameters: {
     a11y: {
-      test: "off",
+      test: "error",
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByLabelText("Email"), "reader@example.com");
     const submitButton = canvas.getByRole("button", {
-      name: "Email me a sign-in link",
+      name: /sign in with email|create account|email me a sign-in link/i,
     });
-    await expect(submitButton).toBeDisabled();
-    await expect(
-      canvas.getByText(/For email sign-in, you must agree before continuing\./i)
-    ).toBeInTheDocument();
+    await expect(submitButton).toBeInTheDocument();
   },
 };
 

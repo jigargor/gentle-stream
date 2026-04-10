@@ -11,12 +11,14 @@ import {
 import { getEnv } from "@/lib/env";
 import {
   buildClaudeWebSearchMessageParams,
+  CLAUDE_WEB_SEARCH_MODEL,
   createMessageBatch,
   fetchMessageBatchResultsJsonl,
   parseMessageBatchJsonlLine,
   pollMessageBatchUntilEnded,
 } from "@/lib/anthropic/messageBatch";
 import { captureException, captureMessage, startSpan } from "@/lib/observability";
+import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
 import { checkUpliftPolicy } from "@/lib/agents/upliftPolicyFilter";
 import { discoverCandidatesFromRss } from "@/lib/rss/discovery";
 import {
@@ -70,6 +72,10 @@ interface DiscoveryCandidate {
   headline: string;
   sourceUrl: string;
   rationale: string;
+  sourcePublishedAt?: string | null;
+  summary?: string | null;
+  body?: string | null;
+  imageUrl?: string | null;
 }
 
 interface DiscoveryResult {
@@ -89,6 +95,9 @@ interface TokenBudget {
 interface RunIngestAgentOptions {
   pipeline?: "legacy" | "overhaul";
   discoveryProvider?: IngestDiscoveryProvider;
+  ingestRunId?: string;
+  /** Rewrite discovered stories with Claude expansion. Defaults false when unset. */
+  rewriteEnabled?: boolean;
   maxExpansionCalls?: number;
   inputTokenCap?: number;
   outputTokenCap?: number;
@@ -130,7 +139,7 @@ export async function runIngestAgent(
   try {
     const result =
       pipeline === "legacy"
-        ? await runLegacyIngest(category, total, targetLocale)
+        ? await runLegacyIngest(category, total, targetLocale, options.ingestRunId ?? null)
         : await runOverhaulIngest(category, total, options);
     span.end({
       category,
@@ -152,8 +161,9 @@ async function runOverhaulIngest(
   total: number,
   options: RunIngestAgentOptions
 ): Promise<IngestResult> {
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  const apiKey = env.ANTHROPIC_API_KEY?.trim() || null;
+  const rewriteEnabled = options.rewriteEnabled ?? (env.INGEST_REWRITE_ENABLED ?? false);
+  if (rewriteEnabled && !apiKey) throw new Error("ANTHROPIC_API_KEY not set");
 
   const allInserted: StoredArticle[] = [];
   const errors: string[] = [];
@@ -173,6 +183,7 @@ async function runOverhaulIngest(
   const discoveryProvider = options.discoveryProvider
     ? options.discoveryProvider
     : resolveIngestDiscoveryProvider(env.INGEST_DISCOVERY_PROVIDER);
+  const ingestRunId = options.ingestRunId ?? null;
 
   const [seenHeadlines, seenUrls] = await Promise.all([
     getRecentHeadlines(category, 60),
@@ -233,7 +244,8 @@ async function runOverhaulIngest(
         discoveryProvider,
         discoveryTarget,
         seenHeadlines,
-        seenUrls
+        seenUrls,
+        ingestRunId
       );
       retryCount += discovery.retryCount;
       spendTokens(budget, discovery.usage);
@@ -254,16 +266,23 @@ async function runOverhaulIngest(
     const accepted: DiscoveryCandidate[] = [];
     for (const candidate of discovery.candidates) {
       if (accepted.length >= expansionsRemaining) break;
-      const policyCheck = checkUpliftPolicy({
-        headline: candidate.headline,
-        rationale: candidate.rationale,
-      });
-      if (!policyCheck.accepted) {
-        policyRejectedCount += 1;
-        skippedCount += 1;
-        const reason = policyCheck.reason ?? "unknown";
-        policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
-        continue;
+      const candidateHasRssContent = hasRssNarrativeContent(candidate);
+      const shouldUseRssNativePolicyPhase =
+        !rewriteEnabled &&
+        candidateHasRssContent &&
+        (discoveryProvider === "rss_seed_only" || discoveryProvider === "rss_seeded_primary");
+      if (!shouldUseRssNativePolicyPhase) {
+        const policyCheck = checkUpliftPolicy({
+          headline: candidate.headline,
+          rationale: candidate.rationale,
+        });
+        if (!policyCheck.accepted) {
+          policyRejectedCount += 1;
+          skippedCount += 1;
+          const reason = policyCheck.reason ?? "unknown";
+          policyRejectReasons[reason] = (policyRejectReasons[reason] ?? 0) + 1;
+          continue;
+        }
       }
       const precheck = await precheckIngestCandidate({
         headline: candidate.headline,
@@ -273,6 +292,14 @@ async function runOverhaulIngest(
       if (precheck.isDuplicate) {
         precheckRejectedCount += 1;
         skippedCount += 1;
+        logIngestCandidateSkip({
+          category,
+          phase: "discovery_precheck",
+          reason: precheck.reason ?? "duplicate",
+          candidate,
+          conflictId: precheck.conflict?.id,
+          conflictCategory: precheck.conflict?.category,
+        });
         if (precheck.conflict) {
           console.log(
             '[IngestAgent:overhaul] Precheck duplicate (%s) candidate="%s" conflict_id=%s conflict_cat=%s fetched_at=%s matched_url=%s',
@@ -299,6 +326,28 @@ async function runOverhaulIngest(
       }
       continue;
     }
+
+    const ensureCandidateStillNovel = async (candidate: DiscoveryCandidate): Promise<boolean> => {
+      const precheck = await precheckIngestCandidate({
+        headline: candidate.headline,
+        category,
+        sourceUrls: [candidate.sourceUrl],
+      });
+      if (!precheck.isDuplicate) return true;
+      precheckRejectedCount += 1;
+      skippedCount += 1;
+      logIngestCandidateSkip({
+        category,
+        phase: "discovery_precheck",
+        reason: precheck.reason ?? "duplicate",
+        candidate,
+        conflictId: precheck.conflict?.id,
+        conflictCategory: precheck.conflict?.category,
+      });
+      seenHeadlines.push(candidate.headline);
+      seenUrls.push(...precheck.normalizedUrls);
+      return false;
+    };
 
     const processExpansionResult = async (expanded: FetchResult) => {
       const policyCheck = checkUpliftPolicy({
@@ -333,18 +382,79 @@ async function runOverhaulIngest(
       }
     };
 
-    if (useMessageBatch && accepted.length > 0) {
+    const acceptedForRewrite: DiscoveryCandidate[] = [];
+    for (const candidate of accepted) {
+      const rssArticle =
+        rewriteEnabled ? null : buildArticleFromRssCandidate(candidate, category, targetLocale);
+      if (!rssArticle) {
+        if (discoveryProvider === "rss_seed_only" && !rewriteEnabled) {
+          skippedCount += 1;
+          logIngestCandidateSkip({
+            category,
+            phase: "rewrite_gate",
+            reason: hasRssNarrativeContent(candidate)
+              ? "rss_seed_only_rss_native_build_failed"
+              : "rss_seed_only_missing_rss_content",
+            candidate,
+          });
+          continue;
+        }
+        if (!(await ensureCandidateStillNovel(candidate))) continue;
+        acceptedForRewrite.push(candidate);
+        continue;
+      }
+      if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
+      attemptedCount += 1;
+      expansionCount += 1;
+      try {
+        const toInsert = {
+          ...rssArticle,
+          category,
+          tags: [],
+          sentiment: "uplifting" as const,
+          emotions: [],
+          locale: targetLocale,
+          readingTimeSecs: estimateReadingTime(rssArticle.body),
+          qualityScore: 0.5,
+        };
+        const inserted = await insertArticles([toInsert]);
+        if (inserted.length > 0) {
+          allInserted.push(inserted[0]);
+          seenHeadlines.push(rssArticle.headline);
+          seenUrls.push(...rssArticle.sourceUrls);
+        } else {
+          skippedCount += 1;
+        }
+      } catch (error) {
+        failedCount += 1;
+        const message = error instanceof Error ? error.message : "RSS-native insert failed";
+        if (errors.length < 8) errors.push(message);
+      }
+    }
+
+    const expansionApiKey = apiKey;
+    if (acceptedForRewrite.length > 0 && !expansionApiKey) {
+      failedCount += 1;
+      const message =
+        "ANTHROPIC_API_KEY not set but rewrite path required (rss_seeded_primary fallback or rewrite enabled).";
+      if (errors.length < 8) errors.push(message);
+      stoppedEarly = true;
+      break;
+    }
+
+    if (useMessageBatch && acceptedForRewrite.length > 0) {
       try {
         const batchRows = await expandAcceptedViaMessageBatch({
-          apiKey,
+          apiKey: expansionApiKey!,
           category,
           targetLocale,
-          accepted,
+          accepted: acceptedForRewrite,
           seenHeadlines,
           seenUrls,
           budget,
           maxWaitMs: batchMaxWaitMs,
           pollIntervalMs: batchPollMs,
+          ingestRunId,
         });
         for (const row of batchRows) {
           if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
@@ -367,12 +477,13 @@ async function runOverhaulIngest(
           }
           try {
             const expanded = await fetchExpandedArticle(
-              apiKey,
+              expansionApiKey!,
               category,
               targetLocale,
               row.candidate,
               seenHeadlines,
-              seenUrls
+            seenUrls,
+            ingestRunId
             );
             retryCount += expanded.retryCount;
             spendTokens(budget, expanded.usage);
@@ -405,13 +516,13 @@ async function runOverhaulIngest(
         });
         console.error("[IngestAgent:overhaul] Message batch error, falling back to sync: %s", msg);
         if (errors.length < 8) errors.push(msg);
-        const fallbackCandidates = accepted.slice(0, batchSyncFallbackLimit);
-        if (accepted.length > fallbackCandidates.length) {
+        const fallbackCandidates = acceptedForRewrite.slice(0, batchSyncFallbackLimit);
+        if (acceptedForRewrite.length > fallbackCandidates.length) {
           batchFallbackCount += 1;
-          skippedCount += accepted.length - fallbackCandidates.length;
+          skippedCount += acceptedForRewrite.length - fallbackCandidates.length;
           if (errors.length < 8)
             errors.push(
-              `Batch fallback capped to ${fallbackCandidates.length}/${accepted.length} expansions`
+              `Batch fallback capped to ${fallbackCandidates.length}/${acceptedForRewrite.length} expansions`
             );
         }
         for (const candidate of fallbackCandidates) {
@@ -428,12 +539,13 @@ async function runOverhaulIngest(
           expansionCount += 1;
           try {
             const expanded = await fetchExpandedArticle(
-              apiKey,
+              expansionApiKey!,
               category,
               targetLocale,
               candidate,
               seenHeadlines,
-              seenUrls
+              seenUrls,
+              ingestRunId
             );
             retryCount += expanded.retryCount;
             spendTokens(budget, expanded.usage);
@@ -458,7 +570,7 @@ async function runOverhaulIngest(
         }
       }
     } else {
-      for (const candidate of accepted) {
+      for (const candidate of acceptedForRewrite) {
         if (allInserted.length >= total || expansionCount >= maxExpansionCalls) break;
         if (Date.now() >= hardDeadlineAt) {
           stoppedEarly = true;
@@ -473,12 +585,13 @@ async function runOverhaulIngest(
         expansionCount += 1;
         try {
           const expanded = await fetchExpandedArticle(
-            apiKey,
+            expansionApiKey!,
             category,
             targetLocale,
             candidate,
             seenHeadlines,
-            seenUrls
+            seenUrls,
+            ingestRunId
           );
           retryCount += expanded.retryCount;
           spendTokens(budget, expanded.usage);
@@ -534,6 +647,8 @@ async function runOverhaulIngest(
       stoppedEarly,
       candidateCount,
       targetLocale,
+      precheckRejectedCount,
+      duplicateSkipRate,
       policyRejectedCount,
       batchFallbackCount,
       discoveryProvider,
@@ -569,7 +684,8 @@ async function runOverhaulIngest(
 async function runLegacyIngest(
   category: Category,
   total: number,
-  targetLocale: string
+  targetLocale: string,
+  ingestRunId: string | null
 ): Promise<IngestResult> {
   const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
@@ -594,7 +710,14 @@ async function runLegacyIngest(
   for (let i = 0; i < total; i++) {
     attemptedCount += 1;
     try {
-      const result = await fetchOneArticle(apiKey, category, targetLocale, seenHeadlines, seenUrls);
+      const result = await fetchOneArticle(
+        apiKey,
+        category,
+        targetLocale,
+        seenHeadlines,
+        seenUrls,
+        ingestRunId
+      );
       retryCount += result.retryCount;
       inputTokens += result.usage.input_tokens ?? 0;
       outputTokens += result.usage.output_tokens ?? 0;
@@ -680,7 +803,8 @@ async function fetchOneArticle(
   category: string,
   targetLocale: string,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<FetchResult> {
   const avoidHeadlines = seenHeadlines.slice(-8).join("; ");
   const avoidUrls = seenUrls.slice(-20).join(", ");
@@ -699,6 +823,11 @@ async function fetchOneArticle(
     apiKey,
     prompt,
     maxTokens: 1024,
+    callKind: "legacy_fetch_article",
+    category,
+    agent: "ingest",
+    route: "lib/agents/ingestAgent",
+    ingestRunId,
   });
   const usage = readClaudeUsage(data, { input_tokens: 1500, output_tokens: 500 });
   const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : "";
@@ -820,6 +949,103 @@ function parseArticleFromText(
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
+function trimToLength(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+function firstSentence(value: string): string {
+  const match = value.match(/^[^.!?]+[.!?]?/);
+  return (match?.[0] ?? value).trim();
+}
+
+function hasRssNarrativeContent(candidate: DiscoveryCandidate): boolean {
+  return Boolean(
+    (candidate.body && candidate.body.trim().length > 0) ||
+      (candidate.summary && candidate.summary.trim().length > 0)
+  );
+}
+
+function logIngestCandidateSkip(input: {
+  category: Category;
+  phase: "discovery_precheck" | "rewrite_gate";
+  reason: string;
+  candidate: DiscoveryCandidate;
+  conflictId?: string;
+  conflictCategory?: string;
+}): void {
+  captureMessage({
+    level: "info",
+    message: "agent.ingest.candidate_skipped",
+    context: {
+      category: input.category,
+      phase: input.phase,
+      reason: input.reason,
+      candidateHeadline: input.candidate.headline.slice(0, 120),
+      candidateSourceUrl: normaliseUrl(input.candidate.sourceUrl).slice(0, 240),
+      conflictId: input.conflictId,
+      conflictCategory: input.conflictCategory,
+    },
+  });
+}
+
+function normalizeRssNarrativeText(value: string): string {
+  const blockedLine = /^(share|details|keep exploring|discover more topics|image credit:|editor|contact|related terms)$/i;
+  const cleaned = value
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\t+/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !blockedLine.test(line))
+    .filter((line) => !/^https?:\/\/\S+$/i.test(line))
+    .filter((line) => !/^[-•]{1,2}\s*$/.test(line))
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return cleaned;
+}
+
+function buildArticleFromRssCandidate(
+  candidate: DiscoveryCandidate,
+  category: Category,
+  targetLocale: string
+): RawArticle | null {
+  const summary = normalizeRssNarrativeText(candidate.summary?.trim() ?? "");
+  const bodyFromFeed = normalizeRssNarrativeText(candidate.body?.trim() ?? "");
+  const content = bodyFromFeed || summary;
+  if (!content) return null;
+
+  const feedLabel = candidate.rationale.replace(/^RSS feed:\s*/i, "").trim();
+  const cleanHeadline = stripCitations(candidate.headline).trim() || "Untitled";
+  const subheadline = trimToLength(firstSentence(summary || content), 220);
+  const paragraphOne = trimToLength(content, 1200);
+  const paragraphTwo =
+    candidate.sourceUrl.trim().length > 0
+      ? "This report is sourced directly from the original RSS item and preserved without a full AI rewrite."
+      : "This report is sourced directly from the original RSS item.";
+  const body = `${paragraphOne}\n\n${paragraphTwo}`;
+  const pullQuote = trimToLength(firstSentence(summary || content), 240);
+  const imageSeed = candidate.imageUrl?.trim();
+  const imagePrompt = imageSeed
+    ? `Editorial illustration inspired by "${cleanHeadline}". Reflect the source imagery mood and scene without logos or text overlays.`
+    : composeImagePromptFallback(cleanHeadline, targetLocale || "Global", category);
+
+  return {
+    headline: cleanHeadline,
+    subheadline: stripCitations(subheadline),
+    byline: feedLabel ? `By ${feedLabel}` : "By RSS Desk",
+    location: targetLocale && targetLocale.toLowerCase() !== "global" ? targetLocale : "Global",
+    category,
+    body: stripCitations(body),
+    pullQuote: stripCitations(pullQuote),
+    imagePrompt: stripCitations(imagePrompt),
+    sourcePublishedAt: parseSourcePublishedAt(candidate.sourcePublishedAt),
+    sourceUrls: [normaliseUrl(candidate.sourceUrl)],
+  };
+}
+
 function estimateReadingTime(body: string): number {
   return Math.round((body.split(/\s+/).length / 200) * 60);
 }
@@ -911,18 +1137,20 @@ function spendTokens(budget: TokenBudget, usage: ClaudeUsage): void {
 }
 
 async function fetchDiscoveryCandidates(
-  apiKey: string,
+  apiKey: string | null,
   category: Category,
   targetLocale: string,
   discoveryProvider: IngestDiscoveryProvider,
   targetCount: number,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<DiscoveryResult> {
   if (discoveryProvider === "rss_seed_only" || discoveryProvider === "rss_seeded_primary") {
     const rssCandidates = await discoverCandidatesFromRss({
       categoryHint: category,
       targetLocale,
+      discoveryProvider,
       targetCount,
       seenUrls,
       seenHeadlines,
@@ -943,13 +1171,15 @@ async function fetchDiscoveryCandidates(
         retryCount: 0,
         provider: discoveryProvider,
       };
+    if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set for rss_seeded_primary fallback discovery.");
     const webFallback = await fetchDiscoveryCandidatesAnthropic(
       apiKey,
       category,
       targetLocale,
       remainingCount,
       seenHeadlines,
-      seenUrls
+      seenUrls,
+      ingestRunId
     );
     return {
       candidates: normalizeDiscoveryCandidates([...rssCandidates, ...webFallback.candidates]).slice(
@@ -962,13 +1192,15 @@ async function fetchDiscoveryCandidates(
     };
   }
 
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set for anthropic_web_search discovery.");
   const webOnly = await fetchDiscoveryCandidatesAnthropic(
     apiKey,
     category,
     targetLocale,
     targetCount,
     seenHeadlines,
-    seenUrls
+    seenUrls,
+    ingestRunId
   );
   return {
     ...webOnly,
@@ -982,7 +1214,8 @@ async function fetchDiscoveryCandidatesAnthropic(
   targetLocale: string,
   targetCount: number,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<Omit<DiscoveryResult, "provider">> {
 
   const avoidHeadlines = seenHeadlines.slice(-30).join("; ");
@@ -1001,6 +1234,11 @@ async function fetchDiscoveryCandidatesAnthropic(
     apiKey,
     prompt,
     maxTokens: 1400,
+    callKind: "discovery_web_search",
+    category,
+    agent: "ingest",
+    route: "lib/agents/ingestAgent",
+    ingestRunId,
   });
   const usage = readClaudeUsage(data, { input_tokens: 1200, output_tokens: 400 });
   const blocks = readContentBlocks(data);
@@ -1025,6 +1263,12 @@ function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
       sourceUrl?: string;
       source_url?: string;
       rationale?: string;
+      sourcePublishedAt?: string | null;
+      source_published_at?: string | null;
+      summary?: string | null;
+      body?: string | null;
+      imageUrl?: string | null;
+      image_url?: string | null;
     } | null;
     const headline = candidate?.headline?.trim() ?? "";
     const sourceUrl = (candidate?.sourceUrl ?? candidate?.source_url ?? "").trim();
@@ -1043,6 +1287,11 @@ function normalizeDiscoveryCandidates(raw: unknown): DiscoveryCandidate[] {
       headline,
       sourceUrl: parsedUrl.toString(),
       rationale: candidate?.rationale?.trim() ?? "",
+      sourcePublishedAt:
+        (candidate?.sourcePublishedAt ?? candidate?.source_published_at ?? null) || null,
+      summary: candidate?.summary?.trim() || null,
+      body: candidate?.body?.trim() || null,
+      imageUrl: (candidate?.imageUrl ?? candidate?.image_url ?? null) || null,
     });
   }
   return out;
@@ -1122,6 +1371,7 @@ async function expandAcceptedViaMessageBatch(input: {
   budget: TokenBudget;
   maxWaitMs: number;
   pollIntervalMs: number;
+  ingestRunId: string | null;
 }): Promise<BatchExpansionRow[]> {
   const {
     apiKey,
@@ -1133,6 +1383,7 @@ async function expandAcceptedViaMessageBatch(input: {
     budget,
     maxWaitMs,
     pollIntervalMs,
+    ingestRunId,
   } = input;
 
   const requests = accepted.map((candidate, i) => ({
@@ -1143,14 +1394,16 @@ async function expandAcceptedViaMessageBatch(input: {
     }),
   }));
 
-  const { id: batchId } = await createMessageBatch(apiKey, requests);
+  const { id: batchId } = await createMessageBatch(apiKey, requests, {
+    ingestRunId,
+  });
   console.log(
     "[IngestAgent:overhaul] Submitted message batch %s (%s expansions)",
     batchId,
     String(requests.length)
   );
-  await pollMessageBatchUntilEnded(apiKey, batchId, { maxWaitMs, pollIntervalMs });
-  const lines = await fetchMessageBatchResultsJsonl(apiKey, batchId);
+  await pollMessageBatchUntilEnded(apiKey, batchId, { maxWaitMs, pollIntervalMs, ingestRunId });
+  const lines = await fetchMessageBatchResultsJsonl(apiKey, batchId, { ingestRunId });
 
   const byIndex = new Map<number, FetchResult>();
   for (const line of lines) {
@@ -1190,7 +1443,8 @@ async function fetchExpandedArticle(
   targetLocale: string,
   candidate: DiscoveryCandidate,
   seenHeadlines: string[],
-  seenUrls: string[]
+  seenUrls: string[],
+  ingestRunId: string | null
 ): Promise<FetchResult> {
   const prompt = buildExpansionPrompt(
     category,
@@ -1204,6 +1458,12 @@ async function fetchExpandedArticle(
     apiKey,
     prompt,
     maxTokens: 1200,
+    callKind: "expansion_web_search",
+    category,
+    agent: "ingest",
+    route: "lib/agents/ingestAgent",
+    correlationId: normaliseUrl(candidate.sourceUrl).slice(0, 240),
+    ingestRunId,
   });
   return expansionFromClaudeData(data, candidate, category, retryCount);
 }
@@ -1212,6 +1472,30 @@ interface ClaudeRequestInput {
   apiKey: string;
   prompt: string;
   maxTokens: number;
+  callKind: string;
+  route: string;
+  agent: string;
+  category?: string;
+  correlationId?: string;
+  ingestRunId?: string | null;
+}
+
+function messageLooksLikeCreditExhaustion(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("insufficient credits") ||
+    lower.includes("credit balance") ||
+    lower.includes("credits exhausted") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("billing")
+  );
+}
+
+function classifyAnthropicFailure(status: number, message: string): string {
+  if (status === 429 && messageLooksLikeCreditExhaustion(message)) return "anthropic_credits_exhausted";
+  if (status === 429) return "anthropic_rate_limited";
+  if (status === 529) return "anthropic_overloaded";
+  return `http_${status}`;
 }
 
 async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
@@ -1219,34 +1503,119 @@ async function callClaudeWithWebSearch(input: ClaudeRequestInput): Promise<{
   retryCount: number;
 }> {
   const maxAttempts = 3;
+  const startedAt = Date.now();
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": input.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "web-search-2025-03-05",
-      },
-      body: JSON.stringify(
-        buildClaudeWebSearchMessageParams({
-          prompt: input.prompt,
-          maxTokens: input.maxTokens,
-        })
-      ),
-    });
+    try {
+      const response = await fetch(ANTHROPIC_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": input.apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "web-search-2025-03-05",
+        },
+        body: JSON.stringify(
+          buildClaudeWebSearchMessageParams({
+            prompt: input.prompt,
+            maxTokens: input.maxTokens,
+          })
+        ),
+      });
 
-    if ((response.status === 429 || response.status === 529) && attempt < maxAttempts) {
-      const waitMs = Math.min(10_000, 2_000 * Math.pow(2, attempt));
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-      continue;
+      if ((response.status === 429 || response.status === 529) && attempt < maxAttempts) {
+        const waitMs = Math.min(10_000, 2_000 * Math.pow(2, attempt));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      if (!response.ok) {
+        const err = await response.text();
+        const errorCode = classifyAnthropicFailure(response.status, err);
+        await logLlmProviderCall({
+          provider: "anthropic",
+          callKind: input.callKind,
+          route: input.route,
+          agent: input.agent,
+          category: input.category ?? null,
+          model: CLAUDE_WEB_SEARCH_MODEL,
+          durationMs: Date.now() - startedAt,
+          httpStatus: response.status,
+          success: false,
+          errorCode,
+          errorMessage: err.slice(0, 500),
+          correlationId: input.correlationId ?? null,
+          ingestRunId: input.ingestRunId ?? null,
+          metadata: {
+            retryCount: attempt,
+            maxTokens: input.maxTokens,
+          },
+        });
+        if (errorCode === "anthropic_credits_exhausted") {
+          captureMessage({
+            level: "warning",
+            message: "agent.ingest.anthropic_credits_exhausted",
+            context: {
+              category: input.category ?? "unknown",
+              callKind: input.callKind,
+              route: input.route,
+              ingestRunId: input.ingestRunId ?? undefined,
+            },
+          });
+          throw new Error(`Anthropic credits exhausted (HTTP ${response.status}): ${err}`);
+        }
+        throw new Error(`Claude API ${response.status}: ${err}`);
+      }
+      const data = (await response.json()) as Record<string, unknown>;
+      const usage = readClaudeUsage(data, { input_tokens: 0, output_tokens: 0 });
+      await logLlmProviderCall({
+        provider: "anthropic",
+        callKind: input.callKind,
+        route: input.route,
+        agent: input.agent,
+        category: input.category ?? null,
+        model: CLAUDE_WEB_SEARCH_MODEL,
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        durationMs: Date.now() - startedAt,
+        httpStatus: response.status,
+        success: true,
+        correlationId: input.correlationId ?? null,
+        ingestRunId: input.ingestRunId ?? null,
+        metadata: {
+          retryCount: attempt,
+          maxTokens: input.maxTokens,
+        },
+      });
+      return { data, retryCount: attempt };
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Claude API ")) {
+        throw error;
+      }
+      if (attempt < maxAttempts) {
+        const waitMs = Math.min(10_000, 1_000 * Math.pow(2, attempt));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      const message = error instanceof Error ? error.message : "anthropic_fetch_failed";
+      await logLlmProviderCall({
+        provider: "anthropic",
+        callKind: input.callKind,
+        route: input.route,
+        agent: input.agent,
+        category: input.category ?? null,
+        model: CLAUDE_WEB_SEARCH_MODEL,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        errorCode: "fetch_exception",
+        errorMessage: message.slice(0, 500),
+        correlationId: input.correlationId ?? null,
+        ingestRunId: input.ingestRunId ?? null,
+        metadata: {
+          retryCount: attempt,
+          maxTokens: input.maxTokens,
+        },
+      });
+      throw error;
     }
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Claude API ${response.status}: ${err}`);
-    }
-    const data = (await response.json()) as Record<string, unknown>;
-    return { data, retryCount: attempt };
   }
   throw new Error("Claude API exhausted retries");
 }

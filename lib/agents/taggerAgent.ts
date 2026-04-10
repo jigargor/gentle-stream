@@ -10,11 +10,33 @@
  * Called by: app/api/cron/tagger/route.ts
  */
 
-import { getUntaggedArticles, updateArticleTags } from "../db/articles";
+import { getArticleById, getUntaggedArticles, updateArticleTags } from "../db/articles";
 import type { StoredArticle } from "../types";
-import { captureException, startSpan } from "@/lib/observability";
+import { captureException, captureMessage, startSpan } from "@/lib/observability";
+import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const AUTO_REJECT_MIN_CONFIDENCE = 0.88;
+
+function messageLooksLikeCreditExhaustion(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("insufficient credits") ||
+    lower.includes("credit balance") ||
+    lower.includes("credits exhausted") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("billing")
+  );
+}
+
+/** Outcome of classifying a single article (exported for ingest CLI sequencing). */
+export type TagSingleOutcome =
+  | "tagged"
+  | "skipped_already_tagged"
+  | "not_found"
+  | "api_error"
+  | "credits_exhausted"
+  | "parse_error";
 
 interface TaggerEnrichment {
   tags: string[];
@@ -23,6 +45,14 @@ interface TaggerEnrichment {
   locale: string;
   readingTimeSecs: number;
   qualityScore: number;
+  moderation?: {
+    isPolitical?: boolean;
+    politicalScope?: "none" | "civic_policy" | "elected_official" | "campaign_election" | "geopolitics";
+    action?: "approve" | "flag_for_review" | "reject";
+    confidence?: number;
+    rationale?: string;
+    reasons?: string[];
+  };
 }
 
 /**
@@ -39,16 +69,17 @@ export async function runTaggerAgent(limit = 20): Promise<void> {
 
   console.log(`[TaggerAgent] Tagging ${articles.length} articles...`);
 
-  // Process in parallel — no web search, so rate limits are relaxed
-  await Promise.allSettled(articles.map(tagSingleArticle));
+  await Promise.allSettled(articles.map((a) => tagSingleArticle(a)));
   span.end({ processed: articles.length });
 }
 
-async function tagSingleArticle(article: StoredArticle): Promise<void> {
+async function tagSingleArticle(article: StoredArticle): Promise<TagSingleOutcome> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+  if (article.tagged) return "skipped_already_tagged";
 
   const prompt = buildTaggerPrompt(article);
+  const startedAt = Date.now();
 
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -65,18 +96,50 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
   });
 
   if (!response.ok) {
+    const responseText = await response.text();
+    const creditsExhausted =
+      response.status === 429 && messageLooksLikeCreditExhaustion(responseText);
+    await logLlmProviderCall({
+      provider: "anthropic",
+      callKind: "tagger_classification",
+      route: "lib/agents/taggerAgent",
+      agent: "tagger",
+      category: article.category,
+      model: "claude-sonnet-4-20250514",
+      durationMs: Date.now() - startedAt,
+      httpStatus: response.status,
+      success: false,
+      errorCode: `http_${response.status}`,
+      errorMessage: responseText.slice(0, 500),
+      correlationId: article.id,
+    });
     console.error(`[TaggerAgent] API error for article ${article.id}: ${response.status}`);
     captureException(new Error(`tagger_api_${response.status}`), {
       agent: "tagger",
       articleId: article.id,
       status: response.status,
     });
-    return;
+    return creditsExhausted ? "credits_exhausted" : "api_error";
   }
 
   const data = await response.json();
+  const usage = data.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+  await logLlmProviderCall({
+    provider: "anthropic",
+    callKind: "tagger_classification",
+    route: "lib/agents/taggerAgent",
+    agent: "tagger",
+    category: article.category,
+    model: "claude-sonnet-4-20250514",
+    inputTokens: usage?.input_tokens ?? 0,
+    outputTokens: usage?.output_tokens ?? 0,
+    durationMs: Date.now() - startedAt,
+    httpStatus: response.status,
+    success: true,
+    correlationId: article.id,
+  });
   const textBlock = data.content?.find((b: { type: string }) => b.type === "text");
-  if (!textBlock?.text) return;
+  if (!textBlock?.text) return "parse_error";
 
   try {
     const raw = textBlock.text.replace(/```json|```/g, "").trim();
@@ -84,6 +147,7 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
     const end = raw.lastIndexOf("}");
     const enrichment: TaggerEnrichment = JSON.parse(raw.slice(start, end + 1));
 
+    const moderation = resolveModerationDecision(enrichment);
     await updateArticleTags(article.id, {
       tags: enrichment.tags ?? [],
       sentiment: enrichment.sentiment ?? "uplifting",
@@ -91,13 +155,77 @@ async function tagSingleArticle(article: StoredArticle): Promise<void> {
       locale: enrichment.locale ?? "global",
       readingTimeSecs: article.readingTimeSecs, // already estimated by ingest
       qualityScore: clamp(enrichment.qualityScore ?? 0.5),
+      moderation,
     });
 
+    captureMessage({
+      level: "info",
+      message: "agent.tagger.moderation_applied",
+      context: {
+        articleId: article.id,
+        moderationStatus: moderation.status,
+        moderationConfidence: moderation.confidence,
+      },
+    });
     console.log(`[TaggerAgent] Tagged article ${article.id}: score=${enrichment.qualityScore}`);
+    return "tagged";
   } catch (e) {
     console.error(`[TaggerAgent] Parse error for article ${article.id}:`, e);
     captureException(e, { agent: "tagger", articleId: article.id, phase: "parse" });
+    return "parse_error";
   }
+}
+
+/**
+ * Load one article by id and run the tagger (sequential ingest scripts).
+ * Does not batch; use this when you must tag before the next ingest step.
+ */
+export async function tagArticleById(articleId: string): Promise<TagSingleOutcome> {
+  const article = await getArticleById(articleId);
+  if (!article) return "not_found";
+  if (article.tagged) return "skipped_already_tagged";
+  return tagSingleArticle(article);
+}
+
+export function resolveModerationDecision(enrichment: TaggerEnrichment): {
+  status: "approved" | "flagged" | "rejected";
+  reason: string | null;
+  confidence: number | null;
+  labels: Record<string, unknown>;
+} {
+  const moderation = enrichment.moderation;
+  const confidenceRaw =
+    moderation?.confidence == null || Number.isNaN(moderation.confidence)
+      ? null
+      : clamp(moderation.confidence);
+  const action =
+    moderation?.action === "reject" ||
+    moderation?.action === "flag_for_review" ||
+    moderation?.action === "approve"
+      ? moderation.action
+      : "approve";
+  const resolvedStatus =
+    action === "reject"
+      ? confidenceRaw != null && confidenceRaw >= AUTO_REJECT_MIN_CONFIDENCE
+        ? "rejected"
+        : "flagged"
+      : action === "flag_for_review"
+        ? "flagged"
+        : "approved";
+  const reason = (moderation?.rationale ?? "").trim() || null;
+
+  return {
+    status: resolvedStatus,
+    reason,
+    confidence: confidenceRaw,
+    labels: {
+      isPolitical: moderation?.isPolitical ?? null,
+      politicalScope: moderation?.politicalScope ?? null,
+      action: moderation?.action ?? null,
+      reasons: moderation?.reasons ?? [],
+      autoRejectMinConfidence: AUTO_REJECT_MIN_CONFIDENCE,
+    },
+  };
 }
 
 function buildTaggerPrompt(article: StoredArticle): string {
@@ -135,7 +263,15 @@ Return exactly:
   "sentiment": "uplifting" | "inspiring" | "heartwarming" | "triumphant",
   "emotions": ["1 to 3 emotions from: joy, awe, hope, pride, gratitude, wonder, excitement"],
   "locale": "global" | "US" | "UK" | "AU" | "EU" | "Asia" | "Africa" | "LatAm",
-  "qualityScore": 0.0 to 1.0 (how compelling, specific, and well-written is this story?)
+  "qualityScore": 0.0 to 1.0 (how compelling, specific, and well-written is this story?),
+  "moderation": {
+    "isPolitical": true | false,
+    "politicalScope": "none" | "civic_policy" | "elected_official" | "campaign_election" | "geopolitics",
+    "action": "approve" | "flag_for_review" | "reject",
+    "confidence": 0.0 to 1.0,
+    "rationale": "short plain-language reason for admin review",
+    "reasons": ["0 to 4 short labels explaining the decision"]
+  }
 }`;
 }
 

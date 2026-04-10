@@ -18,6 +18,17 @@ function joinClassNames(...parts: Array<string | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
+function normalizeAccidentalMarkdownCodeBlocks(markdown: string): string {
+  // RSS/plaintext imports can include tab/4-space indents that markdown treats as code blocks.
+  // De-indent those lines so body text renders as prose instead of scrollable <pre> blocks.
+  return markdown
+    .split("\n")
+    .map((line) =>
+      /^\t+/.test(line) || /^ {4,}/.test(line) ? line.trimStart() : line
+    )
+    .join("\n");
+}
+
 export function ArticleBodyMarkdown({
   markdown,
   variant = "feed",
@@ -34,6 +45,7 @@ export function ArticleBodyMarkdown({
         markdownLength: markdown.length,
         readingTimeSecs,
       }));
+  const normalizedMarkdown = normalizeAccidentalMarkdownCodeBlocks(markdown);
 
   return (
     <div
@@ -54,7 +66,7 @@ export function ArticleBodyMarkdown({
           ),
         }}
       >
-        {markdown}
+        {normalizedMarkdown}
       </ReactMarkdown>
     </div>
   );

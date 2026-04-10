@@ -79,7 +79,13 @@ export async function listEnabledRssFeeds(input?: {
     .order("tone_risk_score", { ascending: true })
     .order("updated_at", { ascending: false })
     .limit(limit);
-  if (localeHint) query = query.in("locale_hint", [localeHint, "global"]);
+  if (localeHint) {
+    const localeCandidates =
+      localeHint.toLowerCase() === "global"
+        ? ["global", "US"]
+        : [localeHint, "global"];
+    query = query.in("locale_hint", localeCandidates);
+  }
   if (categoryHint) query = query.in("category_hint", [categoryHint, ""]);
   const { data, error } = await query;
   if (error) throw new Error(`listEnabledRssFeeds: ${error.message}`);

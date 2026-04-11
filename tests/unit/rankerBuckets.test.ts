@@ -54,21 +54,30 @@ function makeArticle(id: string, category: StoredArticle["category"]): StoredArt
 }
 
 describe("collectAcrossBuckets", () => {
-  it("deduplicates and preserves remaining+8 fetch heuristic", async () => {
+  it("deduplicates and uses parallel per-bucket fetch limits", async () => {
     const profile = makeProfile();
     const requestedLimits: number[] = [];
+
+    // With contentKinds ["news"], traversal uses all editorial buckets (no recipe bucket).
+    const bucketCount = CATEGORIES.length;
+    const poolSize = 3;
+    const expectedPerBucketLimit = Math.max(
+      8,
+      Math.ceil(poolSize / bucketCount) + 8
+    );
 
     const output = await collectAcrossBuckets(
       profile,
       "user-1",
       0,
-      3,
+      poolSize,
       [],
       ["news"],
-      async (_category, limit) => {
+      async (category, limit) => {
         requestedLimits.push(limit);
-        if (requestedLimits.length === 1) return [makeArticle("a1", CATEGORIES[0])];
-        if (requestedLimits.length === 2) {
+        // Parallel fetches: key mock results by category, not call order.
+        if (category === CATEGORIES[0]) return [makeArticle("a1", CATEGORIES[0])];
+        if (category === CATEGORIES[1]) {
           return [
             makeArticle("a1", CATEGORIES[1]),
             makeArticle("a2", CATEGORIES[1]),
@@ -80,8 +89,8 @@ describe("collectAcrossBuckets", () => {
     );
 
     expect(output.map((a) => a.id)).toEqual(["a1", "a2", "a3"]);
-    expect(requestedLimits[0]).toBe(11);
-    expect(requestedLimits[1]).toBe(10);
+    expect(requestedLimits).toHaveLength(bucketCount);
+    expect(requestedLimits.every((limit) => limit === expectedPerBucketLimit)).toBe(true);
+    expect(expectedPerBucketLimit).toBe(9);
   });
 });
-

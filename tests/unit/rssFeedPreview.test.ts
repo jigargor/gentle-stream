@@ -9,7 +9,14 @@ const RSS_FOOTER =
   "This report is sourced directly from the original RSS item and preserved without a full AI rewrite.";
 
 describe("rssFeedPreview helpers", () => {
-  it("detects RSS narrative stories by marker footer", () => {
+  it("treats ingest articles with body as RSS-style feed cards (footer marker optional)", () => {
+    expect(
+      isRssNarrativeArticle({
+        source: "ingest",
+        contentKind: "news",
+        body: "Lead paragraph.\n\nSecond paragraph without pipeline footer.",
+      })
+    ).toBe(true);
     expect(
       isRssNarrativeArticle({
         source: "ingest",

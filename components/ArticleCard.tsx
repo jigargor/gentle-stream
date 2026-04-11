@@ -56,8 +56,8 @@ const isScrollDepthTelemetryEnabled =
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
-/** Cap lines when row is very tall; measurement uses real column height first. */
-const RSS_EXCERPT_MAX_LINES = 28;
+/** Cap lines when row is very tall; keep feed cards scannable (hero rows were ~28 lines). */
+const RSS_EXCERPT_MAX_LINES = 14;
 const RSS_EXCERPT_RESERVED_PX = 18;
 /** Gap between clamped excerpt and Read more (matches grid gap on preview wrap). */
 const RSS_PREVIEW_STACK_GAP_PX = 10.4;
@@ -474,8 +474,8 @@ export default function ArticleCard({
     }),
     [article, displayBody, displayHeadline, displaySubheadline]
   );
-  /** Long excerpt so adaptive clamp can fill grid rows; paragraph breaks preserved in buildRssFeedExcerpt. */
-  const rssExcerptMaxChars = isHero ? 2400 : 2000;
+  /** Excerpt length for feed preview + “read more”; keeps DOM smaller than full article bodies. */
+  const rssExcerptMaxChars = isHero ? 1200 : 900;
   const rssFeedExcerpt = isRssNarrativeFeedCard
     ? buildRssFeedExcerpt(previewArticle, rssExcerptMaxChars)
     : "";
@@ -487,7 +487,7 @@ export default function ArticleCard({
     shouldUseReaderModal && !/[.…]\s*$/u.test(rssFeedExcerpt)
       ? `${rssFeedExcerpt}…`
       : rssFeedExcerpt;
-  const excerptLineClampBaseline = isHero ? 8 : isWide ? 7 : 6;
+  const excerptLineClampBaseline = isHero ? 6 : isWide ? 5 : 5;
   const excerptLineClamp = adaptiveExcerptLineClamp ?? excerptLineClampBaseline;
   const publishedLabel = formatDateLabel(
     "sourcePublishedAt" in article ? article.sourcePublishedAt ?? null : null

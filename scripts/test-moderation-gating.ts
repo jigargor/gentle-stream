@@ -42,6 +42,26 @@ function assert(condition: boolean, label: string, detail?: string) {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Random pool query can lag inserts on shared DBs; poll until the row appears or timeout. */
+async function assertApprovedInRandomPool(approvedId: string): Promise<void> {
+  const deadline = Date.now() + 25_000;
+  let lastCount = 0;
+  while (Date.now() < deadline) {
+    const randomRows = await getRandomAvailableArticles(80, []);
+    lastCount = randomRows.length;
+    if (randomRows.some((r) => r.id === approvedId)) {
+      assert(true, "Random pool includes approved article");
+      return;
+    }
+    await sleep(350);
+  }
+  assert(false, "Random pool includes approved article", `not in pool after wait (last sample size ${lastCount})`);
+}
+
 async function cleanup() {
   if (insertedIds.length === 0) return;
   const { error } = await db.from("articles").delete().in("id", insertedIds);
@@ -154,9 +174,9 @@ async function main() {
     assert(!feedIds.has(flaggedId), "Feed excludes flagged article");
     assert(!feedIds.has(rejectedId), "Feed excludes rejected/soft-deleted article");
 
+    await assertApprovedInRandomPool(approvedId);
     const randomRows = await getRandomAvailableArticles(50, []);
     const randomIds = new Set(randomRows.map((row) => row.id));
-    assert(randomIds.has(approvedId), "Random pool includes approved article");
     assert(!randomIds.has(flaggedId), "Random pool excludes flagged article");
     assert(!randomIds.has(rejectedId), "Random pool excludes rejected article");
   } finally {

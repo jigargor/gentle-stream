@@ -956,13 +956,14 @@ export async function getRandomAvailableArticles(
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
-  const cap = Math.min(150, Math.max(40, limit * 12));
+  const cap = Math.min(400, Math.max(40, limit * 12));
   let query = db
     .from("articles")
     .select("*")
     .is("deleted_at", null)
-    // Without ordering, LIMIT returns an arbitrary slice; new rows (and integration fixtures)
-    // may never appear. Prefer recent rows, then shuffle client-side.
+    // DESC would otherwise put NULL fetched_at first and crowd out real rows (CI flakes).
+    .not("fetched_at", "is", null)
+    // Prefer recent ingests, then shuffle client-side.
     .order("fetched_at", { ascending: false })
     .limit(cap);
   if (isModerationColumnsAvailable) {
@@ -990,6 +991,7 @@ export async function getRandomAvailableArticles(
       .from("articles")
       .select("*")
       .is("deleted_at", null)
+      .not("fetched_at", "is", null)
       .order("fetched_at", { ascending: false })
       .limit(cap);
     if (excludeIds.length > 0) fallbackQuery = fallbackQuery.notIn("id", excludeIds);
@@ -1014,11 +1016,12 @@ export async function getRandomArticlesResurfacing(
   contentKinds?: ArticleContentKind[]
 ): Promise<StoredArticle[]> {
   const effectiveContentKinds = normalizeFeedContentKinds(contentKinds);
-  const cap = Math.min(150, Math.max(40, limit * 12));
+  const cap = Math.min(400, Math.max(40, limit * 12));
   let query = db
     .from("articles")
     .select("*")
     .is("deleted_at", null)
+    .not("fetched_at", "is", null)
     .order("fetched_at", { ascending: false })
     .limit(cap);
   if (isModerationColumnsAvailable) {
@@ -1041,6 +1044,7 @@ export async function getRandomArticlesResurfacing(
       .from("articles")
       .select("*")
       .is("deleted_at", null)
+      .not("fetched_at", "is", null)
       .order("fetched_at", { ascending: false })
       .limit(cap);
     if (!isUserSubmittedEnabled) fallbackQuery = fallbackQuery.neq("content_kind", "user_article");

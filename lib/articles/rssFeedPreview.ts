@@ -47,7 +47,9 @@ export function isRssNarrativeArticle(article: FeedPreviewArticleShape): boolean
   if (article.source != null && article.source !== "ingest") return false;
   const body = article.body?.trim() ?? "";
   if (!body) return false;
-  return body.includes(RSS_BODY_FOOTER_MARKER);
+  // All ingest/news bodies use the feed excerpt + reader modal path. The RSS footer
+  // marker is optional (older pipelines); without it we previously rendered the full body in-grid.
+  return true;
 }
 
 export function buildRssFeedExcerpt(

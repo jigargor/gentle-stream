@@ -44,24 +44,43 @@ async function initDeps() {
   db = clientMod.db;
 }
 
-/** Waits until overlap queries see stored source_urls (read replica / index lag). */
-async function waitForSourceUrlsOverlapVisible(
-  normalisedUrls: string[],
-  maxWaitMs = 15000
+const SOURCE_URL_WAIT_MS = process.env.CI ? 60_000 : 20_000;
+
+/**
+ * Waits until the inserted row’s `source_urls` contains the expected normalised URLs.
+ * More reliable than `.overlaps()` alone: GIN / secondary indexes can lag behind the PK row
+ * on shared Supabase instances, which caused CI timeouts in `testPartialUrlOverlap`.
+ */
+async function waitForArticleSourceUrlsVisible(
+  articleId: string,
+  expectedNormalised: string[],
+  maxWaitMs = SOURCE_URL_WAIT_MS
 ): Promise<void> {
-  if (normalisedUrls.length === 0) return;
+  if (expectedNormalised.length === 0) return;
+  const want = new Set(expectedNormalised);
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
     const { data, error } = await db
       .from("articles")
-      .select("id")
-      .overlaps("source_urls", normalisedUrls)
-      .limit(1);
+      .select("source_urls")
+      .eq("id", articleId)
+      .maybeSingle();
     if (error) throw new Error(error.message);
-    if (data && data.length > 0) return;
+    const urls = (data?.source_urls as string[] | null) ?? [];
+    const urlSet = new Set(urls);
+    let ok = true;
+    for (const n of want) {
+      if (!urlSet.has(n)) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return;
     await sleep(200);
   }
-  throw new Error(`Timeout waiting for source_urls overlap: ${normalisedUrls.join(", ")}`);
+  throw new Error(
+    `Timeout waiting for article ${articleId} source_urls ⊇ [${expectedNormalised.join(", ")}]`
+  );
 }
 
 async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
@@ -162,8 +181,9 @@ async function testUrlBlocksSameArticleDifferentTitle() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original article inserted");
+  const insertedId = first[0]!.id;
 
-  await waitForSourceUrlsOverlapVisible([normaliseUrl(sharedUrl)]);
+  await waitForArticleSourceUrlsVisible(insertedId, [normaliseUrl(sharedUrl)]);
 
   const second = await insertArticles([rephrased]);
   assert(
@@ -193,8 +213,9 @@ async function testUrlVariantsNormalisedCorrectly() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
+  const insertedId = first[0]!.id;
 
-  await waitForSourceUrlsOverlapVisible([normaliseUrl(canonical)]);
+  await waitForArticleSourceUrlsVisible(insertedId, [normaliseUrl(canonical)]);
 
   const second = await insertArticles([withTracking]);
   assert(second.length === 0, "Tracking-param variant blocked — normalises to same URL");
@@ -250,8 +271,12 @@ async function testPartialUrlOverlap() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
+  const insertedId = first[0]!.id;
 
-  await waitForSourceUrlsOverlapVisible([normaliseUrl(sharedUrl)]);
+  await waitForArticleSourceUrlsVisible(insertedId, [
+    normaliseUrl(sharedUrl),
+    normaliseUrl(`https://phys.org/news/TEST_URL_DEDUP_${runTag}_other`),
+  ]);
 
   const second = await insertArticles([partial]);
   assert(second.length === 0, "Partial overlap (1 shared URL) correctly blocked");

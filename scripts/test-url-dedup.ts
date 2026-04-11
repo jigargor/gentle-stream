@@ -13,12 +13,25 @@
  *   npx tsx scripts/test-url-dedup.ts
  */
 
+import { randomBytes } from "node:crypto";
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
+let buildHeadlineFingerprint: typeof import("../lib/db/articles").buildHeadlineFingerprint;
 let normaliseUrl: typeof import("../lib/db/articles").normaliseUrl;
 let db: typeof import("../lib/db/client").db;
+
+/** Isolates fingerprints and URLs from other CI jobs on a shared DB. */
+let runTag = "";
+
+function headline(rest: string): string {
+  return `TEST_URL_DEDUP_${runTag} ${rest}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function initDeps() {
   const [articlesMod, clientMod] = await Promise.all([
@@ -26,8 +39,40 @@ async function initDeps() {
     import("../lib/db/client"),
   ]);
   insertArticles = articlesMod.insertArticles;
+  buildHeadlineFingerprint = articlesMod.buildHeadlineFingerprint;
   normaliseUrl = articlesMod.normaliseUrl;
   db = clientMod.db;
+}
+
+/** Waits until overlap queries see stored source_urls (read replica / index lag). */
+async function waitForSourceUrlsOverlapVisible(
+  normalisedUrls: string[],
+  maxWaitMs = 15000
+): Promise<void> {
+  if (normalisedUrls.length === 0) return;
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await db
+      .from("articles")
+      .select("id")
+      .overlaps("source_urls", normalisedUrls)
+      .limit(1);
+    if (error) throw new Error(error.message);
+    if (data && data.length > 0) return;
+    await sleep(200);
+  }
+  throw new Error(`Timeout waiting for source_urls overlap: ${normalisedUrls.join(", ")}`);
+}
+
+async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
+    if (error) throw new Error(error.message);
+    if (data && data.length > 0) return;
+    await sleep(200);
+  }
+  throw new Error(`Timeout waiting for fingerprint row: ${fp}`);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -100,23 +145,25 @@ function testNormaliseUrl() {
 async function testUrlBlocksSameArticleDifferentTitle() {
   console.log("\n── URL overlap blocks same article with different headline ────");
 
-  const sharedUrl = "https://www.bbc.com/news/science-TEST_URL_DEDUP-123";
+  const sharedUrl = `https://www.bbc.com/news/science-TEST_URL_DEDUP-${runTag}-123`;
 
   const original = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Scientists Make Breakthrough Discovery",
+    headline: headline("Scientists Make Breakthrough Discovery"),
     sourceUrls: [sharedUrl],
   };
 
   const rephrased = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Researchers Achieve Major Scientific Advance", // totally different title
+    headline: headline("Researchers Achieve Major Scientific Advance"), // totally different title
     sourceUrls: [sharedUrl], // same underlying article
   };
 
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original article inserted");
+
+  await waitForSourceUrlsOverlapVisible([normaliseUrl(sharedUrl)]);
 
   const second = await insertArticles([rephrased]);
   assert(
@@ -128,24 +175,26 @@ async function testUrlBlocksSameArticleDifferentTitle() {
 async function testUrlVariantsNormalisedCorrectly() {
   console.log("\n── URL variants normalise to same key ─────────────────────────");
 
-  const canonical = "https://www.nature.com/articles/TEST_URL_DEDUP_s41586";
+  const canonical = `https://www.nature.com/articles/TEST_URL_DEDUP_${runTag}_s41586`;
 
   const original = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Nature Study On Coral Reefs Alpha",
+    headline: headline("Nature Study On Coral Reefs Alpha"),
     sourceUrls: [canonical],
   };
 
   // Same URL but with tracking params and different scheme
   const withTracking = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Nature Study On Coral Reefs Beta", // different title
-    sourceUrls: ["http://nature.com/articles/TEST_URL_DEDUP_s41586?utm_source=twitter"],
+    headline: headline("Nature Study On Coral Reefs Beta"), // different title
+    sourceUrls: [`http://nature.com/articles/TEST_URL_DEDUP_${runTag}_s41586?utm_source=twitter`],
   };
 
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
+
+  await waitForSourceUrlsOverlapVisible([normaliseUrl(canonical)]);
 
   const second = await insertArticles([withTracking]);
   assert(second.length === 0, "Tracking-param variant blocked — normalises to same URL");
@@ -156,14 +205,14 @@ async function testDifferentUrlsNotBlocked() {
 
   const articleA = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Unrelated Article Alpha",
-    sourceUrls: ["https://bbc.com/news/TEST_URL_DEDUP_article_alpha"],
+    headline: headline("Unrelated Article Alpha"),
+    sourceUrls: [`https://bbc.com/news/TEST_URL_DEDUP_${runTag}_article_alpha`],
   };
 
   const articleB = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Unrelated Article Beta",
-    sourceUrls: ["https://reuters.com/world/TEST_URL_DEDUP_article_beta"],
+    headline: headline("Unrelated Article Beta"),
+    sourceUrls: [`https://reuters.com/world/TEST_URL_DEDUP_${runTag}_article_beta`],
   };
 
   const first = await insertArticles([articleA]);
@@ -178,29 +227,31 @@ async function testDifferentUrlsNotBlocked() {
 async function testPartialUrlOverlap() {
   console.log("\n── Partial URL overlap (one shared source) is blocked ─────────");
 
-  const sharedUrl = "https://sciencedaily.com/releases/TEST_URL_DEDUP_shared";
+  const sharedUrl = `https://sciencedaily.com/releases/TEST_URL_DEDUP_${runTag}_shared`;
 
   const original = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Partial Overlap Original Article",
+    headline: headline("Partial Overlap Original Article"),
     sourceUrls: [
       sharedUrl,
-      "https://phys.org/news/TEST_URL_DEDUP_other",
+      `https://phys.org/news/TEST_URL_DEDUP_${runTag}_other`,
     ],
   };
 
   const partial = {
     ...BASE,
-    headline: "TEST_URL_DEDUP Partial Overlap New Article",
+    headline: headline("Partial Overlap New Article"),
     sourceUrls: [
-      sharedUrl,                                         // shared
-      "https://newscientist.com/article/TEST_URL_DEDUP_different", // unique
+      sharedUrl, // shared
+      `https://newscientist.com/article/TEST_URL_DEDUP_${runTag}_different`, // unique
     ],
   };
 
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
+
+  await waitForSourceUrlsOverlapVisible([normaliseUrl(sharedUrl)]);
 
   const second = await insertArticles([partial]);
   assert(second.length === 0, "Partial overlap (1 shared URL) correctly blocked");
@@ -211,19 +262,21 @@ async function testNoSourceUrls() {
 
   const a = {
     ...BASE,
-    headline: "TEST_URL_DEDUP No Source URL Article One",
+    headline: headline("No Source URL Article One"),
     sourceUrls: [],
   };
 
   const b = {
     ...BASE,
-    headline: "TEST_URL_DEDUP No Source URL Article One", // exact duplicate
+    headline: headline("No Source URL Article One"), // exact duplicate
     sourceUrls: [],
   };
 
   const first = await insertArticles([a]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "First article (no URLs) inserted");
+
+  await waitForFingerprintRow(buildHeadlineFingerprint(a.headline, a.category));
 
   const second = await insertArticles([b]);
   assert(second.length === 0, "Identical headline with no URLs still blocked by fingerprint");
@@ -267,6 +320,9 @@ async function main() {
   console.log("══════════════════════════════════════════════");
 
   await initDeps();
+
+  runTag = process.env.GITHUB_RUN_ID ?? randomBytes(6).toString("hex");
+  console.log(`\n  Run tag: ${runTag} (isolates URLs/fingerprints from other jobs)\n`);
 
   // Unit tests (no DB)
   testNormaliseUrl();

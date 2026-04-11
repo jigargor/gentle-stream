@@ -1,7 +1,8 @@
 /**
  * Strip HTML tags to plain text for ingest, RSS normalization, and dedupe.
  * Uses repeated passes so CodeQL does not flag incomplete sanitization, and
- * script/style patterns allow optional whitespace before closing `>`.
+ * script/style blocks: closing tags must match `</script ...>` / `</style ...>`
+ * where `...` may include whitespace or bogus tokens before `>` (HTML/XSS edge cases).
  */
 export function stripInlineHtmlToPlainText(value: string): string {
   if (!value) return "";
@@ -11,8 +12,8 @@ export function stripInlineHtmlToPlainText(value: string): string {
   while (out !== prev && guard < 50) {
     prev = out;
     out = out
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, " ")
       .replace(/<[^>]+>/g, " ");
     guard += 1;
   }

@@ -158,7 +158,7 @@ The newspaper aesthetic is the product: blackletter masthead, rotating section l
 
 ### Prerequisites
 
-- **Node.js 20.x** (matches CI)
+- **Node.js 22+** (CI uses 22; see `.nvmrc`)
 - A [Supabase](https://supabase.com) project
 - An [Anthropic](https://console.anthropic.com) API key (for ingest / tagger)
 

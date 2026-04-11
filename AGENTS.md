@@ -8,7 +8,7 @@ Gentle Stream currently runs as a root Next.js 16 (App Router) app. The `package
 
 ### Node version
 
-The project requires **Node.js 20.x** (see `.nvmrc`). Use `nvm use 20` before running any commands.
+The project requires **Node.js 22 or newer** (see `.nvmrc` for the version CI and maintainers use). Run `nvm use` before running any commands.
 
 ### Key commands
 

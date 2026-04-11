@@ -159,6 +159,10 @@ async function testCasingVariant() {
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Lowercase version inserted");
 
+  // Same as whitespace variant: shared DBs / read paths can lag; preflight must see the row.
+  const fp = buildHeadlineFingerprint(lower.headline, lower.category);
+  await waitForFingerprintRow(fp);
+
   const second = await insertArticles([upper]);
   assert(second.length === 0, "Uppercase variant blocked (fingerprint normalises case)");
 

@@ -20,6 +20,14 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** One paragraph per block; inner whitespace collapsed to single spaces. */
+function splitBodyParagraphs(body: string): string[] {
+  return body
+    .split(/\n\s*\n+/)
+    .map((p) => collapseWhitespace(p))
+    .filter(Boolean);
+}
+
 function trimToSentence(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const limited = text.slice(0, maxChars).trimEnd();
@@ -46,12 +54,41 @@ export function buildRssFeedExcerpt(
   article: FeedPreviewArticleShape,
   maxChars = DEFAULT_EXCERPT_CHARS
 ): string {
-  const body = collapseWhitespace(stripRssFooter(article.body ?? ""));
-  if (body) return trimToSentence(body, Math.max(120, maxChars));
+  const stripped = stripRssFooter(article.body ?? "");
+  const paragraphs = splitBodyParagraphs(stripped);
+  const max = Math.max(120, maxChars);
 
-  const subheadline = collapseWhitespace(article.subheadline ?? "");
-  if (!subheadline) return "";
-  return trimToSentence(subheadline, Math.max(120, maxChars));
+  if (paragraphs.length === 0) {
+    const subheadline = collapseWhitespace(article.subheadline ?? "");
+    if (!subheadline) return "";
+    return trimToSentence(subheadline, max);
+  }
+
+  if (paragraphs.length === 1) {
+    return trimToSentence(paragraphs[0], max);
+  }
+
+  const chunks: string[] = [];
+  let used = 0;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i];
+    const joiner = chunks.length ? 2 : 0;
+    if (used + joiner + para.length <= max) {
+      chunks.push(para);
+      used += joiner + para.length;
+      continue;
+    }
+    const room = max - used - joiner;
+    if (room >= 40) {
+      chunks.push(trimToSentence(para, room));
+    }
+    break;
+  }
+
+  if (chunks.length === 0) {
+    return trimToSentence(paragraphs[0], max);
+  }
+  return chunks.join("\n\n");
 }
 
 function comparableExcerpt(text: string): string {

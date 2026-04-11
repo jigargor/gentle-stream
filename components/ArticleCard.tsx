@@ -56,8 +56,11 @@ const isScrollDepthTelemetryEnabled =
 
 /** When the hero cell is taller than editorial content (grid stretch), offer Sudoku in the slack. */
 const HERO_VERTICAL_GAP_PX = 280;
-const RSS_EXCERPT_MAX_LINES = 18;
+/** Cap lines when row is very tall; measurement uses real column height first. */
+const RSS_EXCERPT_MAX_LINES = 28;
 const RSS_EXCERPT_RESERVED_PX = 18;
+/** Gap between clamped excerpt and Read more (matches grid gap on preview wrap). */
+const RSS_PREVIEW_STACK_GAP_PX = 10.4;
 let userApiAllowed = true;
 
 function formatDateLabel(value: string | null | undefined): string | null {
@@ -471,7 +474,8 @@ export default function ArticleCard({
     }),
     [article, displayBody, displayHeadline, displaySubheadline]
   );
-  const rssExcerptMaxChars = isHero ? 520 : isWide ? 460 : 380;
+  /** Long excerpt so adaptive clamp can fill grid rows; paragraph breaks preserved in buildRssFeedExcerpt. */
+  const rssExcerptMaxChars = isHero ? 2400 : 2000;
   const rssFeedExcerpt = isRssNarrativeFeedCard
     ? buildRssFeedExcerpt(previewArticle, rssExcerptMaxChars)
     : "";
@@ -528,17 +532,32 @@ export default function ArticleCard({
       const excerptNode = rssExcerptRef.current;
       if (!articleNode || !previewNode || !excerptNode) return;
 
+      const readMoreHeight = rssReadMoreWrapRef.current?.offsetHeight ?? 0;
+      const sourceHeight = sourceFooterRef.current?.offsetHeight ?? 0;
+
+      const wrapH = previewNode.clientHeight;
+      const fromPreviewWrap = Math.max(
+        0,
+        wrapH -
+          readMoreHeight -
+          RSS_PREVIEW_STACK_GAP_PX -
+          RSS_EXCERPT_RESERVED_PX
+      );
+
       const articleRect = articleNode.getBoundingClientRect();
       const previewRect = previewNode.getBoundingClientRect();
       const previewTopOffset = Math.max(0, previewRect.top - articleRect.top);
-      const readMoreHeight = rssReadMoreWrapRef.current?.offsetHeight ?? 0;
-      const sourceHeight = sourceFooterRef.current?.offsetHeight ?? 0;
-      const availableHeightPx =
+      const fromArticleBounds = Math.max(
+        0,
         articleNode.clientHeight -
-        previewTopOffset -
-        readMoreHeight -
-        sourceHeight -
-        RSS_EXCERPT_RESERVED_PX;
+          previewTopOffset -
+          readMoreHeight -
+          RSS_PREVIEW_STACK_GAP_PX -
+          sourceHeight -
+          RSS_EXCERPT_RESERVED_PX
+      );
+
+      const availableHeightPx = Math.max(fromPreviewWrap, fromArticleBounds);
       const computed = window.getComputedStyle(excerptNode);
       const lineHeightPx = Number.parseFloat(computed.lineHeight) || 22;
       const nextClamp = computeAdaptiveExcerptClamp({
@@ -558,6 +577,7 @@ export default function ArticleCard({
     ro.observe(articleEl);
     ro.observe(previewWrapEl);
     ro.observe(excerptEl);
+    if (contentWrapRef.current) ro.observe(contentWrapRef.current);
     if (rssReadMoreWrapRef.current) ro.observe(rssReadMoreWrapRef.current);
     if (sourceFooterRef.current) ro.observe(sourceFooterRef.current);
     window.addEventListener("resize", measureExcerptClamp);
@@ -1184,11 +1204,21 @@ export default function ArticleCard({
         gap: "0.45rem",
         animation: `fadeSlideIn 0.5s ease ${index * 0.08}s both`,
         background: "var(--gs-surface)",
-        minHeight: isHero ? "100%" : undefined,
+        flex: 1,
+        minHeight: 0,
         boxSizing: "border-box",
       }}
     >
-      <div ref={contentWrapRef} style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+      <div
+        ref={contentWrapRef}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.45rem",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
       {articleId && visibleDateline ? (
         <div
           ref={dateInfoWrapRef}
@@ -1735,6 +1765,14 @@ export default function ArticleCard({
           columns: isRecipeCard ? 1 : shouldUseReaderModal ? 1 : isHero ? 2 : 1,
           columnGap: "1.5rem",
           columnRule: "1px solid var(--gs-border)",
+          ...(shouldUseReaderModal
+            ? {
+                flex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+              }
+            : {}),
         }}
       >
         {isRecipeCard ? (
@@ -1815,22 +1853,27 @@ export default function ArticleCard({
             style={{
               breakInside: "avoid-column",
               display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr)",
               gap: "0.65rem",
+              width: "100%",
+              minWidth: 0,
+              flex: 1,
+              minHeight: 0,
             }}
           >
             <p
               ref={rssExcerptRef}
+              className="article-font--classic gs-rss-reader-excerpt"
               style={{
                 margin: 0,
                 color: "var(--gs-text)",
                 fontFamily: "Georgia, serif",
-                fontSize: isHero ? "0.97rem" : "0.86rem",
-                lineHeight: 1.58,
-                textAlign: "justify",
                 overflow: "hidden",
                 display: "-webkit-box",
                 WebkitLineClamp: excerptLineClamp,
                 WebkitBoxOrient: "vertical",
+                width: "100%",
+                minWidth: 0,
                 WebkitMaskImage:
                   "linear-gradient(to bottom, rgba(0,0,0,1) 68%, rgba(0,0,0,0.16) 88%, rgba(0,0,0,0) 100%)",
                 maskImage:
@@ -1900,7 +1943,7 @@ export default function ArticleCard({
         <footer
           ref={sourceFooterRef}
           style={{
-            marginTop: "0.65rem",
+            marginTop: shouldUseReaderModal ? "auto" : "0.65rem",
             paddingTop: "0.55rem",
             borderTop: "1px solid var(--gs-border)",
             fontFamily: "Georgia, serif",

@@ -9,6 +9,8 @@
  *   npx tsx -r dotenv/config scripts/articles-strip-inline-html-tags.ts --apply --max-rows=5000 dotenv_config_path=.env.local
  */
 
+import { stripInlineHtmlToPlainText } from "@gentle-stream/feed-engine";
+
 import { buildHeadlineFingerprint } from "../lib/db/articles";
 import { db } from "../lib/db/client";
 
@@ -65,21 +67,6 @@ function parseIntArg(name: string, fallback: number): number {
 
 function hasInlineHtml(value: string): boolean {
   return /<[^>]+>/.test(value);
-}
-
-function stripInlineHtmlModifiers(value: string): string {
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(
-      /<\/?(em|strong|b|i|u|mark|small|sub|sup|code|kbd|samp|var|abbr|dfn|cite|span|time|q|ins|del|a)[^>]*>/gi,
-      ""
-    )
-    .replace(/<\/?[^>]+>/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 async function loadCandidates(maxRows: number): Promise<ArticleRow[]> {
@@ -141,13 +128,13 @@ function collectChanges(rows: ArticleRow[]): ChangeRow[] {
     }
 
     const after = {
-      headline: stripInlineHtmlModifiers(before.headline),
-      subheadline: stripInlineHtmlModifiers(before.subheadline),
-      body: stripInlineHtmlModifiers(before.body),
-      pullQuote: stripInlineHtmlModifiers(before.pullQuote),
-      byline: stripInlineHtmlModifiers(before.byline),
-      location: stripInlineHtmlModifiers(before.location),
-      imagePrompt: stripInlineHtmlModifiers(before.imagePrompt),
+      headline: stripInlineHtmlToPlainText(before.headline),
+      subheadline: stripInlineHtmlToPlainText(before.subheadline),
+      body: stripInlineHtmlToPlainText(before.body),
+      pullQuote: stripInlineHtmlToPlainText(before.pullQuote),
+      byline: stripInlineHtmlToPlainText(before.byline),
+      location: stripInlineHtmlToPlainText(before.location),
+      imagePrompt: stripInlineHtmlToPlainText(before.imagePrompt),
     };
 
     if (

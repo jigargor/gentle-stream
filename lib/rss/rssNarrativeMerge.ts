@@ -1,16 +1,8 @@
+import { stripInlineHtmlToPlainText } from "@gentle-stream/feed-engine";
+
 /** Shared RSS narrative normalization and merge rules (ingest + maintenance scripts). */
 
 export const RSS_SOURCE_FETCH_MIN_CHARS = 320;
-
-function stripInlineHtmlModifiers(value: string): string {
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<\/?(em|strong|b|i|u|mark|small|sub|sup|code|kbd|samp|var|abbr|dfn|cite|span|time|q|ins|del|a)[^>]*>/gi, "")
-    .replace(/<\/?[^>]+>/g, " ")
-    .trim();
-}
 
 function stripInlineChromePhrases(line: string): string {
   return line
@@ -66,7 +58,7 @@ function splitRunOnParagraph(paragraph: string): string[] {
 export function normalizeRssNarrativeText(value: string): string {
   const blockedLine =
     /^(share|details|keep exploring|discover more topics|image credit:|editor|contact|related terms|hide caption|show caption|toggle caption|image article|read more|view more)$/i;
-  const cleaned = stripInlineHtmlModifiers(value)
+  const cleaned = stripInlineHtmlToPlainText(value)
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\t+/g, " ")

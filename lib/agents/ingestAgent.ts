@@ -30,6 +30,7 @@ import {
   resolveIngestDiscoveryProvider,
   type IngestDiscoveryProvider,
 } from "@/lib/agents/ingestDiscoveryProvider";
+import { stripInlineHtmlToPlainText } from "@gentle-stream/feed-engine";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const RSS_FEED_BODY_SKIP_SOURCE_FETCH_CHARS = 2500;
@@ -1079,15 +1080,7 @@ function parseSourcePublishedAt(value: unknown): string | null {
 }
 
 function stripCitations(text: string): string {
-  return text
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<\/?(em|strong|b|i|u|mark|small|sub|sup|code|kbd|samp|var|abbr|dfn|cite|span|time|q|ins|del|a)[^>]*>/gi, "")
-    .replace(/<\/?[^>]+>/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return stripInlineHtmlToPlainText(text);
 }
 
 function resolvePipelineMode(

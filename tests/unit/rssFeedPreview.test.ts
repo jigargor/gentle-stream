@@ -45,6 +45,17 @@ describe("rssFeedPreview helpers", () => {
     ).toBe("First paragraph from source item.");
   });
 
+  it("preserves paragraph breaks for feed excerpt when body has multiple blocks", () => {
+    expect(
+      buildRssFeedExcerpt(
+        {
+          body: `First block of narrative.\n\nSecond block continues the story.\n\n${RSS_FOOTER}`,
+        },
+        500
+      )
+    ).toBe("First block of narrative.\n\nSecond block continues the story.");
+  });
+
   it("returns false when excerpt already covers body text", () => {
     expect(
       rssHasExtraContentBeyondExcerpt({

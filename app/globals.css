@@ -411,6 +411,17 @@ body {
   text-align: justify;
 }
 
+/* RSS reader-modal preview (all layouts): match ArticleBodyMarkdown reader body */
+.gs-rss-reader-excerpt.article-font--classic {
+  font-size: 1.03rem;
+  line-height: 1.68;
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
 .article-markdown--admin {
   font-size: 0.92rem;
 }

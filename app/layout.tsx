@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { APP_LOGO_SRC } from "@/lib/brand/logo";
+import { CookieConsentBanner } from "@/components/legal/CookieConsentBanner";
 
 export const metadata: Metadata = {
   title: "Gentle Stream",
@@ -35,6 +36,7 @@ export default function RootLayout({
       {/* suppressHydrationWarning: browser extensions often inject attrs on <body> (e.g. cz-shortcut-listen) */}
       <body suppressHydrationWarning>
         {children}
+        <CookieConsentBanner />
       </body>
     </html>
   );

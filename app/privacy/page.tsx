@@ -42,9 +42,13 @@ export default function PrivacyPage() {
       <section>
         <h2 style={{ fontSize: "1.15rem" }}>Cookies and session data</h2>
         <p>
-          We use essential cookies and local session storage for login state, security, and
-          anti-abuse controls. These cookies are required to sign in and use account-only
-          features.
+          We use essential cookies and local storage for login state, security, and
+          anti-abuse controls. This includes Supabase authentication cookies (for signed-in
+          sessions), our session-start cookie <code>gs_sess_start</code> (for wall-clock
+          session expiry), and the guest access cookie <code>gs_guest_access</code> (for
+          limited anonymous feed access). We also store your cookie consent preferences in
+          local storage as <code>gs_cookie_consent_v1</code>. Essential cookies are required
+          to sign in and use account-only features.
         </p>
       </section>
 

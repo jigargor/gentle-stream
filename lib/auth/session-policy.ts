@@ -1,5 +1,5 @@
 /** Wall-clock max session length from successful sign-in (callback). */
-export const SESSION_MAX_AGE_SEC = 2 * 60 * 60;
+export const SESSION_MAX_AGE_SEC = 60 * 60;
 
 /** HttpOnly cookie storing Unix seconds when the current login period started. */
 export const SESSION_START_COOKIE = "gs_sess_start";

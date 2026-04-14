@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Masthead, { MASTHEAD_TOP_BAR_HEIGHT_PX } from "./Masthead";
 import { ProfileMenu } from "./user/ProfileMenu";
 import { GuestProfileMenu } from "./user/GuestProfileMenu";
@@ -171,9 +171,19 @@ export interface NewsFeedProps {
   userId: string;
   userEmail?: string | null;
   isAdmin?: boolean;
+  /**
+   * Mirrors `FEED_INCLUDE_USER_SUBMITTED`. When false, the feed excludes creator
+   * submissions and the "User articles" kind chip is not shown.
+   */
+  feedIncludeUserSubmitted?: boolean;
 }
 
-export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFeedProps) {
+export default function NewsFeed({
+  userId,
+  userEmail,
+  isAdmin = false,
+  feedIncludeUserSubmitted = true,
+}: NewsFeedProps) {
   const isGuestUser = userId === GUEST_USER_ID;
   const [mfaPassed, setMfaPassed] = useState(userId === "dev-local" || isGuestUser);
   const [sections, setSections] = useState<FeedSection[]>([]);
@@ -1794,6 +1804,27 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
     resetFeedAndLoad();
   }, [searchInput, resetFeedAndLoad]);
 
+  const kindFilterChipOptions = useMemo(
+    () =>
+      (
+        [
+          { value: "all" as const, label: "All" },
+          { value: "news" as const, label: "News" },
+          { value: "user_article" as const, label: "User articles" },
+          { value: "recipe" as const, label: "Recipes" },
+        ] as const
+      ).filter((option) =>
+        feedIncludeUserSubmitted ? true : option.value !== "user_article"
+      ),
+    [feedIncludeUserSubmitted]
+  );
+
+  useEffect(() => {
+    if (feedIncludeUserSubmitted) return;
+    if (activeKindFilterRef.current !== "user_article") return;
+    handleKindFilterSelect("all");
+  }, [feedIncludeUserSubmitted, handleKindFilterSelect]);
+
   if (!mfaPassed) {
     return <MfaChallengeGate onPassed={() => setMfaPassed(true)} />;
   }
@@ -1840,14 +1871,7 @@ export default function NewsFeed({ userId, userEmail, isAdmin = false }: NewsFee
           boxShadow: "0 8px 24px rgba(22, 15, 8, 0.06)",
         }}
       >
-        {(
-          [
-            { value: "all", label: "All" },
-            { value: "news", label: "News" },
-            { value: "user_article", label: "User articles" },
-            { value: "recipe", label: "Recipes" },
-          ] as const
-        ).map((option) => {
+        {kindFilterChipOptions.map((option) => {
           const active = activeKindFilter === option.value;
           return (
             <button

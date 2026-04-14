@@ -2,6 +2,7 @@ import NewsFeed from "@/components/NewsFeed";
 import { createClient } from "@/lib/supabase/server";
 import { isAdmin } from "@/lib/auth/admin";
 import { GUEST_ACCESS_COOKIE, hasGuestAccessCookie } from "@/lib/auth/guest-access";
+import { getEnv } from "@/lib/env";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -10,11 +11,14 @@ export const dynamic = "force-dynamic";
 const GUEST_USER_ID = "anonymous";
 
 export default async function Home() {
+  const feedIncludeUserSubmitted = getEnv().FEED_INCLUDE_USER_SUBMITTED ?? true;
+
   if (process.env.AUTH_DISABLED === "1") {
     return (
       <NewsFeed
         userId={process.env.DEV_USER_ID ?? "dev-local"}
         userEmail={null}
+        feedIncludeUserSubmitted={feedIncludeUserSubmitted}
       />
     );
   }
@@ -29,7 +33,13 @@ export default async function Home() {
       cookieStore.get(GUEST_ACCESS_COOKIE)?.value ?? null
     );
     if (!hasGuestAccess) redirect("/login?next=/");
-    return <NewsFeed userId={GUEST_USER_ID} userEmail={null} />;
+    return (
+      <NewsFeed
+        userId={GUEST_USER_ID}
+        userEmail={null}
+        feedIncludeUserSubmitted={feedIncludeUserSubmitted}
+      />
+    );
   }
 
   return (
@@ -37,6 +47,7 @@ export default async function Home() {
       userId={user.id}
       userEmail={user.email}
       isAdmin={isAdmin({ userId: user.id, email: user.email ?? null })}
+      feedIncludeUserSubmitted={feedIncludeUserSubmitted}
     />
   );
 }

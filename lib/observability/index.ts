@@ -1,5 +1,3 @@
-import "server-only";
-
 import { resolveSentry } from "@/lib/observability/sentry-server";
 import {
   emitDatadogLog,

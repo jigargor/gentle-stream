@@ -1,5 +1,8 @@
-import "server-only";
 import { createRequire } from "node:module";
+
+// Intentionally no `server-only` import: that package throws when loaded under plain
+// Node (e.g. `tsx` scripts in CI). Client bundles must not import this file; use
+// `@/lib/observability/client` in client components.
 
 export interface SentryLike {
   captureException: (error: unknown, extra?: Record<string, unknown>) => void;

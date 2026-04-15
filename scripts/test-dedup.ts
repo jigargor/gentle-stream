@@ -41,14 +41,26 @@ function sleep(ms: number): Promise<void> {
 let passed = 0;
 let failed = 0;
 
-function assert(condition: boolean, label: string) {
+function assert(condition: boolean, label: string, detail?: string) {
   if (condition) {
     console.log(`  ✓  ${label}`);
     passed++;
   } else {
     console.error(`  ✗  ${label}`);
+    if (detail) console.error(`     ${detail}`);
     failed++;
   }
+}
+
+/**
+ * `insertArticles` usually returns [] when a duplicate is skipped, but PostgREST can still
+ * return the existing row for `upsert(..., { ignoreDuplicates: true }).select()` — same `id`,
+ * no second physical insert. Treat that as blocked.
+ */
+function insertBlockedDuplicate(originalId: string, batch: { id: string }[]): boolean {
+  if (batch.length === 0) return true;
+  if (batch.length === 1 && batch[0]!.id === originalId) return true;
+  return false;
 }
 
 const BASE = {
@@ -130,10 +142,11 @@ async function testExactDuplicate() {
   const first = await insertArticles([article]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "First insert returns 1 row");
+  const firstId = first[0]!.id;
 
   const second = await insertArticles([article]);
   insertedIds.push(...second.map((a) => a.id));
-  if (second.length === 0) {
+  if (insertBlockedDuplicate(firstId, second)) {
     assert(true, "Second insert returns 0 rows (blocked)");
     return;
   }
@@ -143,7 +156,11 @@ async function testExactDuplicate() {
   await new Promise((resolve) => setTimeout(resolve, 500));
   const third = await insertArticles([article]);
   insertedIds.push(...third.map((a) => a.id));
-  assert(third.length === 0, "Duplicate insert is eventually blocked");
+  assert(
+    insertBlockedDuplicate(firstId, third),
+    "Duplicate insert is eventually blocked",
+    third.map((r) => r.id).join(",") || undefined
+  );
 }
 
 async function testCasingVariant() {
@@ -156,14 +173,25 @@ async function testCasingVariant() {
   const first = await insertArticles([lower]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Lowercase version inserted");
+  const firstId = first[0]!.id;
 
   await afterFingerprintInsertReady();
 
   const second = await insertArticles([upper]);
-  assert(second.length === 0, "Uppercase variant blocked (fingerprint normalises case)");
+  insertedIds.push(...second.map((a) => a.id));
+  assert(
+    insertBlockedDuplicate(firstId, second),
+    "Uppercase variant blocked (fingerprint normalises case)",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 
   const third = await insertArticles([mixed]);
-  assert(third.length === 0, "Mixed-case variant blocked");
+  insertedIds.push(...third.map((a) => a.id));
+  assert(
+    insertBlockedDuplicate(firstId, third),
+    "Mixed-case variant blocked",
+    `got ${third.length} row(s): ${third.map((r) => r.id).join(", ")}`
+  );
 }
 
 async function testWhitespaceVariant() {
@@ -175,11 +203,17 @@ async function testWhitespaceVariant() {
   const first = await insertArticles([clean]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Clean headline inserted");
+  const firstId = first[0]!.id;
 
   await afterFingerprintInsertReady();
 
   const second = await insertArticles([padded]);
-  assert(second.length === 0, "Padded variant blocked (fingerprint collapses whitespace)");
+  insertedIds.push(...second.map((a) => a.id));
+  assert(
+    insertBlockedDuplicate(firstId, second),
+    "Padded variant blocked (fingerprint collapses whitespace)",
+    `got ${second.length} row(s): ${second.map((r) => r.id).join(", ")}`
+  );
 }
 
 async function testDifferentCategory() {

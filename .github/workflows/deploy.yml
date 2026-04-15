@@ -38,7 +38,9 @@ permissions:
 
 jobs:
   quality:
-    uses: ./.github/workflows/ci-reusable.yml
+    # Repo-qualified ref so GitHub Actions tooling can resolve the callee (local `./…` is valid on
+    # runners but many editors report "Unable to find reusable workflow"). Pin to default branch.
+    uses: jigargor/gentle-stream/.github/workflows/ci-reusable.yml@main
     secrets: inherit
     with:
       run-integration: true

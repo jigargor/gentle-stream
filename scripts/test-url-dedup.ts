@@ -46,10 +46,43 @@ async function initDeps() {
 
 const SOURCE_URL_WAIT_MS = process.env.CI ? 60_000 : 20_000;
 
+/** CI delay (ms) before a second `insertArticles` that relies on URL overlap — helps read replicas. */
+const DEDUP_FOLLOWUP_DELAY_MS = process.env.CI ? 2_500 : 150;
+
+function insertResponseHasNormalisedUrls(
+  inserted: { sourceUrls: string[] },
+  expectedNormalised: string[]
+): boolean {
+  // `insertArticles` persists `normaliseUrl` output; compare directly.
+  const have = new Set(inserted.sourceUrls ?? []);
+  return expectedNormalised.every((n) => have.has(n));
+}
+
 /**
- * Waits until the inserted row’s `source_urls` contains the expected normalised URLs.
- * More reliable than `.overlaps()` alone: GIN / secondary indexes can lag behind the PK row
- * on shared Supabase instances, which caused CI timeouts in `testPartialUrlOverlap`.
+ * Ensures URL dedup metadata is ready before the next insert that calls `findUrlConflict`.
+ *
+ * Prefer the row returned by `insertArticles` (same write/response path as the upsert). Polling
+ * `articles.source_urls` by id alone can time out on CI when follow-up reads hit a replica that
+ * has not caught up yet — even though the insert response already contained the URLs.
+ */
+async function waitForDedupReadiness(
+  inserted: { id: string; sourceUrls: string[] },
+  expectedNormalised: string[]
+): Promise<void> {
+  if (expectedNormalised.length === 0) return;
+
+  if (insertResponseHasNormalisedUrls(inserted, expectedNormalised)) {
+    console.log("  ✓  source_urls confirmed from insert response (skipping long poll)");
+    await sleep(DEDUP_FOLLOWUP_DELAY_MS);
+    return;
+  }
+
+  await waitForArticleSourceUrlsVisible(inserted.id, expectedNormalised);
+  await sleep(DEDUP_FOLLOWUP_DELAY_MS);
+}
+
+/**
+ * Fallback: poll until `source_urls` is visible on a follow-up SELECT (e.g. empty insert response).
  */
 async function waitForArticleSourceUrlsVisible(
   articleId: string,
@@ -59,6 +92,7 @@ async function waitForArticleSourceUrlsVisible(
   if (expectedNormalised.length === 0) return;
   const want = new Set(expectedNormalised);
   const deadline = Date.now() + maxWaitMs;
+  let lastUrls: string[] = [];
   while (Date.now() < deadline) {
     const { data, error } = await db
       .from("articles")
@@ -67,6 +101,7 @@ async function waitForArticleSourceUrlsVisible(
       .maybeSingle();
     if (error) throw new Error(error.message);
     const urls = (data?.source_urls as string[] | null) ?? [];
+    lastUrls = urls;
     const urlSet = new Set(urls);
     let ok = true;
     for (const n of want) {
@@ -79,7 +114,7 @@ async function waitForArticleSourceUrlsVisible(
     await sleep(200);
   }
   throw new Error(
-    `Timeout waiting for article ${articleId} source_urls ⊇ [${expectedNormalised.join(", ")}]`
+    `Timeout waiting for article ${articleId} source_urls ⊇ [${expectedNormalised.join(", ")}] — last read: [${lastUrls.join(", ")}]`
   );
 }
 
@@ -181,9 +216,9 @@ async function testUrlBlocksSameArticleDifferentTitle() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original article inserted");
-  const insertedId = first[0]!.id;
+  const inserted = first[0]!;
 
-  await waitForArticleSourceUrlsVisible(insertedId, [normaliseUrl(sharedUrl)]);
+  await waitForDedupReadiness(inserted, [normaliseUrl(sharedUrl)]);
 
   const second = await insertArticles([rephrased]);
   assert(
@@ -213,9 +248,9 @@ async function testUrlVariantsNormalisedCorrectly() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
-  const insertedId = first[0]!.id;
+  const inserted = first[0]!;
 
-  await waitForArticleSourceUrlsVisible(insertedId, [normaliseUrl(canonical)]);
+  await waitForDedupReadiness(inserted, [normaliseUrl(canonical)]);
 
   const second = await insertArticles([withTracking]);
   assert(second.length === 0, "Tracking-param variant blocked — normalises to same URL");
@@ -271,9 +306,9 @@ async function testPartialUrlOverlap() {
   const first = await insertArticles([original]);
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Original inserted");
-  const insertedId = first[0]!.id;
+  const inserted = first[0]!;
 
-  await waitForArticleSourceUrlsVisible(insertedId, [
+  await waitForDedupReadiness(inserted, [
     normaliseUrl(sharedUrl),
     normaliseUrl(`https://phys.org/news/TEST_URL_DEDUP_${runTag}_other`),
   ]);

@@ -18,7 +18,6 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
-let buildHeadlineFingerprint: typeof import("../lib/db/articles").buildHeadlineFingerprint;
 let normaliseUrl: typeof import("../lib/db/articles").normaliseUrl;
 let db: typeof import("../lib/db/client").db;
 
@@ -39,7 +38,6 @@ async function initDeps() {
     import("../lib/db/client"),
   ]);
   insertArticles = articlesMod.insertArticles;
-  buildHeadlineFingerprint = articlesMod.buildHeadlineFingerprint;
   normaliseUrl = articlesMod.normaliseUrl;
   db = clientMod.db;
 }
@@ -118,15 +116,10 @@ async function waitForArticleSourceUrlsVisible(
   );
 }
 
-async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
-    if (error) throw new Error(error.message);
-    if (data && data.length > 0) return;
-    await sleep(200);
-  }
-  throw new Error(`Timeout waiting for fingerprint row: ${fp}`);
+/** Same replica pause as `waitForDedupReadiness` when the next insert only needs fingerprint overlap. */
+async function afterFingerprintInsertReady(): Promise<void> {
+  console.log("  ✓  fingerprint dedup pause (insert succeeded; skip replica poll)");
+  await sleep(DEDUP_FOLLOWUP_DELAY_MS);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -336,7 +329,7 @@ async function testNoSourceUrls() {
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "First article (no URLs) inserted");
 
-  await waitForFingerprintRow(buildHeadlineFingerprint(a.headline, a.category));
+  await afterFingerprintInsertReady();
 
   const second = await insertArticles([b]);
   assert(second.length === 0, "Identical headline with no URLs still blocked by fingerprint");

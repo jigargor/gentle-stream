@@ -17,7 +17,6 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
-let buildHeadlineFingerprint: typeof import("../lib/db/articles").buildHeadlineFingerprint;
 let db: typeof import("../lib/db/client").db;
 
 /** Unique per process so parallel CI jobs on a shared DB do not share fingerprints. */
@@ -78,20 +77,19 @@ async function initDeps() {
     import("../lib/db/client"),
   ]);
   insertArticles = articlesMod.insertArticles;
-  buildHeadlineFingerprint = articlesMod.buildHeadlineFingerprint;
   db = clientMod.db;
 }
 
-/** Ensures the first insert is visible to fingerprint lookups (read replicas / PostgREST lag). */
-async function waitForFingerprintRow(fp: string, maxWaitMs = 15000): Promise<void> {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const { data, error } = await db.from("articles").select("id").eq("fingerprint", fp).limit(1);
-    if (error) throw new Error(error.message);
-    if (data && data.length > 0) return;
-    await sleep(200);
-  }
-  throw new Error(`Timed out waiting for fingerprint row: ${fp}`);
+/**
+ * After a successful `insertArticles`, skip polling `articles` by fingerprint — that query
+ * can hit a read replica and time out even though the upsert already committed. The next
+ * insert’s preflight uses the same pool; a short pause matches `test-url-dedup.ts`.
+ */
+const FINGERPRINT_FOLLOWUP_DELAY_MS = process.env.CI ? 2_500 : 150;
+
+async function afterFingerprintInsertReady(): Promise<void> {
+  console.log("  ✓  fingerprint dedup pause (insert succeeded; skip replica poll)");
+  await sleep(FINGERPRINT_FOLLOWUP_DELAY_MS);
 }
 
 async function preCleanup() {
@@ -159,9 +157,7 @@ async function testCasingVariant() {
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Lowercase version inserted");
 
-  // Same as whitespace variant: shared DBs / read paths can lag; preflight must see the row.
-  const fp = buildHeadlineFingerprint(lower.headline, lower.category);
-  await waitForFingerprintRow(fp);
+  await afterFingerprintInsertReady();
 
   const second = await insertArticles([upper]);
   assert(second.length === 0, "Uppercase variant blocked (fingerprint normalises case)");
@@ -180,8 +176,7 @@ async function testWhitespaceVariant() {
   insertedIds.push(...first.map((a) => a.id));
   assert(first.length === 1, "Clean headline inserted");
 
-  const fp = buildHeadlineFingerprint(clean.headline, clean.category);
-  await waitForFingerprintRow(fp);
+  await afterFingerprintInsertReady();
 
   const second = await insertArticles([padded]);
   assert(second.length === 0, "Padded variant blocked (fingerprint collapses whitespace)");

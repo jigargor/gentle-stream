@@ -26,6 +26,8 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
   const [error, setError] = useState<string | null>(null);
   const autoSubmittedCodeRef = useRef<string | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
+  const onPassedRef = useRef(onPassed);
+  onPassedRef.current = onPassed;
 
   const startChallenge = useCallback(async (factorId: string) => {
     setBusy(true);
@@ -59,15 +61,17 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
         if (verifyError) throw verifyError;
 
         await supabase.auth.refreshSession();
-        onPassed();
+        onPassedRef.current();
       } catch (e) {
-        autoSubmittedCodeRef.current = null;
+        // Keep autoSubmittedCodeRef set to the code we already attempted so the
+        // auto-submit effect does not immediately call verify again (same 6 digits,
+        // busy flips false) — that caused a /verify storm and Supabase 429s.
         setError(formatMfaError(e, "MFA verification failed."));
       } finally {
         setBusy(false);
       }
     },
-    [challengeId, onPassed, selectedFactorId]
+    [challengeId, selectedFactorId]
   );
 
   const init = useCallback(async () => {
@@ -84,7 +88,7 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
       const needsMfa =
         aalData.nextLevel === "aal2" && aalData.currentLevel !== "aal2";
       if (!needsMfa) {
-        onPassed();
+        onPassedRef.current();
         return;
       }
 
@@ -122,7 +126,7 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
     } finally {
       setChecking(false);
     }
-  }, [onPassed, startChallenge]);
+  }, [startChallenge]);
 
   useEffect(() => {
     void init();
@@ -198,6 +202,7 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
             value={code}
             onChange={(event) => {
               const digitsOnly = event.target.value.replace(/\D+/g, "").slice(0, 6);
+              autoSubmittedCodeRef.current = null;
               setCode(digitsOnly);
               setError(null);
             }}

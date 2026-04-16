@@ -22,6 +22,12 @@ const cspDirectives = [
 ].join("; ");
 
 const nextConfig = {
+  // Next 16+ Turbopack walks up for lockfiles; a package-lock.json in a parent folder
+  // (e.g. the user home directory) makes it infer the wrong workspace root. That breaks
+  // dev routing so /api/* can return 404 even though route files exist.
+  turbopack: {
+    root: __dirname,
+  },
   // Allow the Google Fonts domain for font loading
   images: {
     domains: [],

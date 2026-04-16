@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginForm } from "@/components/auth/LoginForm";
 
 const createClientMock = vi.fn();
+vi.mock("next/image", () => ({
+  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
+}));
 vi.mock("next/script", () => ({
   default: (props: Record<string, unknown>) => {
     const { children, ...rest } = props;

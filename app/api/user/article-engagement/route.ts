@@ -123,11 +123,18 @@ async function flushEngagementBuffer(reason: string): Promise<void> {
 
 function scheduleEngagementBufferFlush(): void {
   const state = getEngagementBufferState();
-  if (state.timer != null) return;
-  state.timer = setTimeout(() => {
+  if (state.timer != null) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  const timer = setTimeout(() => {
     state.timer = null;
     void flushEngagementBuffer("timer");
   }, ENGAGEMENT_BUFFER_WINDOW_MS);
+  if (typeof timer === "object" && timer != null && "unref" in timer) {
+    (timer as { unref: () => void }).unref();
+  }
+  state.timer = timer;
 }
 
 function isArticleForeignKeyError(message: string): boolean {

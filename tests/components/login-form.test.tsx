@@ -26,6 +26,8 @@ describe("LoginForm", () => {
   beforeEach(() => {
     createClientMock.mockReset();
     vi.stubGlobal("fetch", vi.fn());
+    delete process.env.NEXT_PUBLIC_TURNSTILE_ENABLED;
+    delete process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
   });
 
   it("shows password length error before calling the API", async () => {
@@ -133,5 +135,29 @@ describe("LoginForm", () => {
     expect(await screen.findByText(/Account created\./)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to sign in" }));
     expect(screen.getByRole("button", { name: "Sign in with email" })).toBeInTheDocument();
+  });
+
+  it("shows creator-disabled screen when creator login is not enabled", () => {
+    render(<LoginForm audience="creator" />);
+
+    expect(screen.getByText("Creator login")).toBeInTheDocument();
+    expect(screen.getByText(/temporarily disabled pending approval/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue with Google" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue as guest" })).not.toBeInTheDocument();
+  });
+
+  it("disables guest browsing until turnstile challenge is solved", () => {
+    process.env.NEXT_PUBLIC_TURNSTILE_ENABLED = "1";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "turnstile-test-key";
+
+    render(<LoginForm />);
+
+    const guestButton = screen.getByRole("button", {
+      name: "Continue as guest is disabled until security check is complete",
+    });
+    expect(guestButton).toBeDisabled();
+    expect(
+      screen.getByText("Complete the security check above to unlock guest browsing.")
+    ).toBeInTheDocument();
   });
 });

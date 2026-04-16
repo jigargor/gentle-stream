@@ -55,3 +55,9 @@ export const CreatorOnboardingModal: Story = {
     await expect(canvas.getByRole("dialog")).toBeInTheDocument();
   },
 };
+
+export const CreatorAudience: Story = {
+  args: {
+    audience: "creator",
+  },
+};

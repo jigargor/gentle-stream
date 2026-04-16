@@ -36,11 +36,13 @@ import { CATEGORIES, DEFAULT_CATEGORY_WEIGHTS, RECIPE_CATEGORY } from "../consta
 import { buildAffinityIndex, scoreArticleWithEngagement } from "../feed/recommendationScore";
 import { captureException } from "@/lib/observability";
 import { getEnv } from "@/lib/env";
+import pLimit from "p-limit";
 
 /** Section label when articles come from multiple categories (random backfill). */
 const MIXED_SECTION_LABEL = "Mixed";
 const SOFT_SEEN_TTL_MS = 20 * 60 * 1000;
 const RANDOM_FALLBACK_EXCLUDE_CAP = 240;
+const rankerBucketLimit = pLimit(3);
 const env = getEnv();
 const hybridSeenEnabled =
   env.FEED_HYBRID_SEEN_ENABLED == null ? true : env.FEED_HYBRID_SEEN_ENABLED;
@@ -140,7 +142,9 @@ export async function collectAcrossBuckets(
   );
   const batches = await Promise.all(
     order.map((cat) =>
-      fetchFn(cat, perBucketLimit, excludeIds, contentKinds, userId)
+      rankerBucketLimit(() =>
+        fetchFn(cat, perBucketLimit, excludeIds, contentKinds, userId)
+      )
     )
   );
 

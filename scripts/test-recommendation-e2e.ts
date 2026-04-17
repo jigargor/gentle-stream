@@ -44,17 +44,29 @@ const testUserId = `reco-e2e-${Date.now()}`;
 const insertedIds: string[] = [];
 const TEST_HEADLINE_PREFIX = "TEST_RECO_E2E";
 
+/**
+ * Only delete reco-e2e fixture rows older than this window so parallel CI jobs
+ * do not wipe another run's fresh data (e.g. FK errors on article_engagement_events).
+ */
+const STALE_FIXTURE_MAX_AGE_MS = 30 * 60 * 1000;
+
 async function purgeStaleFixtures() {
+  const staleBeforeIso = new Date(
+    Date.now() - STALE_FIXTURE_MAX_AGE_MS
+  ).toISOString();
+
   const { error: evtErr } = await db
     .from("article_engagement_events")
     .delete()
-    .like("user_id", "reco-e2e-%");
+    .like("user_id", "reco-e2e-%")
+    .lt("occurred_at", staleBeforeIso);
   if (evtErr) throw new Error(`purgeStaleFixtures(events): ${evtErr.message}`);
 
   const { error: affinityErr } = await db
     .from("user_article_affinity")
     .delete()
-    .like("user_id", "reco-e2e-%");
+    .like("user_id", "reco-e2e-%")
+    .lt("updated_at", staleBeforeIso);
   if (affinityErr)
     throw new Error(`purgeStaleFixtures(affinity): ${affinityErr.message}`);
 
@@ -63,7 +75,8 @@ async function purgeStaleFixtures() {
     .delete()
     .or(
       `headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST%RECO%E2E%`
-    );
+    )
+    .lt("fetched_at", staleBeforeIso);
   if (articleErr) throw new Error(`purgeStaleFixtures(articles): ${articleErr.message}`);
 }
 

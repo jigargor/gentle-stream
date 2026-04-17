@@ -84,24 +84,37 @@ const testUserId = `eng-test-user-${Date.now()}`;
 const insertedArticleIds: string[] = [];
 const TEST_HEADLINE_PREFIX = "TEST_ENG_DB";
 
+/**
+ * Only delete fixture rows older than this window so parallel CI jobs do not
+ * remove another run's articles (CASCADE wipes engagement events → empty affinity).
+ */
+const STALE_FIXTURE_MAX_AGE_MS = 30 * 60 * 1000;
+
 async function purgeStaleFixtures() {
+  const staleBeforeIso = new Date(
+    Date.now() - STALE_FIXTURE_MAX_AGE_MS
+  ).toISOString();
+
   const { error: evtErr } = await db
     .from("article_engagement_events")
     .delete()
-    .like("user_id", "eng-test-user-%");
+    .like("user_id", "eng-test-user-%")
+    .lt("occurred_at", staleBeforeIso);
   if (evtErr) throw new Error(`purgeStaleFixtures(events): ${evtErr.message}`);
 
   const { error: affinityErr } = await db
     .from("user_article_affinity")
     .delete()
-    .like("user_id", "eng-test-user-%");
+    .like("user_id", "eng-test-user-%")
+    .lt("updated_at", staleBeforeIso);
   if (affinityErr)
     throw new Error(`purgeStaleFixtures(affinity): ${affinityErr.message}`);
 
   const { error: articleErr } = await db
     .from("articles")
     .delete()
-    .or(`headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST%ENG%DB%`);
+    .or(`headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST%ENG%DB%`)
+    .lt("fetched_at", staleBeforeIso);
   if (articleErr) throw new Error(`purgeStaleFixtures(articles): ${articleErr.message}`);
 }
 

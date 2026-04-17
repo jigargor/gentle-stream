@@ -7,9 +7,9 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
-  "packageManager": "npm@10.8.2",
+  "packageManager": "npm@11.6.1",
   "overrides": {
     "elliptic": "6.6.1"
   },

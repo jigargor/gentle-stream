@@ -4,7 +4,7 @@ Thanks for helping improve Gentle Stream.
 
 ## Local setup
 
-- Use Node.js **22+**; repo `.nvmrc` targets **24** to match CI (run `nvm use`).
+- Use Node.js **24** (minimum in `package.json` is `>=24`). `.nvmrc` and `.node-version` pin **24** to match CI (`actions/setup-node`); run `nvm use` or `fnm use` before installs.
 - Install deps from repo root: `npm install`.
 - Copy `.env.example` to `.env.local`.
 - For auth-free local dev:

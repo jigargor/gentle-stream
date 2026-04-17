@@ -6,7 +6,7 @@ This snapshot records the quality baseline before release-hygiene cleanup work.
 
 ## Tooling Baseline
 
-- Node runtime present: `v24.11.0` (project requirement is `>=22`)
+- Node runtime present: `v24.11.0` (project requirement is `>=24`; see `.nvmrc` / `.node-version`)
 - TypeScript typecheck: `npx tsc --noEmit` passed
 - Unit tests: `npm run test:unit` passed (`26` files, `89` tests)
 - Component tests: `npm run test:component` passed (`2` files, `5` tests)

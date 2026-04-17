@@ -27,7 +27,7 @@ What happened instead?
 ## Environment
 
 - OS:
-- Node version:
+- Node version: (expected **24** per `.nvmrc` / `.node-version`; output of `node -v`)
 - Browser (if UI issue):
 - Auth mode (`AUTH_DISABLED` on/off):
 

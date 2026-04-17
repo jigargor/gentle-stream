@@ -8,9 +8,9 @@ Gentle Stream currently runs as a root Next.js 16 (App Router) app. The `package
 
 ### Node version
 
-The project requires **Node.js 22 or newer**; **CI and `.nvmrc` use Node.js 24** as the default runtime. Run `nvm use` before running any commands.
+The project targets **Node.js 24** (`engines.node` is `>=24`). **`.nvmrc`** and **`.node-version`** both pin `24` for nvm, fnm, asdf, and similar tools. **GitHub Actions** uses `node-version: "24"` with `actions/setup-node`. Run `nvm use` (or your version manager’s equivalent) before installs.
 
-**npm / lockfile:** `package.json` pins `npm@10.8.2` via `packageManager`. Use Corepack (`corepack enable`) so your npm matches CI; installing with a different **major** npm can rewrite `package-lock.json` in ways that make `npm ci` fail on GitHub (missing nested packages such as `@emnapi/*`). If that happens, run `npx npm@10.8.2 install` at the repo root and commit the updated lockfile.
+**npm / lockfile:** `package.json` pins `npm@11.6.1` via `packageManager`. Use Corepack (`corepack enable`) so your npm matches CI; installing with a different **major** npm can rewrite `package-lock.json` in ways that make `npm ci` fail on GitHub (missing nested packages such as `@emnapi/*`). If that happens, run `npx npm@11.6.1 install` at the repo root and commit the updated lockfile.
 
 ### Key commands
 

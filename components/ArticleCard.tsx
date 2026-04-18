@@ -34,7 +34,6 @@ import {
   isRssNarrativeArticle,
   rssHasExtraContentBeyondExcerpt,
 } from "@/lib/articles/rssFeedPreview";
-import { looksLikelyNonEnglishText } from "@/lib/articles/languageHeuristics";
 import { computeAdaptiveExcerptClamp } from "@/lib/articles/rssExcerptClamp";
 
 interface ArticleTranslationPayload {
@@ -44,6 +43,8 @@ interface ArticleTranslationPayload {
   headline: string;
   subheadline: string;
   body: string;
+  pullQuote: string;
+  imagePrompt: string;
 }
 
 const HERO_IMG_W = 800;
@@ -312,7 +313,7 @@ export default function ArticleCard({
 
   useEffect(() => {
     setImageStage("pollinations");
-  }, [article.imagePrompt, articleSeed]);
+  }, [articleSeed]);
 
   useEffect(() => {
     setReaderOpen(false);
@@ -379,16 +380,25 @@ export default function ArticleCard({
     () => embeddedGamePickFromSeed(articleSeed, enabledEmbeddedGameTypes ?? undefined),
     [articleSeed, enabledEmbeddedGameTypes]
   );
+  const displayImagePrompt =
+    translatedArticle && !showOriginalLanguage
+      ? translatedArticle.imagePrompt
+      : article.imagePrompt ?? "";
+  const displayPullQuote =
+    translatedArticle && !showOriginalLanguage
+      ? translatedArticle.pullQuote
+      : article.pullQuote ?? "";
 
   const heroImageSrc = useMemo(() => {
-    if (!article.imagePrompt?.trim()) return null;
+    const prompt = displayImagePrompt.trim();
+    if (!prompt) return null;
     if (imageStage === "broken") return null;
     if (imageStage === "picsum") {
       return picsumFallbackUrl(articleSeed, HERO_IMG_W, HERO_IMG_H);
     }
     return (
       pollinationsImageUrl(
-        article.imagePrompt,
+        prompt,
         HERO_IMG_W,
         HERO_IMG_H,
         {
@@ -397,7 +407,7 @@ export default function ArticleCard({
         }
       ) ?? picsumFallbackUrl(articleSeed, HERO_IMG_W, HERO_IMG_H)
     );
-  }, [article.category, article.imagePrompt, article.location, articleSeed, imageStage]);
+  }, [article.category, article.location, articleSeed, displayImagePrompt, imageStage]);
 
   const headlineSizePx = isHero
     ? "clamp(1.55rem, 2.8vw, 2.3rem)"
@@ -411,15 +421,21 @@ export default function ArticleCard({
   const isRssNarrativeFeedCard = isRssNarrativeArticle(article);
   const translationProbeText = useMemo(
     () =>
-      [article.headline, article.subheadline ?? "", article.body ?? ""]
+      [
+        article.headline,
+        article.subheadline ?? "",
+        article.body ?? "",
+        article.pullQuote ?? "",
+        article.imagePrompt ?? "",
+      ]
         .join(" ")
         .slice(0, 2400),
-    [article.body, article.headline, article.subheadline]
+    [article.body, article.headline, article.imagePrompt, article.pullQuote, article.subheadline]
   );
   const shouldAttemptTranslation =
     isRssNarrativeFeedCard &&
     translatedArticle == null &&
-    looksLikelyNonEnglishText(translationProbeText);
+    translationProbeText.trim().length >= 45;
   const translationArticleId =
     "id" in article && article.id ? article.id : articleSeed;
 
@@ -438,6 +454,8 @@ export default function ArticleCard({
             headline: article.headline,
             subheadline: article.subheadline ?? "",
             body: article.body ?? "",
+            pullQuote: article.pullQuote ?? "",
+            imagePrompt: article.imagePrompt ?? "",
           }),
           signal: controller.signal,
         });
@@ -454,6 +472,8 @@ export default function ArticleCard({
   }, [
     article.body,
     article.headline,
+    article.imagePrompt,
+    article.pullQuote,
     article.subheadline,
     shouldAttemptTranslation,
     translationArticleId,
@@ -1212,7 +1232,7 @@ export default function ArticleCard({
   } as const;
 
   const shouldRenderPullQuote =
-    !shouldUseReaderModal && Boolean(article.pullQuote?.trim());
+    !shouldUseReaderModal && Boolean(displayPullQuote.trim());
 
   return (
     <article
@@ -1703,7 +1723,7 @@ export default function ArticleCard({
       )}
 
       {/* Hero image from imagePrompt (AI URL → stock photo fallback → caption only) */}
-      {isHero && article.imagePrompt?.trim() && (
+      {isHero && displayImagePrompt.trim() && (
         <figure
           style={{
             margin: "0.4rem 0 0",
@@ -1729,7 +1749,7 @@ export default function ArticleCard({
                 {/* eslint-disable-next-line @next/next/no-img-element -- hero image source is dynamic (AI/picsum/source URL) and not restricted to a fixed host allowlist */}
                 <img
                   src={heroImageSrc}
-                  alt={article.imagePrompt}
+                  alt={displayImagePrompt}
                   width={HERO_IMG_W}
                   height={HERO_IMG_H}
                   loading="lazy"
@@ -1752,7 +1772,7 @@ export default function ArticleCard({
               // eslint-disable-next-line @next/next/no-img-element -- hero image source is dynamic (AI/picsum/source URL) and not restricted to a fixed host allowlist
               <img
                 src={heroImageSrc}
-                alt={article.imagePrompt}
+                alt={displayImagePrompt}
                 width={HERO_IMG_W}
                 height={HERO_IMG_H}
                 loading="lazy"
@@ -1786,7 +1806,7 @@ export default function ArticleCard({
                 padding: "1rem",
               }}
             >
-              <span>[ {article.imagePrompt} ]</span>
+              <span>[ {displayImagePrompt} ]</span>
             </div>
           )}
         </figure>
@@ -1968,7 +1988,7 @@ export default function ArticleCard({
             columnSpan: isHero ? "all" : "none",
           }}
         >
-          &ldquo;{article.pullQuote}&rdquo;
+          &ldquo;{displayPullQuote}&rdquo;
         </blockquote>
       ) : null}
 

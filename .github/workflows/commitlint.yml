@@ -1,0 +1,44 @@
+name: commitlint
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  soft-commitlint:
+    name: Commit message guidance (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Pin npm version
+        run: npm install --global npm@11.6.1
+
+      - name: Install dependencies
+        run: npm ci || npm ci --legacy-peer-deps
+
+      - name: Check commit messages (warning mode)
+        id: commitlint
+        continue-on-error: true
+        run: >
+          npx commitlint
+          --from "${{ github.event.pull_request.base.sha }}"
+          --to "${{ github.event.pull_request.head.sha }}"
+          --verbose
+
+      - name: Guidance summary
+        if: steps.commitlint.outcome == 'failure'
+        run: |
+          echo "::warning::Some commit messages are not Conventional Commits yet."
+          echo "::warning::During the transition to 1.0.0 this is non-blocking."
+          echo "::warning::Preferred examples: feat(feed): add saved filter, fix(auth): prevent token loop."

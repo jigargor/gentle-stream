@@ -2,7 +2,7 @@
  * Translate likely non-English ingest articles to English (DeepL) and optionally update the DB.
  *
  * The in-app feed uses POST /api/articles/translate for on-demand display; this script persists
- * English headline/subheadline/body on rows that pass language heuristics (Spanish and others).
+ * English headline/subheadline/body on recent ingest rows.
  *
  * Requires DEEPL_API_KEY (see .env.example). Default is DRY RUN (no writes).
  *
@@ -15,7 +15,6 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { looksLikelyNonEnglishText } from "../lib/articles/languageHeuristics";
 import { buildHeadlineFingerprint } from "../lib/db/articles";
 import { db } from "../lib/db/client";
 import { translateTextsWithDeepL } from "../lib/translation/deepl";
@@ -42,10 +41,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function probeText(headline: string, subheadline: string | null, body: string | null): string {
-  return [headline, subheadline ?? "", body ?? ""].join("\n\n");
-}
-
 async function main() {
   const apply = parseArg("apply") === "true";
   const maxRows = parseIntArg("max-rows", 15);
@@ -69,12 +64,10 @@ async function main() {
     body: string | null;
   }[];
 
-  const candidates = rows
-    .filter((r) => looksLikelyNonEnglishText(probeText(r.headline, r.subheadline, r.body)))
-    .slice(0, maxRows);
+  const candidates = rows.slice(0, maxRows);
 
   console.log(
-    `Found ${candidates.length} candidate(s) (non-English heuristic, max ${maxRows}) — ${apply ? "APPLY" : "dry run"}`
+    `Found ${candidates.length} candidate(s) (max ${maxRows}) — ${apply ? "APPLY" : "dry run"}`
   );
 
   if (candidates.length === 0) {

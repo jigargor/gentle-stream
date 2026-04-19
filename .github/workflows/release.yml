@@ -24,12 +24,12 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
       SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
-      GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+      GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT }}
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:

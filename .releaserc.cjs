@@ -44,13 +44,6 @@ const plugins = [
       npmPublish: false,
     },
   ],
-  [
-    "@semantic-release/git",
-    {
-      assets: ["CHANGELOG.md", "package.json", "package-lock.json"],
-      message: "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}",
-    },
-  ],
 ];
 
 if (isGithubPublishingEnabled) {
@@ -58,9 +51,9 @@ if (isGithubPublishingEnabled) {
 }
 
 module.exports = {
-  // Releases and version bumps run only from `main`. `develop` is integration only;
-  // merging to `main` (via PR) triggers the release workflow and avoids direct pushes
-  // that violate branch protection / CodeQL rules.
+  // Releases run only from `main`. Version bumps and CHANGELOG edits happen in CI only;
+  // @semantic-release/github publishes the tag and GitHub Release via API (no `git push`
+  // to main), which matches rules that require PRs and CodeQL on branch updates.
   branches: ["main"],
   tagFormat: "v${version}",
   plugins,

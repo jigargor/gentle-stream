@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: semantic-release-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Pin npm version
+        run: npm install --global npm@11.6.1
+
+      - name: Install dependencies
+        run: |
+          npm --version
+          node --version
+          npm ci || npm ci --legacy-peer-deps
+
+      - name: Quality gate (lint + unit tests)
+        run: |
+          npm run lint
+          npm run test:unit
+
+      - name: Publish release
+        run: npm run release

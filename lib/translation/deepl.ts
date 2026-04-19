@@ -11,6 +11,7 @@ export interface DeepLTranslationInput {
 export interface DeepLTranslationOutput {
   texts: string[];
   detectedSourceLanguage: string | null;
+  detectedSourceLanguages: string[];
 }
 
 interface DeepLResponseShape {
@@ -60,11 +61,15 @@ export async function translateTextsWithDeepL(
   if (translations.length === 0) return null;
 
   const translatedTexts = translations.map((entry, index) => entry.text ?? texts[index] ?? "");
+  const detectedSourceLanguages = translations
+    .map((entry) => entry.detected_source_language?.toUpperCase() ?? "")
+    .filter((language) => language.length > 0);
   const detectedSourceLanguage =
-    translations.find((entry) => entry.detected_source_language)?.detected_source_language ?? null;
+    detectedSourceLanguages[0] ?? null;
 
   return {
     texts: translatedTexts,
     detectedSourceLanguage,
+    detectedSourceLanguages,
   };
 }

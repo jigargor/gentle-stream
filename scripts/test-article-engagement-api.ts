@@ -73,8 +73,7 @@ function testInvalidEventTypeRejected() {
       events: [
         {
           articleId: ARTICLE_ID,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          eventType: "hover" as any,
+          eventType: "hover" as never,
         },
       ],
     },
@@ -105,8 +104,7 @@ function testContextAndTimestampNormalization() {
           articleId: ARTICLE_ID,
           eventType: "read_30s",
           occurredAt: "not-a-date",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          context: null as any,
+          context: null as never,
         },
       ],
     },

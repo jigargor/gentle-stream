@@ -32,9 +32,19 @@ Important: optional feed modules are opt-in. If a module flag is not set, treat 
 - Do not commit secrets or local `.env` files.
 - For feed rendering/UI work, verify both light and dark themes.
 
+## Commit message format (1.0.0 transition)
+
+- Preferred format: Conventional Commits, for example:
+  - `feat(feed): add source badge hover state`
+  - `fix(auth): avoid stale refresh token loop`
+  - `chore(ci): cache playwright browsers`
+- During the pre-1.0.0 transition, commitlint guidance is non-blocking.
+- After `1.0.0`, Conventional Commits become required so semantic-release can determine patch/minor/major bumps automatically.
+
 ## Versioning
 
 - This project follows semver with pre-1.0 rules; see `docs/versioning-policy.md`.
+- Semantic-release rollout + 1.0.0 readiness checklist: `docs/release-readiness-1.0.0.md`.
 - User-visible bug fixes increment patch (`0.1.0` -> `0.1.1`).
 - Backward-compatible features and pre-1.0 breaking changes increment minor (`0.1.0` -> `0.2.0`).
 

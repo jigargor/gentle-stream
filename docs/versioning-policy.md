@@ -35,9 +35,22 @@ Use semver fields directly; do not treat versions as decimal math.
 - `0.2.0`: first major internal cleanup/modularity milestone
 - `1.0.0`: stable public contracts and contributor/release process
 
-## Release Steps
+## Release Steps (semantic-release)
 
-1. Move `CHANGELOG.md` entries from `Unreleased` into a new version heading.
-2. Run quality gates: lint, typecheck, unit/component tests, and selected smoke/e2e.
-3. Tag release (`v0.1.0`, `v0.1.1`, ...).
-4. Publish release notes from changelog entries.
+Releases run **only** when commits land on **`main`** (the workflow does not run on `develop`).
+
+1. Integrate work with pull requests: feature branch → PR into `develop` → merge (no version bump).
+2. When you are ready to ship: open a PR **`develop` → `main`**, get required checks (including CodeQL), then merge.
+3. The **release** workflow runs on the push to `main`, runs lint/tests, then **semantic-release** computes the version from commits on `main`, updates `CHANGELOG.md` and `package.json`, creates the git tag (`vX.Y.Z`), and publishes a GitHub Release.
+
+You do **not** manually tag versions before pushing to `develop`; tags are created by CI on `main`. To preview what the next version would be locally, use `npm run release:dry:main` on a branch that matches `main` history (or use `npm run release:dry` with the default branch config).
+
+## Pre-1.0.0 transition
+
+- We temporarily map legacy commit subjects like `fix ...`, `fixed ...`, and `hotfix ...` to `patch` bumps.
+- Conventional Commit subjects remain preferred (`feat:`, `fix:`, etc.) and are what we will enforce after `1.0.0`.
+
+## Post-1.0.0 hardening
+
+- Remove temporary fallback release rules in `.releaserc.cjs`.
+- Make commitlint a required status check on pull requests.

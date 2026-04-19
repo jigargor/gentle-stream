@@ -58,14 +58,10 @@ if (isGithubPublishingEnabled) {
 }
 
 module.exports = {
-  branches: [
-    "main",
-    {
-      name: "develop",
-      channel: "beta",
-      prerelease: "beta",
-    },
-  ],
+  // Releases and version bumps run only from `main`. `develop` is integration only;
+  // merging to `main` (via PR) triggers the release workflow and avoids direct pushes
+  // that violate branch protection / CodeQL rules.
+  branches: ["main"],
   tagFormat: "v${version}",
   plugins,
 };

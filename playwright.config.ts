@@ -24,7 +24,8 @@ export default defineConfig({
           ? "cross-env E2E_PORT=3000 node ./e2e-mocks/server.mjs"
           : "npm run dev-light -- --hostname 127.0.0.1 --port 3000",
         url: baseUrl,
-        reuseExistingServer: !isCi,
+        // Mock smoke tests expect static HTML from e2e-mocks, not a leftover `next dev` on :3000.
+        reuseExistingServer: useMockServer ? false : !isCi,
         timeout: 120_000,
       },
   projects: [

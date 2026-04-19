@@ -37,9 +37,13 @@ Use semver fields directly; do not treat versions as decimal math.
 
 ## Release Steps (semantic-release)
 
-1. Merge changes into `develop` for prereleases (`beta`) and into `main` for stable releases.
-2. GitHub Actions runs quality gates and executes semantic-release.
-3. semantic-release determines the next version from commit messages, updates `CHANGELOG.md`, creates a tag (`vX.Y.Z`), and publishes a GitHub Release.
+Releases run **only** when commits land on **`main`** (the workflow does not run on `develop`).
+
+1. Integrate work with pull requests: feature branch → PR into `develop` → merge (no version bump).
+2. When you are ready to ship: open a PR **`develop` → `main`**, get required checks (including CodeQL), then merge.
+3. The **release** workflow runs on the push to `main`, runs lint/tests, then **semantic-release** computes the version from commits on `main`, updates `CHANGELOG.md` and `package.json`, creates the git tag (`vX.Y.Z`), and publishes a GitHub Release.
+
+You do **not** manually tag versions before pushing to `develop`; tags are created by CI on `main`. To preview what the next version would be locally, use `npm run release:dry:main` on a branch that matches `main` history (or use `npm run release:dry` with the default branch config).
 
 ## Pre-1.0.0 transition
 
@@ -50,4 +54,3 @@ Use semver fields directly; do not treat versions as decimal math.
 
 - Remove temporary fallback release rules in `.releaserc.cjs`.
 - Make commitlint a required status check on pull requests.
-- Keep `develop` prereleases enabled for validation and progressively roll stable releases from `main`.

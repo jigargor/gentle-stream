@@ -72,7 +72,6 @@
     "release": "semantic-release",
     "release:dry": "cross-env SEMREL_SKIP_GITHUB=1 semantic-release --dry-run --no-ci",
     "release:dry:main": "cross-env SEMREL_SKIP_GITHUB=1 semantic-release --dry-run --no-ci --branches main",
-    "release:dry:develop": "cross-env SEMREL_SKIP_GITHUB=1 semantic-release --dry-run --no-ci --branches develop",
     "commitlint:range": "commitlint --verbose"
   },
   "dependencies": {

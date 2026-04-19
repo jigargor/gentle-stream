@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
           route: "/api/articles/translate",
           articleId,
           sourceLanguage,
-          perFieldLanguages,
+          perFieldLanguages: perFieldLanguages.join(","),
           hasAnyLanguageSignal,
           hasEnglishOnlySignal,
         },

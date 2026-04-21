@@ -1,11 +1,11 @@
 /**
  * Cleanup near-duplicate articles by headline fingerprint similarity.
  *
- * Default mode is DRY RUN (no deletes). Use --apply to actually delete.
+ * Default mode is DRY RUN (no deletes). Use --execute to actually delete.
  *
  * Usage:
  *   npx tsx -r dotenv/config scripts/articles-dedup-cleanup.ts dotenv_config_path=.env.local
- *   npx tsx -r dotenv/config scripts/articles-dedup-cleanup.ts --apply dotenv_config_path=.env.local
+ *   npx tsx -r dotenv/config scripts/articles-dedup-cleanup.ts --execute dotenv_config_path=.env.local
  *   npx tsx -r dotenv/config scripts/articles-dedup-cleanup.ts --min-similarity=0.9 --lookback-days=30
  */
 
@@ -168,14 +168,17 @@ async function deleteByIds(ids: string[]): Promise<number> {
 }
 
 async function main() {
-  const apply = parseArg("apply") === "true";
+  const DRY_RUN = !process.argv.includes("--execute");
+  if (DRY_RUN) {
+    console.log("DRY RUN mode — pass --execute to actually write changes");
+  }
   const minSimilarity = parseFloatArg("min-similarity", 0.88);
   const lookbackDays = parseIntArg("lookback-days", 21);
 
   console.log("══════════════════════════════════════════════");
   console.log("  Article Near-Duplicate Cleanup");
   console.log("══════════════════════════════════════════════");
-  console.log(`Mode: ${apply ? "APPLY (will delete)" : "DRY RUN (no deletes)"}`);
+  console.log(`Mode: ${DRY_RUN ? "DRY RUN (no deletes)" : "EXECUTE (will delete)"}`);
   console.log(`Similarity threshold: ${minSimilarity}`);
   console.log(`Lookback window: ${lookbackDays} days`);
 
@@ -197,8 +200,8 @@ async function main() {
     }
   }
 
-  if (!apply) {
-    console.log("\nDry run complete. Re-run with --apply to delete marked duplicates.");
+  if (DRY_RUN) {
+    console.log("\nDry run complete. Re-run with --execute to delete marked duplicates.");
     return;
   }
 

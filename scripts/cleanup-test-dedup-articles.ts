@@ -15,33 +15,44 @@ config({ path: ".env.local" });
 import { db } from "../lib/db/client";
 
 async function main() {
-  const { data: byHeadline, error: e1 } = await db
-    .from("articles")
-    .delete()
-    .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
-    .select("id");
+  const DRY_RUN = !process.argv.includes("--execute");
+  if (DRY_RUN) {
+    console.log("DRY RUN mode — pass --execute to actually write changes");
+  }
 
-  if (e1) throw new Error(e1.message);
+  let byHeadline: Array<{ id: string }> = [];
+  let byFixture: Array<{ id: string }> = [];
+  let byEngagementReco: Array<{ id: string }> = [];
 
-  const { data: byFixture, error: e2 } = await db
-    .from("articles")
-    .delete()
-    .ilike("byline", "%Test Runner%")
-    .ilike("location", "%Testland%")
-    .ilike("subheadline", "%test subheadline%")
-    .select("id");
+  if (!DRY_RUN) {
+    const { data, error } = await db
+      .from("articles")
+      .delete()
+      .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%")
+      .select("id");
+    if (error) throw new Error(error.message);
+    byHeadline = data ?? [];
 
-  if (e2) throw new Error(e2.message);
+    const { data: fixtureData, error: fixtureError } = await db
+      .from("articles")
+      .delete()
+      .ilike("byline", "%Test Runner%")
+      .ilike("location", "%Testland%")
+      .ilike("subheadline", "%test subheadline%")
+      .select("id");
+    if (fixtureError) throw new Error(fixtureError.message);
+    byFixture = fixtureData ?? [];
 
-  const { data: byEngagementReco, error: e3 } = await db
-    .from("articles")
-    .delete()
-    .or(
-      "headline.ilike.%TEST_ENG_DB%,headline.ilike.%TEST%ENG%DB%,headline.ilike.%TEST_RECO_E2E%,headline.ilike.%TEST%RECO%E2E%"
-    )
-    .select("id");
-
-  if (e3) throw new Error(e3.message);
+    const { data: recoData, error: recoError } = await db
+      .from("articles")
+      .delete()
+      .or(
+        "headline.ilike.%TEST_ENG_DB%,headline.ilike.%TEST%ENG%DB%,headline.ilike.%TEST_RECO_E2E%,headline.ilike.%TEST%RECO%E2E%"
+      )
+      .select("id");
+    if (recoError) throw new Error(recoError.message);
+    byEngagementReco = recoData ?? [];
+  }
 
   const n1 = byHeadline?.length ?? 0;
   const n2 = byFixture?.length ?? 0;

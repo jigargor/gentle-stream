@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
     logWarning("auth.email_password.rejected_redirect_origin", {
       redirectTo,
       providedOrigin,
-      allowedOrigins: allowed,
+      allowedOrigins: allowed.join(", "),
     });
     return apiErrorResponse({
       request,

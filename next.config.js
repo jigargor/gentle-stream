@@ -1,28 +1,4 @@
 /** @type {import('next').NextConfig} */
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-let supabaseOrigin = "";
-try {
-  supabaseOrigin = supabaseUrl ? new URL(supabaseUrl).origin : "";
-} catch {
-  supabaseOrigin = "";
-}
-
-const cspDirectives = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://places.googleapis.com`,
-  // TODO(security): Replace 'unsafe-inline' with nonce-only once all inline scripts/styles attach middleware nonce.
-  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com",
-  "frame-src https://challenges.cloudflare.com",
-  "report-uri /api/csp-report",
-].join("; ");
-
 const nextConfig = {
   // Next 16+ Turbopack walks up for lockfiles; a package-lock.json in a parent folder
   // (e.g. the user home directory) makes it infer the wrong workspace root. That breaks
@@ -43,7 +19,6 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: cspDirectives },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },

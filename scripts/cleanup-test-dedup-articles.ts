@@ -24,7 +24,32 @@ async function main() {
   let byFixture: Array<{ id: string }> = [];
   let byEngagementReco: Array<{ id: string }> = [];
 
-  if (!DRY_RUN) {
+  if (DRY_RUN) {
+    const { data, error } = await db
+      .from("articles")
+      .select("id")
+      .or("headline.ilike.%TEST_DEDUP%,headline.ilike.%TEST_URL_DEDUP%");
+    if (error) throw new Error(error.message);
+    byHeadline = data ?? [];
+
+    const { data: fixtureData, error: fixtureError } = await db
+      .from("articles")
+      .select("id")
+      .ilike("byline", "%Test Runner%")
+      .ilike("location", "%Testland%")
+      .ilike("subheadline", "%test subheadline%");
+    if (fixtureError) throw new Error(fixtureError.message);
+    byFixture = fixtureData ?? [];
+
+    const { data: recoData, error: recoError } = await db
+      .from("articles")
+      .select("id")
+      .or(
+        "headline.ilike.%TEST_ENG_DB%,headline.ilike.%TEST%ENG%DB%,headline.ilike.%TEST_RECO_E2E%,headline.ilike.%TEST%RECO%E2E%"
+      );
+    if (recoError) throw new Error(recoError.message);
+    byEngagementReco = recoData ?? [];
+  } else {
     const { data, error } = await db
       .from("articles")
       .delete()
@@ -57,14 +82,16 @@ async function main() {
   const n1 = byHeadline?.length ?? 0;
   const n2 = byFixture?.length ?? 0;
   const n3 = byEngagementReco?.length ?? 0;
+  const action = DRY_RUN ? "Would remove" : "Removed";
+  const totalLabel = DRY_RUN ? "Total candidates" : "Total deleted";
   console.log(
-    `Removed ${n1} row(s) matching TEST_DEDUP / TEST_URL_DEDUP in headline.`
+    `${action} ${n1} row(s) matching TEST_DEDUP / TEST_URL_DEDUP in headline.`
   );
   console.log(
-    `Removed ${n2} row(s) matching Test Runner + Testland + test subheadline fixture.`
+    `${action} ${n2} row(s) matching Test Runner + Testland + test subheadline fixture.`
   );
-  console.log(`Removed ${n3} row(s) matching TEST_ENG_DB / TEST_RECO_E2E in headline.`);
-  console.log(`Total deleted: ${n1 + n2 + n3}`);
+  console.log(`${action} ${n3} row(s) matching TEST_ENG_DB / TEST_RECO_E2E in headline.`);
+  console.log(`${totalLabel}: ${n1 + n2 + n3}`);
 }
 
 main().catch((e) => {

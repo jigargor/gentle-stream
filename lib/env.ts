@@ -107,6 +107,13 @@ export function parseEnv(input: NodeJS.ProcessEnv): Env {
 let cachedEnv: Env | null = null;
 
 export function getEnv(): Env {
-  if (!cachedEnv) cachedEnv = parseEnv(process.env);
+  if (!cachedEnv) {
+    cachedEnv = parseEnv(process.env);
+    if (!cachedEnv.ANTHROPIC_API_KEY) {
+      console.warn(
+        "[env] ANTHROPIC_API_KEY is not set — ingest and tagger agents will fail at runtime."
+      );
+    }
+  }
   return cachedEnv;
 }

@@ -120,7 +120,7 @@ describe("updateSession middleware", () => {
     expect(res.status).toBe(200);
   });
 
-  it("logs out signed-in users when session start cookie is missing", async () => {
+  it("starts session clock for signed-in users when session start cookie is missing", async () => {
     const mutableEnv = process.env as Record<string, string | undefined>;
     mutableEnv.NODE_ENV = "development";
     delete mutableEnv.AUTH_DISABLED;
@@ -132,10 +132,8 @@ describe("updateSession middleware", () => {
     const req = new NextRequest("http://localhost:3000/profile");
     const res = await updateSession(req);
 
-    expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toContain(
-      "/login?reason=session_expired&next=%2Fprofile"
-    );
-    expect(signOutMock).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("gs_sess_start")?.value).toMatch(/^\d+$/);
+    expect(signOutMock).not.toHaveBeenCalled();
   });
 });

@@ -17,8 +17,10 @@ const cspDirectives = [
   "font-src 'self' data: https://fonts.gstatic.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://places.googleapis.com`,
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com",
+  // TODO(security): Replace 'unsafe-inline' with nonce-only once all inline scripts/styles attach middleware nonce.
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com",
   "frame-src https://challenges.cloudflare.com",
+  "report-uri /api/csp-report",
 ].join("; ");
 
 const nextConfig = {
@@ -30,7 +32,11 @@ const nextConfig = {
   },
   // Allow the Google Fonts domain for font loading
   images: {
-    domains: [],
+    remotePatterns: [
+      { protocol: "https", hostname: "**.supabase.co" },
+      { protocol: "https", hostname: "image.pollinations.ai" },
+      { protocol: "https", hostname: "picsum.photos" },
+    ],
   },
   async headers() {
     return [

@@ -18,6 +18,7 @@ import {
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
+import { logWarning } from "@/lib/observability/logger";
 
 const emailPasswordBodySchema = z
   .object({
@@ -30,10 +31,6 @@ const emailPasswordBodySchema = z
     turnstileToken: z.string().trim().optional().default(""),
   })
   .strict();
-
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
 
 function allowedAuthOrigins(request: NextRequest): Set<string> {
   const origins = new Set<string>();
@@ -93,15 +90,6 @@ export async function POST(request: NextRequest) {
   const redirectTo = parsedBody.data.redirectTo.trim();
   const turnstileToken = parsedBody.data.turnstileToken.trim();
 
-  if (!isValidEmail(email)) {
-    return apiErrorResponse({
-      request,
-      status: 400,
-      code: API_ERROR_CODES.VALIDATION,
-      message: "Invalid email address.",
-    });
-  }
-
   if (audience === "creator" && !CREATOR_LOGIN_ENABLED) {
     return apiErrorResponse({
       request,
@@ -120,7 +108,7 @@ export async function POST(request: NextRequest) {
         return null;
       }
     })();
-    console.warn("[auth-email-password] rejected redirectTo origin", {
+    logWarning("auth.email_password.rejected_redirect_origin", {
       redirectTo,
       providedOrigin,
       allowedOrigins: allowed,
@@ -169,6 +157,16 @@ export async function POST(request: NextRequest) {
         status: 400,
         code: API_ERROR_CODES.VALIDATION,
         message: "Birthdate must be a valid date.",
+      });
+    }
+    const ageMs = Date.now() - parsedBirthDate;
+    const ageYears = ageMs / (1000 * 60 * 60 * 24 * 365.25);
+    if (ageYears < 13) {
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "You must be at least 13 years old to create an account.",
       });
     }
   }

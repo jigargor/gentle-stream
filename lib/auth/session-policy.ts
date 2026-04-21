@@ -1,4 +1,4 @@
-/** Wall-clock max session length from successful sign-in (callback). */
+/** Wall-clock max session length from successful sign-in (callback); 1-hour hard wall is intentional. */
 export const SESSION_MAX_AGE_SEC = 60 * 60;
 /** Cookie retention for the login-start timestamp (must outlive policy window). */
 const SESSION_START_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 30;

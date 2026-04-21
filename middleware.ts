@@ -4,7 +4,9 @@ import { updateSession } from "@/lib/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
   const traceId = getOrCreateTraceId(request);
+  const nonce = crypto.randomUUID();
   const response = await updateSession(request, traceId);
+  response.headers.set("x-nonce", nonce);
   response.headers.set("X-Trace-Id", traceId);
   return response;
 }

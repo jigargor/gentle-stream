@@ -44,10 +44,15 @@ function nowMs(): number {
 }
 
 export function getClientIp(request: Request): string {
+  // Prefer Vercel's trusted header (not user-controllable)
+  const vercelIp = request.headers.get("x-vercel-forwarded-for")?.trim();
+  if (vercelIp) return vercelIp.split(",")[0]?.trim() || vercelIp;
+
+  // Use LAST IP in x-forwarded-for (set by ingress proxy, not client)
   const xff = request.headers.get("x-forwarded-for")?.trim() ?? "";
   if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
+    const parts = xff.split(",").map((p: string) => p.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
   }
   return request.headers.get("x-real-ip")?.trim() || "unknown";
 }
@@ -119,6 +124,9 @@ export async function consumeRateLimit(
       p_max: options.policy.max,
     });
     if (error || !Array.isArray(data) || data.length === 0) {
+      console.warn(
+        "[rate-limit] Supabase RPC failed — falling back to in-memory store. Rate limiting may be ineffective in multi-instance deployments."
+      );
       return consumeRateLimitInMemory(options);
     }
     const row = data[0] as ConsumeRateLimitRpcRow;
@@ -129,6 +137,9 @@ export async function consumeRateLimit(
       resetAt: Date.parse(row.reset_at),
     };
   } catch {
+    console.warn(
+      "[rate-limit] Supabase RPC failed — falling back to in-memory store. Rate limiting may be ineffective in multi-instance deployments."
+    );
     return consumeRateLimitInMemory(options);
   }
 }

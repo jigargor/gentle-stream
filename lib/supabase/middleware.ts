@@ -5,6 +5,7 @@ import {
   parseSessionStart,
   SESSION_MAX_AGE_SEC,
   SESSION_START_COOKIE,
+  sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
@@ -122,7 +123,13 @@ export async function updateSession(request: NextRequest, traceId?: string) {
   const started = parseSessionStart(startRaw);
 
   if (user) {
-    if (started === null || nowSec - started > SESSION_MAX_AGE_SEC) {
+    if (started === null) {
+      supabaseResponse.cookies.set(
+        SESSION_START_COOKIE,
+        String(nowSec),
+        sessionStartCookieOptions()
+      );
+    } else if (nowSec - started > SESSION_MAX_AGE_SEC) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/login";
       redirectUrl.searchParams.set("reason", "session_expired");

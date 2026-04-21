@@ -16,6 +16,7 @@ export interface EmailPasswordFormProps {
   email: string;
   password: string;
   birthDate: string;
+  maxBirthDate: string;
   showPassword: boolean;
   emailBusy: boolean;
   needsTurnstileChallenge: boolean;
@@ -36,6 +37,7 @@ export function EmailPasswordForm({
   email,
   password,
   birthDate,
+  maxBirthDate,
   showPassword,
   emailBusy,
   needsTurnstileChallenge,
@@ -179,6 +181,7 @@ export function EmailPasswordForm({
             type="date"
             required
             value={birthDate}
+            max={maxBirthDate}
             onChange={(event) => onBirthDateChange(event.target.value)}
             style={{ ...loginFieldInputStyle, marginBottom: "0.5rem" }}
           />

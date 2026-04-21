@@ -160,6 +160,14 @@ export async function POST(request: NextRequest) {
       });
     }
     const ageMs = Date.now() - parsedBirthDate;
+    if (ageMs <= 0) {
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Birthdate cannot result in a negative age.",
+      });
+    }
     const ageYears = ageMs / (1000 * 60 * 60 * 24 * 365.25);
     if (ageYears < 13) {
       return apiErrorResponse({

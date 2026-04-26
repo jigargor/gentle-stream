@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
-import type { ArticleSubmission } from "@/lib/types";
+import type { ArticleSubmission, CreatorDraft, CreatorDraftVersion } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 import { BUILT_IN_ARTICLE_TYPES, articleTypeLabel } from "@/lib/creator/article-types";
 import {
@@ -14,6 +14,9 @@ import {
 interface CreatorDashboardProps {
   /** Public creator profile URL (same for author byline links). */
   publicProfileHref?: string;
+  initialSubmissions?: ArticleSubmission[];
+  initialNextCursor?: string | null;
+  initialAutocompleteEnabled?: boolean;
 }
 
 interface FormState {
@@ -34,6 +37,20 @@ interface FormState {
   recipePrepTimeMinutes: string;
   recipeCookTimeMinutes: string;
   recipeImages: string[];
+  neverSendToAi: boolean;
+}
+
+interface AnalystCheckpoint {
+  createdAt: string;
+  metrics: {
+    wordCount: number;
+    sentenceCount: number;
+    paragraphCount: number;
+    avgSentenceWords: number;
+    sectionPhase: "opening" | "middle" | "closing";
+    repeatedTrigramCount: number;
+  };
+  notes: string[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -52,14 +69,23 @@ const EMPTY_FORM: FormState = {
   recipePrepTimeMinutes: "",
   recipeCookTimeMinutes: "",
   recipeImages: [],
+  neverSendToAi: false,
 };
 
 const MAX_SUBMISSION_BODY_CHARS = 15_000;
+const AUTOSAVE_DEBOUNCE_MS = 1200;
 
-export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = {}) {
+export function CreatorDashboard({
+  publicProfileHref,
+  initialSubmissions = [],
+  initialNextCursor = null,
+  initialAutocompleteEnabled = false,
+}: CreatorDashboardProps = {}) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [submissions, setSubmissions] = useState<ArticleSubmission[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [submissions, setSubmissions] = useState<ArticleSubmission[]>(initialSubmissions);
+  const [loading, setLoading] = useState(initialSubmissions.length === 0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -74,12 +100,36 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistSuggestion, setAssistSuggestion] = useState<string | null>(null);
+  const [assistCostEstimate, setAssistCostEstimate] = useState<number | null>(null);
+  const [assistEscalation, setAssistEscalation] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const [helpContext, setHelpContext] = useState("");
   const [idlePromptVisible, setIdlePromptVisible] = useState(false);
-  const [autocompleteEnabled, setAutocompleteEnabled] = useState(false);
+  const [autocompleteEnabled, setAutocompleteEnabled] = useState(
+    initialAutocompleteEnabled
+  );
   const [autocompleteSuggestion, setAutocompleteSuggestion] = useState<string | null>(null);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [activeDraftRevision, setActiveDraftRevision] = useState<number | null>(null);
+  const [autosaveStatus, setAutosaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle"
+  );
+  const [autosaveError, setAutosaveError] = useState<string | null>(null);
+  const [autosaveConflict, setAutosaveConflict] = useState(false);
+  const [draftVersions, setDraftVersions] = useState<CreatorDraftVersion[]>([]);
+  const [analystEnabled, setAnalystEnabled] = useState(true);
+  const [analystQuietMode, setAnalystQuietMode] = useState(true);
+  const [analystCheckpoints, setAnalystCheckpoints] = useState<AnalystCheckpoint[]>([]);
+  const [latestAnalyst, setLatestAnalyst] = useState<AnalystCheckpoint | null>(null);
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingAutosaveRef = useRef(false);
+  const lastSavedFingerprintRef = useRef<string>("");
+  const lastSavedAtRef = useRef<number | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const latestSelectionRef = useRef<{ start: number; end: number; text: string } | null>(null);
+  const analystWorkerRef = useRef<Worker | null>(null);
+  const analystDirtyRef = useRef(false);
+  const lastAnalystFingerprintRef = useRef("");
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyCharacterCount = form.body.length;
   /** ~200 wpm, aligned with typical reading-time estimates for multi-column heuristic. */
@@ -167,10 +217,182 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     });
   }
 
-  async function loadSubmissions() {
-    setLoading(true);
+  function buildDraftPayloadFromForm(state: FormState) {
+    const bodyToSave =
+      state.contentKind === "recipe"
+        ? [
+            state.recipeIngredientsText.trim()
+              ? `Ingredients:\n${state.recipeIngredientsText.trim()}`
+              : "",
+            state.recipeInstructionsText.trim()
+              ? `Instructions:\n${state.recipeInstructionsText.trim()}`
+              : "",
+            state.body.trim(),
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+        : state.body;
+    return {
+      title: state.headline,
+      body: bodyToSave,
+      contentKind: state.contentKind,
+      articleType: state.contentKind === "user_article" ? state.articleType : null,
+      articleTypeCustom:
+        state.contentKind === "user_article" && state.articleType === "custom"
+          ? state.articleTypeCustom
+          : null,
+      category: state.contentKind === "user_article" ? state.category : "recipe",
+      locale: state.locale,
+      explicitHashtags: state.explicitHashtags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      pullQuote: state.pullQuote,
+      neverSendToAi: state.neverSendToAi,
+    };
+  }
+
+  function draftFingerprint(state: FormState): string {
+    const payload = buildDraftPayloadFromForm(state);
+    return JSON.stringify(payload);
+  }
+
+  async function loadLatestDraft() {
+    let latest: CreatorDraft | undefined;
     try {
-      const response = await fetch("/api/creator/submissions");
+      const savedId = localStorage.getItem("gentle_stream_active_draft_id");
+      if (savedId) {
+        const singleRes = await fetch(`/api/creator/drafts/${savedId}`, {
+          credentials: "include",
+        });
+        if (singleRes.ok) {
+          const singlePayload = (await singleRes.json()) as { draft?: CreatorDraft };
+          latest = singlePayload.draft;
+        }
+      }
+    } catch {
+      // ignore localStorage/fetch failures
+    }
+    if (!latest) {
+      const response = await fetch("/api/creator/drafts?limit=1", {
+        credentials: "include",
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { drafts?: CreatorDraft[] };
+      latest = payload.drafts?.[0];
+    }
+    if (!latest) return;
+    setActiveDraftId(latest.id);
+    setActiveDraftRevision(latest.revision);
+    setForm((prev) => ({
+      ...prev,
+      headline: latest.title ?? prev.headline,
+      body: latest.body ?? prev.body,
+      pullQuote: latest.pullQuote ?? prev.pullQuote,
+      category: latest.category ?? prev.category,
+      articleType: latest.articleType ?? prev.articleType,
+      articleTypeCustom: latest.articleTypeCustom ?? prev.articleTypeCustom,
+      contentKind: latest.contentKind ?? prev.contentKind,
+      locale: latest.locale ?? prev.locale,
+      explicitHashtags: latest.explicitHashtags.join(", "),
+      neverSendToAi: latest.neverSendToAi === true,
+    }));
+    lastSavedFingerprintRef.current = JSON.stringify({
+      title: latest.title,
+      body: latest.body,
+      contentKind: latest.contentKind,
+      articleType: latest.articleType,
+      articleTypeCustom: latest.articleTypeCustom,
+      category: latest.category,
+      locale: latest.locale,
+      explicitHashtags: latest.explicitHashtags,
+      pullQuote: latest.pullQuote,
+      neverSendToAi: latest.neverSendToAi === true,
+    });
+    lastSavedAtRef.current = Date.now();
+    setAutosaveStatus("saved");
+  }
+
+  async function loadDraftVersions(draftId: string) {
+    const response = await fetch(`/api/creator/drafts/${draftId}/versions`, {
+      credentials: "include",
+    });
+    if (!response.ok) return;
+    const payload = (await response.json()) as { versions?: CreatorDraftVersion[] };
+    setDraftVersions(payload.versions ?? []);
+  }
+
+  async function ensureDraftExists(): Promise<{ id: string; revision: number } | null> {
+    if (activeDraftId && activeDraftRevision != null)
+      return { id: activeDraftId, revision: activeDraftRevision };
+    const response = await fetch("/api/creator/drafts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(buildDraftPayloadFromForm(form)),
+    });
+    if (!response.ok) {
+      const apiError = await parseApiClientError(response);
+      setAutosaveStatus("error");
+      setAutosaveError(formatApiClientError(apiError));
+      return null;
+    }
+    const payload = (await response.json()) as { draft?: CreatorDraft };
+    if (!payload.draft) return null;
+    setActiveDraftId(payload.draft.id);
+    setActiveDraftRevision(payload.draft.revision);
+    return { id: payload.draft.id, revision: payload.draft.revision };
+  }
+
+  async function flushAutosave() {
+    const fingerprint = draftFingerprint(form);
+    if (fingerprint === lastSavedFingerprintRef.current) return;
+    setAutosaveStatus("saving");
+    setAutosaveError(null);
+    setAutosaveConflict(false);
+    const draftRef = await ensureDraftExists();
+    if (!draftRef) return;
+    const response = await fetch(`/api/creator/drafts/${draftRef.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        expectedRevision: draftRef.revision,
+        ...buildDraftPayloadFromForm(form),
+        autosave: true,
+      }),
+    });
+    if (response.status === 409) {
+      setAutosaveStatus("error");
+      setAutosaveConflict(true);
+      setAutosaveError("Draft was updated in another tab. Refresh draft to continue.");
+      return;
+    }
+    if (!response.ok) {
+      const apiError = await parseApiClientError(response);
+      setAutosaveStatus("error");
+      setAutosaveError(formatApiClientError(apiError));
+      return;
+    }
+    const payload = (await response.json()) as { draft?: CreatorDraft };
+    if (payload.draft) {
+      setActiveDraftRevision(payload.draft.revision);
+      if (activeDraftId == null) setActiveDraftId(payload.draft.id);
+    }
+    lastSavedFingerprintRef.current = fingerprint;
+    lastSavedAtRef.current = Date.now();
+    setAutosaveStatus("saved");
+  }
+
+  async function loadSubmissions(input?: { reset?: boolean }) {
+    const reset = input?.reset !== false;
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", "12");
+      if (!reset && nextCursor) params.set("cursor", nextCursor);
+      const response = await fetch(`/api/creator/submissions?${params.toString()}`);
       if (!response.ok) {
         const apiError = await parseApiClientError(response);
         setMessage(formatApiClientError(apiError));
@@ -178,24 +400,30 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       }
       const payload = (await response.json()) as {
         submissions?: ArticleSubmission[];
+        nextCursor?: string | null;
       };
-      setSubmissions(payload.submissions ?? []);
+      const rows = payload.submissions ?? [];
+      setSubmissions((prev) => {
+        if (reset) return rows;
+        const seen = new Set(prev.map((entry) => entry.id));
+        return [...prev, ...rows.filter((entry) => !seen.has(entry.id))];
+      });
+      setNextCursor(payload.nextCursor ?? null);
     } finally {
-      setLoading(false);
+      if (reset) setLoading(false);
+      else setLoadingMore(false);
     }
   }
 
   useEffect(() => {
-    void loadSubmissions();
+    if (initialSubmissions.length > 0) return;
+    void loadSubmissions({ reset: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once; initial bootstrap carries first payload
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      const response = await fetch("/api/creator/settings");
-      if (!response.ok) return;
-      const payload = (await response.json()) as { autocompleteEnabled?: boolean };
-      setAutocompleteEnabled(payload.autocompleteEnabled === true);
-    })();
+    void loadLatestDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- draft bootstrap only once
   }, []);
 
   useEffect(() => {
@@ -241,8 +469,117 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     form.headline,
   ]);
 
+  useEffect(() => {
+    const fingerprint = draftFingerprint(form);
+    if (fingerprint === lastSavedFingerprintRef.current) return;
+    pendingAutosaveRef.current = true;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      pendingAutosaveRef.current = false;
+      void flushAutosave();
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce on form fingerprint only
+  }, [form]);
+
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState !== "hidden") return;
+      if (pendingAutosaveRef.current) {
+        pendingAutosaveRef.current = false;
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        void flushAutosave();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uses refs and flush
+  }, []);
+
+  useEffect(() => {
+    if (!activeDraftId) {
+      setDraftVersions([]);
+      return;
+    }
+    void loadDraftVersions(activeDraftId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load on draft selection change
+  }, [activeDraftId]);
+
+  useEffect(() => {
+    try {
+      if (activeDraftId) localStorage.setItem("gentle_stream_active_draft_id", activeDraftId);
+    } catch {
+      // best-effort only
+    }
+  }, [activeDraftId]);
+
+  useEffect(() => {
+    const worker = new Worker(
+      new URL("./writer-analyst.worker.ts", import.meta.url)
+    );
+    analystWorkerRef.current = worker;
+    worker.onmessage = (event: MessageEvent<AnalystCheckpoint>) => {
+      const checkpoint = event.data;
+      setLatestAnalyst(checkpoint);
+      setAnalystCheckpoints((prev) => {
+        const next = [checkpoint, ...prev].slice(0, 30);
+        try {
+          localStorage.setItem("gentle_stream_analyst_checkpoints", JSON.stringify(next));
+        } catch {
+          // best-effort local persistence only
+        }
+        return next;
+      });
+    };
+    try {
+      const raw = localStorage.getItem("gentle_stream_analyst_checkpoints");
+      if (raw) {
+        const parsed = JSON.parse(raw) as AnalystCheckpoint[];
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.slice(0, 30);
+          setAnalystCheckpoints(cleaned);
+          setLatestAnalyst(cleaned[0] ?? null);
+        }
+      }
+    } catch {
+      // ignore bad local payloads
+    }
+    return () => {
+      worker.terminate();
+      analystWorkerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    analystDirtyRef.current = true;
+  }, [form.body, form.headline]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (!analystEnabled) return;
+      if (!analystDirtyRef.current) return;
+      const fingerprint = `${form.headline.trim()}::${form.body.trim()}`;
+      if (!fingerprint || fingerprint === lastAnalystFingerprintRef.current) return;
+      lastAnalystFingerprintRef.current = fingerprint;
+      analystDirtyRef.current = false;
+      analystWorkerRef.current?.postMessage({
+        headline: form.headline,
+        body: form.body,
+        requestNags: !analystQuietMode,
+      });
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [analystEnabled, analystQuietMode, form.body, form.headline]);
+
   async function submitForm() {
     if (!canSubmit) return;
+    if (pendingAutosaveRef.current) {
+      pendingAutosaveRef.current = false;
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      await flushAutosave();
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -315,48 +652,69 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       }
       setForm(EMPTY_FORM);
       setEditingId(null);
-      await loadSubmissions();
+      await loadSubmissions({ reset: true });
       setMessage(isEdit ? "Submission updated." : "Submission sent for review.");
     } finally {
       setBusy(false);
     }
   }
 
-  function beginEdit(submission: ArticleSubmission) {
-    setEditingId(submission.id);
-    setBodyEditorTab("write");
-    setForm({
-      headline: submission.headline,
-      body: submission.body,
-      pullQuote: submission.pullQuote,
-      category: submission.category,
-      articleType: submission.articleType ?? BUILT_IN_ARTICLE_TYPES[0],
-      articleTypeCustom: submission.articleTypeCustom ?? "",
-      contentKind: submission.contentKind,
-      locale: submission.locale,
-      explicitHashtags: submission.explicitHashtags.join(", "),
-      recipeServings:
-        submission.contentKind === "recipe"
-          ? String(submission.recipeServings ?? "")
-          : "",
-      recipeIngredientsText:
-        submission.contentKind === "recipe"
-          ? (submission.recipeIngredients ?? []).join("\n")
-          : "",
-      recipeInstructionsText:
-        submission.contentKind === "recipe"
-          ? (submission.recipeInstructions ?? []).join("\n\n")
-          : "",
-      recipePrepTimeMinutes:
-        submission.contentKind === "recipe"
-          ? String(submission.recipePrepTimeMinutes ?? "")
-          : "",
-      recipeCookTimeMinutes:
-        submission.contentKind === "recipe"
-          ? String(submission.recipeCookTimeMinutes ?? "")
-          : "",
-      recipeImages: submission.contentKind === "recipe" ? submission.recipeImages ?? [] : [],
-    });
+  async function beginEdit(submission: ArticleSubmission) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      let full = submission;
+      if (!submission.body || submission.body.trim().length === 0) {
+        const response = await fetch(`/api/creator/submissions/${submission.id}`, {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          const apiError = await parseApiClientError(response);
+          setMessage(formatApiClientError(apiError));
+          return;
+        }
+        const payload = (await response.json()) as { submission?: ArticleSubmission };
+        if (payload.submission) full = payload.submission;
+      }
+
+      setEditingId(full.id);
+      setBodyEditorTab("write");
+      setForm({
+        headline: full.headline,
+        body: full.body,
+        pullQuote: full.pullQuote,
+        category: full.category,
+        articleType: full.articleType ?? BUILT_IN_ARTICLE_TYPES[0],
+        articleTypeCustom: full.articleTypeCustom ?? "",
+        contentKind: full.contentKind,
+        locale: full.locale,
+        explicitHashtags: full.explicitHashtags.join(", "),
+        recipeServings:
+          full.contentKind === "recipe"
+            ? String(full.recipeServings ?? "")
+            : "",
+        recipeIngredientsText:
+          full.contentKind === "recipe"
+            ? (full.recipeIngredients ?? []).join("\n")
+            : "",
+        recipeInstructionsText:
+          full.contentKind === "recipe"
+            ? (full.recipeInstructions ?? []).join("\n\n")
+            : "",
+        recipePrepTimeMinutes:
+          full.contentKind === "recipe"
+            ? String(full.recipePrepTimeMinutes ?? "")
+            : "",
+        recipeCookTimeMinutes:
+          full.contentKind === "recipe"
+            ? String(full.recipeCookTimeMinutes ?? "")
+            : "",
+        recipeImages: full.contentKind === "recipe" ? full.recipeImages ?? [] : [],
+        neverSendToAi: false,
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function withdrawSubmission(id: string) {
@@ -373,7 +731,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         setMessage(formatApiClientError(apiError));
         return;
       }
-      await loadSubmissions();
+      await loadSubmissions({ reset: true });
     } finally {
       setBusy(false);
     }
@@ -482,7 +840,19 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     setAssistBusy(true);
     setAssistError(null);
     setAssistSuggestion(null);
+    setAssistCostEstimate(null);
+    setAssistEscalation(false);
     try {
+      const textarea = bodyTextareaRef.current;
+      const selection =
+        textarea != null
+          ? {
+              start: textarea.selectionStart ?? 0,
+              end: textarea.selectionEnd ?? 0,
+              text: form.body.slice(textarea.selectionStart ?? 0, textarea.selectionEnd ?? 0),
+            }
+          : null;
+      latestSelectionRef.current = selection;
       const response = await fetch("/api/creator/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -496,6 +866,11 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           articleTypeCustom: form.articleType === "custom" ? form.articleTypeCustom : undefined,
           headline: form.headline,
           body: form.body,
+          draftId: activeDraftId ?? undefined,
+          selectedText: selection?.text,
+          selectionStart: selection?.start,
+          selectionEnd: selection?.end,
+          stream: true,
           context: options?.context,
         }),
       });
@@ -504,17 +879,126 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         setAssistError(formatApiClientError(apiError));
         return;
       }
+      const contentType = response.headers.get("Content-Type") ?? "";
+      if (contentType.includes("text/event-stream")) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          setAssistError("AI assist stream is unavailable right now.");
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let aggregate = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() ?? "";
+          for (const event of events) {
+            const line = event
+              .split("\n")
+              .find((entry) => entry.startsWith("data: "));
+            if (!line) continue;
+            const parsed = JSON.parse(line.slice(6)) as
+              | { type: "delta"; delta: string }
+              | {
+                  type: "done";
+                  provider?: string;
+                  model?: string;
+                  costEstimateUsd?: number;
+                  isEscalation?: boolean;
+                };
+            if (parsed.type === "delta") {
+              aggregate += parsed.delta;
+              setAssistSuggestion(aggregate.trim());
+            } else if (parsed.type === "done") {
+              if (typeof parsed.costEstimateUsd === "number")
+                setAssistCostEstimate(parsed.costEstimateUsd);
+              setAssistEscalation(parsed.isEscalation === true);
+            }
+          }
+        }
+        if (!aggregate.trim()) {
+          setAssistError("AI assist returned no content.");
+        }
+        return;
+      }
       const payload = (await response.json().catch(() => ({}))) as {
         result?: string;
+        costEstimateUsd?: number;
+        isEscalation?: boolean;
       };
       if (!payload.result) {
         setAssistError("AI assist is unavailable right now.");
         return;
       }
       setAssistSuggestion(payload.result);
+      if (typeof payload.costEstimateUsd === "number")
+        setAssistCostEstimate(payload.costEstimateUsd);
+      setAssistEscalation(payload.isEscalation === true);
     } finally {
       setAssistBusy(false);
     }
+  }
+
+  async function createManualCheckpoint() {
+    if (!activeDraftId || activeDraftRevision == null) return;
+    const response = await fetch(`/api/creator/drafts/${activeDraftId}/versions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ expectedRevision: activeDraftRevision }),
+    });
+    if (!response.ok) {
+      const apiError = await parseApiClientError(response);
+      setMessage(formatApiClientError(apiError));
+      return;
+    }
+    await loadDraftVersions(activeDraftId);
+    setMessage("Checkpoint saved.");
+  }
+
+  async function restoreDraftVersion(versionId: string) {
+    if (!activeDraftId || activeDraftRevision == null) return;
+    const response = await fetch(`/api/creator/drafts/${activeDraftId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        expectedRevision: activeDraftRevision,
+        action: "restore",
+        restoreVersionId: versionId,
+      }),
+    });
+    if (response.status === 409) {
+      setAutosaveConflict(true);
+      setAutosaveError("Draft changed in another tab before restore.");
+      return;
+    }
+    if (!response.ok) {
+      const apiError = await parseApiClientError(response);
+      setMessage(formatApiClientError(apiError));
+      return;
+    }
+    const payload = (await response.json()) as { draft?: CreatorDraft };
+    if (!payload.draft) return;
+    setActiveDraftRevision(payload.draft.revision);
+    setForm((prev) => ({
+      ...prev,
+      headline: payload.draft?.title ?? prev.headline,
+      body: payload.draft?.body ?? prev.body,
+      pullQuote: payload.draft?.pullQuote ?? prev.pullQuote,
+      category: payload.draft?.category ?? prev.category,
+      articleType: payload.draft?.articleType ?? prev.articleType,
+      articleTypeCustom: payload.draft?.articleTypeCustom ?? prev.articleTypeCustom,
+      contentKind: payload.draft?.contentKind ?? prev.contentKind,
+      locale: payload.draft?.locale ?? prev.locale,
+      explicitHashtags: payload.draft?.explicitHashtags.join(", ") ?? prev.explicitHashtags,
+      neverSendToAi: payload.draft?.neverSendToAi ?? prev.neverSendToAi,
+    }));
+    setMessage("Version restored.");
+    await loadDraftVersions(activeDraftId);
   }
 
   return (
@@ -691,7 +1175,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                       cursor: "pointer",
                     }}
                   >
-                    Help
+                    AI Assist
                   </button>
                   <span style={{ fontSize: "0.78rem", color: isBodyTooLong ? "#8b4513" : "#666" }}>
                     {bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}
@@ -700,7 +1184,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
               </div>
               {(idlePromptVisible || helpMenuOpen) ? (
                 <div style={{ marginTop: "0.5rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem", display: "grid", gap: "0.45rem" }}>
-                  <strong style={{ fontSize: "0.82rem" }}>Need a starting push?</strong>
+                  <strong style={{ fontSize: "0.82rem" }}>Need a starting push with AI Assist?</strong>
                   <input
                     value={helpContext}
                     onChange={(event) => setHelpContext(event.target.value)}
@@ -776,9 +1260,21 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
               </div>
 
               <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.45rem" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.38rem", fontSize: "0.76rem", color: "#444" }}>
+                  <input
+                    type="checkbox"
+                    checked={form.neverSendToAi}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, neverSendToAi: event.target.checked }))
+                    }
+                  />
+                  Never send this draft to AI
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.3rem" }}>
                 <button
                   type="button"
-                  disabled={assistBusy}
+                  disabled={assistBusy || form.neverSendToAi}
                   onClick={() => void requestAssist("improve")}
                   style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
                 >
@@ -786,7 +1282,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </button>
                 <button
                   type="button"
-                  disabled={assistBusy}
+                  disabled={assistBusy || form.neverSendToAi}
                   onClick={() => void requestAssist("continue")}
                   style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
                 >
@@ -794,7 +1290,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </button>
                 <button
                   type="button"
-                  disabled={assistBusy}
+                  disabled={assistBusy || form.neverSendToAi}
                   onClick={() => void requestAssist("headline")}
                   style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
                 >
@@ -802,7 +1298,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 </button>
                 <button
                   type="button"
-                  disabled={assistBusy}
+                  disabled={assistBusy || form.neverSendToAi}
                   onClick={() =>
                     void requestAssist("improve", {
                       workflowId: "stuck_assist",
@@ -819,6 +1315,12 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                   {assistError}
                 </p>
               ) : null}
+              {assistCostEstimate != null ? (
+                <p style={{ margin: "0.35rem 0 0", fontSize: "0.76rem", color: "#666" }}>
+                  Estimated assist cost: ${assistCostEstimate.toFixed(4)}
+                  {assistEscalation ? " (escalated)" : ""}
+                </p>
+              ) : null}
               {assistSuggestion ? (
                 <div style={{ marginTop: "0.45rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem" }}>
                   <p style={{ margin: 0, fontSize: "0.78rem", color: "#333" }}>{assistSuggestion}</p>
@@ -826,15 +1328,47 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                     <button
                       type="button"
                       onClick={() => {
-                        if (form.contentKind === "user_article") {
-                          setForm((f) => ({ ...f, body: `${f.body.trim()}\n\n${assistSuggestion}`.trim() }));
-                        } else {
+                        if (form.contentKind === "user_article")
+                          setForm((f) => ({ ...f, body: assistSuggestion.trim() }));
+                        else
                           setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
-                        }
                       }}
                       style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
-                      Insert
+                      Apply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          body: `${f.body.trim()}\n\n${assistSuggestion}`.trim(),
+                        }))
+                      }
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Insert below
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const selection = latestSelectionRef.current;
+                        if (!selection) return;
+                        setForm((f) => {
+                          const nextBody = `${f.body.slice(0, selection.start)}${assistSuggestion}${f.body.slice(selection.end)}`;
+                          return { ...f, body: nextBody };
+                        });
+                      }}
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Replace selection
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void navigator.clipboard.writeText(assistSuggestion)}
+                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                    >
+                      Copy
                     </button>
                     <button
                       type="button"
@@ -900,6 +1434,17 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                   ref={bodyTextareaRef}
                   value={form.body}
                   onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                  onSelect={(e) => {
+                    const target = e.currentTarget;
+                    latestSelectionRef.current = {
+                      start: target.selectionStart ?? 0,
+                      end: target.selectionEnd ?? 0,
+                      text: form.body.slice(
+                        target.selectionStart ?? 0,
+                        target.selectionEnd ?? 0
+                      ),
+                    };
+                  }}
                   placeholder={"Write in Markdown...\n\n## Section heading\n\nParagraph text with **bold** and _italic_.\n\n> Pull quote or emphasis.\n\n---\n\nNext section..."}
                   style={{ minHeight: "220px", width: "100%", padding: "0.55rem", border: "1px solid #bbb", resize: "vertical" }}
                 />
@@ -1208,7 +1753,82 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
             <input aria-label="Explicit hashtags" value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
           </div>
 
-          {message ? <p aria-live="polite" style={{ color: "#7b2d00", margin: "0.7rem 0 0" }}>{message}</p> : null}
+          <div style={{ display: "flex", gap: "0.65rem", alignItems: "center", flexWrap: "wrap", marginTop: "0.7rem" }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "0.8rem",
+                color:
+                  autosaveStatus === "error"
+                    ? "#8b4513"
+                    : autosaveStatus === "saved"
+                      ? "#2f5f3a"
+                      : "#666",
+              }}
+            >
+              {autosaveStatus === "saving"
+                ? "Autosaving draft..."
+                : autosaveStatus === "saved"
+                  ? "Draft saved"
+                  : autosaveStatus === "error"
+                    ? `Autosave failed${autosaveError ? `: ${autosaveError}` : ""}`
+                    : "Autosave idle"}
+            </p>
+            {activeDraftRevision != null ? (
+              <span style={{ fontSize: "0.75rem", color: "#666" }}>
+                Revision #{activeDraftRevision}
+              </span>
+            ) : null}
+            {lastSavedAtRef.current ? (
+              <span style={{ fontSize: "0.75rem", color: "#666" }}>
+                Last save {new Date(lastSavedAtRef.current).toLocaleTimeString()}
+              </span>
+            ) : null}
+          </div>
+
+          {autosaveConflict ? (
+            <p aria-live="polite" style={{ color: "#8b4513", margin: "0.45rem 0 0" }}>
+              Another tab changed this draft. Reload the page or restore a version before continuing.
+            </p>
+          ) : null}
+          {message ? <p aria-live="polite" style={{ color: "#7b2d00", margin: "0.45rem 0 0" }}>{message}</p> : null}
+          <div style={{ marginTop: "0.45rem", border: "1px dashed #d8d2c7", padding: "0.45rem", background: "#fff" }}>
+            <div style={{ display: "flex", gap: "0.8rem", flexWrap: "wrap", alignItems: "center" }}>
+              <label style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center", fontSize: "0.76rem", color: "#555" }}>
+                <input
+                  type="checkbox"
+                  checked={analystEnabled}
+                  onChange={(event) => setAnalystEnabled(event.target.checked)}
+                />
+                Local analyst enabled
+              </label>
+              <label style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center", fontSize: "0.76rem", color: "#555" }}>
+                <input
+                  type="checkbox"
+                  checked={analystQuietMode}
+                  onChange={(event) => setAnalystQuietMode(event.target.checked)}
+                />
+                Quiet mode (no writing nags)
+              </label>
+            </div>
+            {latestAnalyst ? (
+              <p style={{ margin: "0.45rem 0 0", fontSize: "0.75rem", color: "#666" }}>
+                Analyst snapshot: {latestAnalyst.metrics.wordCount} words, {latestAnalyst.metrics.paragraphCount} paragraphs,
+                phase {latestAnalyst.metrics.sectionPhase}, avg sentence {latestAnalyst.metrics.avgSentenceWords}.
+              </p>
+            ) : (
+              <p style={{ margin: "0.45rem 0 0", fontSize: "0.75rem", color: "#777" }}>
+                Analyst checkpoints run every 5 minutes only after text changes.
+              </p>
+            )}
+            {!analystQuietMode && latestAnalyst && latestAnalyst.notes.length > 0 ? (
+              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1rem", color: "#666", fontSize: "0.75rem" }}>
+                {latestAnalyst.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
 
           <div style={{ display: "flex", gap: "0.55rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
             <button onClick={submitForm} disabled={!canSubmit || busy} style={{ padding: "0.45rem 0.7rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer" }}>
@@ -1219,7 +1839,35 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 Cancel edit
               </button>
             ) : null}
+            {activeDraftId && activeDraftRevision != null ? (
+              <button
+                type="button"
+                onClick={() => void createManualCheckpoint()}
+                style={{ padding: "0.45rem 0.7rem", border: "1px solid #666", background: "#fff", cursor: "pointer" }}
+              >
+                Checkpoint
+              </button>
+            ) : null}
           </div>
+          {draftVersions.length > 0 ? (
+            <div style={{ marginTop: "0.65rem", display: "grid", gap: "0.35rem" }}>
+              <p style={{ margin: 0, fontSize: "0.78rem", color: "#666" }}>
+                Revision history
+              </p>
+              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                {draftVersions.slice(0, 5).map((version) => (
+                  <button
+                    key={version.id}
+                    type="button"
+                    onClick={() => void restoreDraftVersion(version.id)}
+                    style={{ padding: "0.25rem 0.45rem", border: "1px solid #999", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
+                  >
+                    {version.versionReason} · {new Date(version.createdAt).toLocaleTimeString()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
@@ -1231,41 +1879,55 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
           ) : submissions.length === 0 ? (
             <p style={{ color: "#666" }}>No submissions yet.</p>
           ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.65rem" }}>
-              {submissions.map((submission) => (
-                <li key={submission.id} style={{ border: "1px solid #ddd", padding: "0.7rem", background: "#fff" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center" }}>
-                    <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>{submission.headline}</strong>
-                    <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
-                  </div>
-                  <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
-                    {submission.contentKind === "recipe"
-                      ? `Recipe • ${new Date(submission.createdAt).toLocaleString()}`
-                      : `${submission.category} • ${(submission.articleTypeCustom || submission.articleType || "article").replaceAll("_", " ")} • ${new Date(submission.createdAt).toLocaleString()}`}
-                  </p>
-                  {submission.adminNote ? (
-                    <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>
-                      Moderator note: {submission.adminNote}
-                    </p>
-                  ) : null}
-                  {submission.rejectionReason ? (
-                    <p style={{ margin: "0.35rem 0 0", color: "#8b4513", fontSize: "0.84rem" }}>
-                      Rejection reason: {submission.rejectionReason}
-                    </p>
-                  ) : null}
-                  {submission.status === "pending" || submission.status === "changes_requested" ? (
-                    <div style={{ marginTop: "0.45rem", display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-                      <button onClick={() => beginEdit(submission)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #999", background: "#fff", cursor: "pointer" }}>
-                        {submission.status === "changes_requested" ? "Revise" : "Edit"}
-                      </button>
-                      <button onClick={() => withdrawSubmission(submission.id)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #b05", background: "#fff", cursor: "pointer" }}>
-                        Withdraw
-                      </button>
+            <>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.65rem" }}>
+                {submissions.map((submission) => (
+                  <li key={submission.id} style={{ border: "1px solid #ddd", padding: "0.7rem", background: "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center" }}>
+                      <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>{submission.headline}</strong>
+                      <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
                     </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+                    <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
+                      {submission.contentKind === "recipe"
+                        ? `Recipe • ${new Date(submission.createdAt).toLocaleString()}`
+                        : `${submission.category} • ${(submission.articleTypeCustom || submission.articleType || "article").replaceAll("_", " ")} • ${new Date(submission.createdAt).toLocaleString()}`}
+                    </p>
+                    {submission.adminNote ? (
+                      <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>
+                        Moderator note: {submission.adminNote}
+                      </p>
+                    ) : null}
+                    {submission.rejectionReason ? (
+                      <p style={{ margin: "0.35rem 0 0", color: "#8b4513", fontSize: "0.84rem" }}>
+                        Rejection reason: {submission.rejectionReason}
+                      </p>
+                    ) : null}
+                    {submission.status === "pending" || submission.status === "changes_requested" ? (
+                      <div style={{ marginTop: "0.45rem", display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+                        <button onClick={() => void beginEdit(submission)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #999", background: "#fff", cursor: "pointer" }}>
+                          {submission.status === "changes_requested" ? "Revise" : "Edit"}
+                        </button>
+                        <button onClick={() => void withdrawSubmission(submission.id)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #b05", background: "#fff", cursor: "pointer" }}>
+                          Withdraw
+                        </button>
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {nextCursor ? (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <button
+                    type="button"
+                    disabled={loadingMore}
+                    onClick={() => void loadSubmissions({ reset: false })}
+                    style={{ padding: "0.4rem 0.7rem", border: "1px solid #888", background: "#fff", cursor: loadingMore ? "wait" : "pointer" }}
+                  >
+                    {loadingMore ? "Loading..." : "Load more"}
+                  </button>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
       </div>

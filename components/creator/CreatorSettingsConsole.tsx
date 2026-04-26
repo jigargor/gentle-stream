@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 interface CreatorSettingsResponse {
@@ -196,6 +197,21 @@ export function CreatorSettingsConsole() {
           <p style={{ margin: "0.4rem 0 0", color: "#666" }}>
             Bring-your-own-key model controls, budgets, autocomplete, and memory policy.
           </p>
+          <div style={{ marginTop: "0.65rem" }}>
+            <Link
+              href="/creator"
+              style={{
+                display: "inline-flex",
+                padding: "0.35rem 0.65rem",
+                border: "1px solid #1a472a",
+                color: "#1a472a",
+                textDecoration: "none",
+                fontSize: "0.82rem",
+              }}
+            >
+              Back to Writing
+            </Link>
+          </div>
         </section>
 
         {schemaNotice ? (

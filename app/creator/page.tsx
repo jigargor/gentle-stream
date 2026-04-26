@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getOrCreateUserProfile } from "@/lib/db/users";
-import { getCreatorProfile } from "@/lib/db/creator";
+import { getCreatorProfile, listSubmissionsByAuthor } from "@/lib/db/creator";
 import { CreatorDashboard } from "@/components/creator/CreatorDashboard";
+import { getCreatorSettings } from "@/lib/db/creatorStudio";
 
 export const dynamic = "force-dynamic";
 
@@ -32,5 +33,22 @@ export default async function CreatorPage() {
     redirect("/creator/onboarding");
   }
 
-  return <CreatorDashboard publicProfileHref={`/creator/${user.id}`} />;
+  const [{ submissions, nextCursor }, settingsResult] = await Promise.all([
+    listSubmissionsByAuthor({
+      authorUserId: user.id,
+      limit: 12,
+      includeBody: false,
+      cursorCreatedAt: null,
+    }),
+    getCreatorSettings(user.id),
+  ]);
+
+  return (
+    <CreatorDashboard
+      publicProfileHref={`/creator/${user.id}`}
+      initialSubmissions={submissions}
+      initialNextCursor={nextCursor}
+      initialAutocompleteEnabled={settingsResult.settings.autocompleteEnabled}
+    />
+  );
 }

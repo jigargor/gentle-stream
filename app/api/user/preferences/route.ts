@@ -13,7 +13,7 @@ import {
   updateUserPreferences,
 } from "@/lib/db/users";
 import type { GameType } from "@gentle-stream/domain/games/types";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 const preferencesBodySchema = z
   .object({
@@ -42,13 +42,7 @@ export async function GET(request: NextRequest) {
     const profile = await getOrCreateUserProfile(user.id);
     return NextResponse.json(profile);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }
 
@@ -171,12 +165,6 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(updated);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }

@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ConnectionsPuzzle, ConnectionsGroup, ConnectionsTier } from "@/lib/games/connectionsIngestAgent";
 import type { Difficulty } from "@/lib/games/types";
+import {
+  initConnectionsState,
+  reduceConnectionsState,
+  type ConnectionsEngineAction,
+  type ConnectionsEngineState,
+} from "@gentle-stream/games-engine/connections/reducer";
 
 // ─── Tier colours (NYT Connections–style: yellow → green → blue → purple) ───
 
@@ -23,24 +29,8 @@ const TILE_TEXT = "#121212";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface GameState {
-  words: string[];              // all 16 words, shuffled
-  selected: Set<string>;
-  solved: ConnectionsTier[];    // tiers that have been correctly solved
-  guesses: string[][];          // history of guesses
-  mistakesLeft: number;
-  completed: boolean;
-  startedAt: number | null;
-  elapsedSecs: number;
-}
-
-type Action =
-  | { type: "TOGGLE"; word: string }
-  | { type: "SUBMIT" }
-  | { type: "DESELECT_ALL" }
-  | { type: "SHUFFLE" }
-  | { type: "TICK" }
-  | { type: "RESET" };
+type GameState = ConnectionsEngineState;
+type Action = ConnectionsEngineAction;
 
 interface ConnectionsCardProps {
   puzzle: ConnectionsPuzzle;
@@ -53,15 +43,6 @@ interface ConnectionsCardProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
 function formatTime(secs: number): string {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
@@ -70,101 +51,6 @@ function formatTime(secs: number): string {
 
 function getGroupForWord(puzzle: ConnectionsPuzzle, word: string): ConnectionsGroup | null {
   return puzzle.groups.find((g) => g.words.includes(word)) ?? null;
-}
-
-function initState(puzzle: ConnectionsPuzzle): GameState {
-  return {
-    words: shuffle(puzzle.groups.flatMap((g) => g.words)),
-    selected: new Set(),
-    solved: [],
-    guesses: [],
-    mistakesLeft: 4,
-    completed: false,
-    startedAt: null,
-    elapsedSecs: 0,
-  };
-}
-
-// ─── Reducer ──────────────────────────────────────────────────────────────────
-
-function reducer(
-  state: GameState,
-  action: Action,
-  puzzle: ConnectionsPuzzle
-): GameState {
-  switch (action.type) {
-    case "TOGGLE": {
-      if (state.completed) return state;
-      const sel = new Set(state.selected);
-      if (sel.has(action.word)) {
-        sel.delete(action.word);
-      } else if (sel.size < 4) {
-        sel.add(action.word);
-      }
-      return {
-        ...state,
-        selected: sel,
-        startedAt: state.startedAt ?? Date.now(),
-      };
-    }
-
-    case "SUBMIT": {
-      if (state.selected.size !== 4 || state.completed) return state;
-      const guessWords = [...state.selected];
-      const guesses = [...state.guesses, guessWords];
-
-      // Check if the guess matches any unsolved group exactly
-      const matchedGroup = puzzle.groups.find(
-        (g) =>
-          !state.solved.includes(g.tier) &&
-          g.words.every((w) => state.selected.has(w)) &&
-          state.selected.size === g.words.length
-      );
-
-      if (matchedGroup) {
-        const solved = [...state.solved, matchedGroup.tier];
-        const remainingWords = state.words.filter((w) => !state.selected.has(w));
-        const completed = solved.length === 4;
-        return {
-          ...state,
-          words: remainingWords,
-          selected: new Set(),
-          solved,
-          guesses,
-          completed,
-        };
-      }
-
-      // Check if one away (3 of 4 correct for an unsolved group)
-      // — we track this for the "one away" hint but don't act on it here
-
-      const mistakesLeft = state.mistakesLeft - 1;
-      const completed = mistakesLeft === 0;
-      return {
-        ...state,
-        selected: new Set(),
-        guesses,
-        mistakesLeft,
-        completed,
-      };
-    }
-
-    case "DESELECT_ALL":
-      return { ...state, selected: new Set() };
-
-    case "SHUFFLE":
-      return { ...state, words: shuffle(state.words) };
-
-    case "TICK":
-      if (state.completed || !state.startedAt) return state;
-      return { ...state, elapsedSecs: Math.floor((Date.now() - state.startedAt) / 1000) };
-
-    case "RESET":
-      return initState(puzzle);
-
-    default:
-      return state;
-  }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -182,9 +68,9 @@ export default function ConnectionsCard({
   const completionDispatched = useRef(false);
 
   const [state, dispatchRaw] = useReducer(
-    (s: GameState, a: Action) => reducer(s, a, puzzleRef.current),
+    (s: GameState, a: Action) => reduceConnectionsState(s, a, puzzleRef.current),
     puzzle,
-    initState
+    initConnectionsState
   );
   const dispatch = dispatchRaw;
 
@@ -246,7 +132,7 @@ export default function ConnectionsCard({
 
   useEffect(() => {
     if (state.completed || !state.startedAt) return;
-    const id = setInterval(() => dispatch({ type: "TICK" }), 1000);
+    const id = setInterval(() => dispatch({ type: "TICK", nowMs: Date.now() }), 1000);
     return () => clearInterval(id);
   }, [state.completed, state.startedAt, dispatch]);
 

@@ -44,12 +44,12 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(created, { status: 201 });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Could not create RSS feed";
+    console.error("[admin.rss-feeds.create] failed", error);
     return apiErrorResponse({
       request,
       status: 400,
       code: API_ERROR_CODES.INVALID_REQUEST,
-      message,
+      message: "Could not create RSS feed",
     });
   }
 }

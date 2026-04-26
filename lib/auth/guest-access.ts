@@ -8,7 +8,7 @@ export function guestAccessCookieOptions() {
     maxAge: GUEST_ACCESS_MAX_AGE_SEC,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
+    sameSite: "strict" as const,
   };
 }
 

@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-04-19T19:42:25.610Z",
-  "totalRoutes": 61,
+  "generatedAt": "2026-04-26T15:06:12.663Z",
+  "totalRoutes": 62,
   "items": [
     {
       "route": "/api/admin/articles/moderation/[id]/approve",
       "methods": [
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -18,7 +18,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -29,7 +29,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -40,7 +40,7 @@
       "methods": [
         "GET"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -60,7 +60,7 @@
       "methods": [
         "GET"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },
@@ -70,7 +70,7 @@
         "PATCH",
         "DELETE"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -82,7 +82,7 @@
         "GET",
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -93,7 +93,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -104,7 +104,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -115,7 +115,7 @@
       "methods": [
         "POST"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -126,7 +126,7 @@
       "methods": [
         "GET"
       ],
-      "authModel": "public",
+      "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },
@@ -310,6 +310,15 @@
       "p0Flags": [
         "raw-error-message-exposed"
       ]
+    },
+    {
+      "route": "/api/csp-report",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
     },
     {
       "route": "/api/feed/force-ingest",

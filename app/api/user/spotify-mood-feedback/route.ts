@@ -10,7 +10,7 @@ import {
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 const bodySchema = z.object({
   mood: z.string().min(1).max(48),
@@ -66,12 +66,6 @@ export async function POST(request: NextRequest) {
     const score = await applySpotifyMoodVote({ userId, mood: moodKey, delta });
     return NextResponse.json({ mood: moodKey, score });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }

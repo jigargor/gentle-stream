@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/api/adminAuth";
 import { approveModeratedArticle } from "@/lib/db/articleModeration";
 import { parseJsonBody } from "@/lib/validation/http";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 const bodySchema = z.object({
   note: z.string().max(500).nullish(),
@@ -32,13 +32,16 @@ export async function POST(
     });
     return NextResponse.json(result);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = message.includes("not found") ? 404 : 500;
-    return apiErrorResponse({
-      request,
-      status,
-      code: status === 404 ? API_ERROR_CODES.NOT_FOUND : API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    const rawMessage = error instanceof Error ? error.message : "";
+    const status = rawMessage.includes("not found") ? 404 : 500;
+    if (status === 404) {
+      return apiErrorResponse({
+        request,
+        status,
+        code: API_ERROR_CODES.NOT_FOUND,
+        message: "Not found",
+      });
+    }
+    return internalErrorResponse({ request, error });
   }
 }

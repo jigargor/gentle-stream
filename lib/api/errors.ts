@@ -68,6 +68,28 @@ export function apiErrorResponse(input: ApiErrorInput): NextResponse<ApiErrorBod
   return response;
 }
 
+export interface InternalErrorInput {
+  request?: Request;
+  error?: unknown;
+  status?: number;
+  code?: ApiErrorCode;
+  message?: string;
+  headers?: Record<string, string>;
+}
+
+export function internalErrorResponse(input: InternalErrorInput): NextResponse<ApiErrorBody> {
+  if (input.error !== undefined) {
+    console.error("[api] Internal error", input.error);
+  }
+  return apiErrorResponse({
+    request: input.request,
+    status: input.status ?? 500,
+    code: input.code ?? API_ERROR_CODES.INTERNAL,
+    message: input.message ?? "Internal error",
+    headers: input.headers,
+  });
+}
+
 export function applyTraceIdHeader<T extends NextResponse>(request: Request | undefined, response: T): T {
   response.headers.set("X-Trace-Id", getOrCreateTraceId(request));
   return response;

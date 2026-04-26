@@ -70,7 +70,9 @@ async function main() {
 
     const authSignals: string[] = [];
     if (content.includes("getSessionUserId(")) authSignals.push("session_user");
-    if (content.includes("isAdmin(")) authSignals.push("admin_guard");
+    if (content.includes("isAdmin(") || content.includes("requireAdmin(")) {
+      authSignals.push("admin_guard");
+    }
     if (content.includes("isAuthorizedCronRequest(")) authSignals.push("cron_secret");
     if (authSignals.length === 0) authSignals.push("none_detected");
 

@@ -4,7 +4,7 @@ import {
   type ModerationQueueFilter,
   listArticlesForModeration,
 } from "@/lib/db/articleModeration";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { internalErrorResponse } from "@/lib/api/errors";
 
 function parseFilter(value: string | null): ModerationQueueFilter {
   if (
@@ -31,12 +31,6 @@ export async function GET(request: NextRequest) {
     const items = await listArticlesForModeration({ filter, limit });
     return NextResponse.json({ items });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }

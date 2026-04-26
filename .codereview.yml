@@ -1,0 +1,76 @@
+version: 1
+
+defaults:
+  mode: standard
+  artifactDir: .cursor/code-review
+  contextPolicy: strict
+
+modes:
+  standard:
+    reviewers:
+      - provider: anthropic
+        model: claude-sonnet-4-20250514
+    adjudicator:
+      provider: anthropic
+      model: claude-sonnet-4-20250514
+    minAgreement: 1
+
+  max:
+    reviewers:
+      - provider: anthropic
+        model: claude-sonnet-4-20250514
+      - provider: openai
+        model: gpt-4o-mini
+      - provider: gemini
+        model: gemini-2.5-flash
+    adjudicator:
+      provider: anthropic
+      model: claude-sonnet-4-20250514
+    minAgreement: 2
+    tieBreakPriority:
+      - security
+      - correctness
+      - data_loss
+      - performance
+      - reliability
+      - style
+    acceptancePolicy:
+      requireEvidenceForSingleModel: true
+      evidenceKinds:
+        - failing_test
+        - repro_steps
+        - source_reference
+      advisoryWhenLowConfidence: true
+
+audit:
+  enabled: true
+  jsonlPath: .cursor/code-review/review-runs.jsonl
+  includePromptTemplateId: true
+  includeContextPackageHash: true
+  includeModelVersions: true
+  includeTokenUsage: true
+  includeLatencyMs: true
+  includeEstimatedCost: true
+  includeFindingLifecycle: true
+
+contextPackaging:
+  allowlist:
+    - AGENTS.md
+    - API.md
+    - .cursor/rules/
+    - docs/
+  denylist:
+    - .env*
+    - secrets*
+    - "**/*.pem"
+  trustZones:
+    trusted:
+      - maintainer_docs
+      - rules
+      - verified_architecture_notes
+    untrusted:
+      - pr_diff
+      - commit_messages
+      - issue_comments
+      - user_snippets
+  sanitizeUntrustedInstructions: true

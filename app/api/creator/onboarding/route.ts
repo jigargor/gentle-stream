@@ -11,6 +11,7 @@ import { getOrCreateUserProfile } from "@/lib/db/users";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { CREATOR_ONBOARDING_ENABLED } from "@/lib/feature-flags/regulatory";
+import { hasTrustedOrigin } from "@/lib/security/origin";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -59,6 +60,14 @@ export async function GET(request: NextRequest) {
       message: "Unauthorized",
     });
   }
+  if (!user.email_confirmed_at) {
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Creator onboarding requires verified email.",
+    });
+  }
 
   const profile = await getCreatorProfile(user.id);
   const userRoleProfile = await getOrCreateUserProfile(user.id);
@@ -71,6 +80,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  if (!hasTrustedOrigin(request)) {
+    return apiErrorResponse({
+      request,
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN_ORIGIN,
+      message: "Invalid request origin.",
+    });
+  }
   if (!CREATOR_ONBOARDING_ENABLED) {
     return apiErrorResponse({
       request,
@@ -93,14 +110,12 @@ export async function POST(request: NextRequest) {
       message: "Unauthorized",
     });
   }
-
-  const phoneConfirmedAt = (user as { phone_confirmed_at?: string | null }).phone_confirmed_at ?? null;
-  if (!user.phone || !phoneConfirmedAt) {
+  if (!user.email_confirmed_at) {
     return apiErrorResponse({
       request,
-      status: 400,
-      code: API_ERROR_CODES.INVALID_REQUEST,
-      message: "Phone verification is required before creator onboarding.",
+      status: 403,
+      code: API_ERROR_CODES.FORBIDDEN,
+      message: "Creator onboarding requires verified email.",
     });
   }
 

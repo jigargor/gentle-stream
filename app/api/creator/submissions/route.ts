@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId } from "@/lib/api/sessionUser";
 import { CATEGORIES, RECIPE_CATEGORY, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
-import { getOrCreateUserProfile } from "@/lib/db/users";
 import {
   countSubmissionsSince,
   createSubmission,
@@ -18,6 +16,8 @@ import {
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { isCreatorAccessDenied, requireCreatorAccess } from "@/lib/auth/creator-security";
+import { isBuiltInArticleType } from "@/lib/creator/article-types";
 
 const DAILY_SUBMISSION_LIMIT = 10;
 
@@ -28,6 +28,8 @@ const submissionBodySchema = z.object({
   pullQuote: z.string().optional(),
   category: z.string().optional(),
   contentKind: z.string().optional(),
+  articleType: z.string().optional(),
+  articleTypeCustom: z.string().optional(),
   locale: z.string().optional(),
   explicitHashtags: z.array(z.string()).optional(),
   recipeServings: z.union([z.number(), z.string()]).optional(),
@@ -52,25 +54,9 @@ function toSafeText(value: unknown, maxLen: number): string {
 }
 
 export async function GET(request: NextRequest) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiErrorResponse({
-      request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
-    });
-  }
-
-  const profile = await getOrCreateUserProfile(userId);
-  if (profile.userRole !== "creator") {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Creator access required",
-    });
-  }
+  const access = await requireCreatorAccess(request, { requireMfa: true });
+  if (isCreatorAccessDenied(access)) return access;
+  const userId = access.userId;
 
   const submissions = await listSubmissionsByAuthor(userId);
   return NextResponse.json({ submissions });
@@ -86,15 +72,9 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiErrorResponse({
-      request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
-    });
-  }
+  const access = await requireCreatorAccess(request, { requireMfa: true });
+  if (isCreatorAccessDenied(access)) return access;
+  const userId = access.userId;
 
   const rateLimit = await consumeRateLimit({
     policy: { id: "creator-submission", windowMs: 60 * 60 * 1000, max: 25 },
@@ -105,16 +85,6 @@ export async function POST(request: NextRequest) {
     }),
   });
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
-
-  const profile = await getOrCreateUserProfile(userId);
-  if (profile.userRole !== "creator") {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Creator access required",
-    });
-  }
 
   const creatorProfile = await getCreatorProfile(userId);
   if (!creatorProfile?.onboardingCompletedAt) {
@@ -159,6 +129,10 @@ export async function POST(request: NextRequest) {
     contentKindRaw && isSubmissionContentKind(contentKindRaw)
       ? contentKindRaw
       : "user_article";
+  const articleTypeRaw = toSafeText(body.articleType, 120);
+  const articleTypeCustom = toSafeText(body.articleTypeCustom, 160) || null;
+  const articleType =
+    articleTypeRaw && isBuiltInArticleType(articleTypeRaw) ? articleTypeRaw : null;
 
   const isRecipe = contentKind === "recipe";
 
@@ -305,6 +279,8 @@ export async function POST(request: NextRequest) {
     contentKind,
     locale,
     explicitHashtags,
+    articleType: isRecipe ? null : (articleType ?? (articleTypeCustom ? "custom" : null)),
+    articleTypeCustom: isRecipe ? null : articleTypeCustom,
     recipeServings: isRecipe ? recipeServings : undefined,
     recipeIngredients: isRecipe ? recipeIngredients : undefined,
     recipeInstructions: isRecipe ? recipeInstructions : undefined,

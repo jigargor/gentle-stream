@@ -37,6 +37,8 @@ interface ArticleSubmissionRow {
   content_kind: string | null;
   locale: string;
   explicit_hashtags: string[];
+  article_type?: string | null;
+  article_type_custom?: string | null;
   status: string;
   admin_note: string | null;
   rejection_reason: string | null;
@@ -115,6 +117,8 @@ function rowToSubmission(row: ArticleSubmissionRow): ArticleSubmission {
     contentKind: toSubmissionContentKind(row.content_kind),
     locale: row.locale ?? "global",
     explicitHashtags: row.explicit_hashtags ?? [],
+    articleType: row.article_type ?? null,
+    articleTypeCustom: row.article_type_custom ?? null,
     status: toSubmissionStatus(row.status),
     adminNote: row.admin_note,
     rejectionReason: row.rejection_reason,
@@ -254,6 +258,8 @@ export async function createSubmission(input: {
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
   recipeServings?: number | null;
   recipeIngredients?: string[];
   recipeInstructions?: string[];
@@ -271,6 +277,8 @@ export async function createSubmission(input: {
     content_kind: input.contentKind,
     locale: input.locale,
     explicit_hashtags: normaliseHashtags(input.explicitHashtags),
+    article_type: input.articleType ?? null,
+    article_type_custom: input.articleTypeCustom ?? null,
     status: "pending",
 
     recipe_servings:
@@ -317,6 +325,8 @@ export async function updateSubmissionForAuthor(input: {
   contentKind?: SubmissionContentKind;
   locale?: string;
   explicitHashtags?: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
   withdraw?: boolean;
 
   recipeServings?: number | null;
@@ -350,6 +360,8 @@ export async function updateSubmissionForAuthor(input: {
   if (input.explicitHashtags !== undefined) {
     updates.explicit_hashtags = normaliseHashtags(input.explicitHashtags);
   }
+  if (input.articleType !== undefined) updates.article_type = input.articleType;
+  if (input.articleTypeCustom !== undefined) updates.article_type_custom = input.articleTypeCustom;
 
   if (input.recipeServings !== undefined) {
     updates.recipe_servings = input.recipeServings;
@@ -559,6 +571,8 @@ export async function reviewSubmission(input: {
       author_user_id: submission.author_user_id,
       submission_id: submission.id,
       creator_explicit_tags: explicitTags,
+      article_type: submission.article_type ?? null,
+      article_type_custom: submission.article_type_custom ?? null,
       deleted_at: null,
       deleted_by_user_id: null,
       delete_reason: null,
@@ -639,6 +653,8 @@ export async function reviewSubmission(input: {
       authorUserId: submission.author_user_id,
       submissionId: submission.id,
       creatorExplicitTags: explicitTags,
+      articleType: submission.article_type ?? null,
+      articleTypeCustom: submission.article_type_custom ?? null,
       recipeServings:
         submission.content_kind === "recipe"
           ? submission.recipe_servings ?? null

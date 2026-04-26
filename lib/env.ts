@@ -41,6 +41,7 @@ const envSchema = z.object({
   GEMINI_API_KEY: optionalTrimmedString,
   GEMINI_DEFAULT_MODEL: optionalTrimmedString,
   CREATOR_KEYS_MASTER_KEY: optionalTrimmedString,
+  CREATOR_MAX_DRAFTS_PER_USER: optionalNumberString,
   CREATOR_DEBUG_PROMPT_LOGGING: optionalBooleanString,
   CREATOR_WORKFLOW_ROLLOUT_ALLOWLIST: optionalTrimmedString,
   LANGFUSE_PUBLIC_KEY: optionalTrimmedString,

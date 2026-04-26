@@ -152,6 +152,55 @@ export interface ArticleSubmission {
   recipeImages?: string[];
 }
 
+export type CreatorDraftVersionReason =
+  | "autosave"
+  | "manual_checkpoint"
+  | "restore"
+  | "publish";
+
+export interface CreatorDraft {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  contentKind: SubmissionContentKind;
+  articleType: string | null;
+  articleTypeCustom: string | null;
+  category: ArticleStorageCategory;
+  locale: string;
+  explicitHashtags: string[];
+  pullQuote: string;
+  privateNotes: string | null;
+  contentHash: string;
+  wordCount: number;
+  revision: number;
+  lastOpenedAt: string;
+  neverSendToAi: boolean;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatorDraftVersion {
+  id: string;
+  draftId: string;
+  userId: string;
+  revision: number;
+  title: string;
+  body: string;
+  contentKind: SubmissionContentKind;
+  articleType: string | null;
+  articleTypeCustom: string | null;
+  category: ArticleStorageCategory;
+  locale: string;
+  explicitHashtags: string[];
+  pullQuote: string;
+  contentHash: string;
+  wordCount: number;
+  versionReason: CreatorDraftVersionReason;
+  createdAt: string;
+}
+
 /** Row from `article_saves` for library UI */
 export interface SavedArticleListItem {
   id: string;

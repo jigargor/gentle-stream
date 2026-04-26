@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-26T15:06:12.663Z",
+  "generatedAt": "2026-04-26T18:31:26.916Z",
   "totalRoutes": 62,
   "items": [
     {
@@ -42,9 +42,7 @@
       ],
       "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/admin/cron/ingest-logs",
@@ -72,9 +70,7 @@
       ],
       "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/admin/rss-feeds",
@@ -84,9 +80,7 @@
       ],
       "authModel": "admin_guard",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/admin/submissions/[id]/approve",
@@ -137,9 +131,7 @@
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": true,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/articles/translate",
@@ -205,9 +197,7 @@
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/creator/onboarding",
@@ -265,9 +255,7 @@
       ],
       "authModel": "cron_secret",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/cron/engagement-health",
@@ -276,9 +264,7 @@
       ],
       "authModel": "cron_secret",
       "usesServiceRoleDbClient": true,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/cron/games",
@@ -296,9 +282,7 @@
       ],
       "authModel": "cron_secret",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/cron/tagger",
@@ -307,9 +291,7 @@
       ],
       "authModel": "cron_secret",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/csp-report",
@@ -357,9 +339,7 @@
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/feed/modules/weather",
@@ -377,9 +357,7 @@
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/feed",
@@ -581,9 +559,7 @@
       ],
       "authModel": "public",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/user/profile",
@@ -621,9 +597,7 @@
       ],
       "authModel": "session_user",
       "usesServiceRoleDbClient": false,
-      "p0Flags": [
-        "raw-error-message-exposed"
-      ]
+      "p0Flags": []
     },
     {
       "route": "/api/webhooks/twilio/status",

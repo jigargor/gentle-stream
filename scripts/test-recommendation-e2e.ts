@@ -15,19 +15,24 @@ import { config } from "dotenv";
 import type { StoredArticle } from "../lib/types";
 config({ path: ".env.local" });
 
+let buildAffinityIndex: typeof import("../lib/feed/recommendationScore").buildAffinityIndex;
+let scoreArticleWithEngagement: typeof import("../lib/feed/recommendationScore").scoreArticleWithEngagement;
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
 let db: typeof import("../lib/db/client").db;
 let getRankedFeed: typeof import("../lib/agents/rankerAgent").getRankedFeed;
 
 async function initDeps() {
-  const [articlesMod, clientMod, rankerMod] = await Promise.all([
+  const [articlesMod, clientMod, rankerMod, scoreMod] = await Promise.all([
     import("../lib/db/articles"),
     import("../lib/db/client"),
     import("../lib/agents/rankerAgent"),
+    import("../lib/feed/recommendationScore"),
   ]);
   insertArticles = articlesMod.insertArticles;
   db = clientMod.db;
   getRankedFeed = rankerMod.getRankedFeed;
+  buildAffinityIndex = scoreMod.buildAffinityIndex;
+  scoreArticleWithEngagement = scoreMod.scoreArticleWithEngagement;
 }
 
 let passed = 0;
@@ -207,20 +212,46 @@ async function testBeforeAfterAffinityOrdering() {
   const rankAfter = afterScience.articles.findIndex((a) => a.id === targetId);
   assert(rankAfter >= 0, "Fixture appears in Science-ranked pool after affinity", `index ${rankAfter}`);
 
-  const improved = rankAfter < rankBefore || rankAfter === 0;
-  assert(
-    improved,
-    "Engaged Science article ranks higher (or stays #1) in Science-only slice after affinity",
-    `rank ${rankBefore} → ${rankAfter}; head after: ${afterScience.articles[0]?.headline?.slice(0, 48) ?? ""}`
-  );
-
   const { data: affRows, error: affErr } = await db
     .from("user_article_affinity")
-    .select("category")
+    .select("category, locale, affinity_score")
     .eq("user_id", testUserId)
-    .ilike("category", "%Science%");
+    .in("category", ["Science & Discovery", "Education"]);
   assert(!affErr, "Affinity lookup succeeds", affErr?.message);
-  assert((affRows?.length ?? 0) > 0, "Affinity row exists for Science after refresh");
+  assert(
+    (affRows ?? []).some((row) => row.category === scienceCategory),
+    "Affinity row exists for Science after refresh"
+  );
+
+  const educationFixture = insertedArticles.find((a) => a.headline.includes("EDU TOP"));
+  assert(Boolean(educationFixture), "Resolved Education comparison fixture");
+  if (scienceFixture && educationFixture) {
+    const { getOrCreateUserProfile } = await import("../lib/db/users");
+    const profile = await getOrCreateUserProfile(testUserId);
+    const beforeAffinity = new Map<string, number>();
+    const afterAffinity = buildAffinityIndex(
+      (affRows ?? []).map((row) => ({
+        category: String(row.category),
+        locale: String(row.locale ?? "global"),
+        affinity_score: Number(row.affinity_score ?? 0),
+      }))
+    );
+    const scienceBeforeScore = scoreArticleWithEngagement(scienceFixture, profile, beforeAffinity);
+    const educationBeforeScore = scoreArticleWithEngagement(educationFixture, profile, beforeAffinity);
+    const scienceAfterScore = scoreArticleWithEngagement(scienceFixture, profile, afterAffinity);
+    const educationAfterScore = scoreArticleWithEngagement(educationFixture, profile, afterAffinity);
+
+    assert(
+      scienceBeforeScore < educationBeforeScore,
+      "Before affinity, higher-quality Education fixture outranks Science fixture",
+      `science=${scienceBeforeScore.toFixed(4)} education=${educationBeforeScore.toFixed(4)}`
+    );
+    assert(
+      scienceAfterScore > educationAfterScore,
+      "After affinity, engaged Science fixture outranks Education fixture by score",
+      `science=${scienceAfterScore.toFixed(4)} education=${educationAfterScore.toFixed(4)}; science rank ${rankBefore} -> ${rankAfter}`
+    );
+  }
 }
 
 async function cleanup() {
@@ -256,4 +287,3 @@ main().catch((error) => {
   console.error("Fatal:", error);
   process.exit(1);
 });
-

@@ -38,10 +38,30 @@ export const assistDiagnosisSchema = z
       })
       .strict(),
     validationFallback: z.boolean().optional(),
+    /** Short paste-ready hooks (questions, lines); not the full analysis. */
+    openingAngles: z.array(z.string().trim().min(4).max(220)).min(1).max(8).optional(),
   })
   .strict();
 
 export type AssistDiagnosis = z.infer<typeof assistDiagnosisSchema>;
+
+export function formatDiagnosisDisplayText(diagnosis: AssistDiagnosis): string {
+  return [
+    diagnosis.summary,
+    "",
+    ...diagnosis.suggestions.map((entry, index) => `${index + 1}. ${entry.title}\n${entry.detail}`),
+  ].join("\n\n");
+}
+
+export function listOpeningAnglesFromDiagnosis(diagnosis: AssistDiagnosis): string[] {
+  if (diagnosis.openingAngles && diagnosis.openingAngles.length > 0)
+    return diagnosis.openingAngles.slice(0, 8);
+  return diagnosis.suggestions
+    .filter((entry) => entry.lengthHint === "short")
+    .map((entry) => entry.title.trim())
+    .filter((title) => title.length >= 4)
+    .slice(0, 4);
+}
 
 function estimateSentenceCount(text: string): number {
   return text
@@ -122,5 +142,9 @@ export function buildFallbackDiagnosis(input: {
       mode: input.mode,
     },
     validationFallback: true,
+    openingAngles: [
+      "What is the single clearest claim you want the reader to believe next?",
+      "What evidence from the draft already supports that claim?",
+    ],
   };
 }

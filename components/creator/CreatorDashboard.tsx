@@ -75,6 +75,34 @@ const EMPTY_FORM: FormState = {
 const MAX_SUBMISSION_BODY_CHARS = 15_000;
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
+function assistActionTitles(params: {
+  contentKind: FormState["contentKind"];
+  hasOpeningAngles: boolean;
+}) {
+  const { contentKind, hasOpeningAngles } = params;
+  const applyArticle = hasOpeningAngles
+    ? "Uses only the suggested opening lines below—not the analysis paragraph above. If you highlighted text in the body, that selection is replaced with those lines. If nothing is highlighted, every opening line is inserted at the very start of your draft."
+    : "Replaces your entire article body with the suggestion text. This overwrites the draft; use Copy first if you want to keep a backup.";
+  return {
+    apply:
+      contentKind !== "user_article"
+        ? "Replaces your headline with the suggestion. The article body is not changed."
+        : applyArticle,
+    insertBelow: hasOpeningAngles
+      ? "Adds every suggested opening line after the end of your draft. The analysis paragraph above is not inserted."
+      : "Adds the full suggestion after the end of your current draft.",
+    replaceSelection: hasOpeningAngles
+      ? "First highlight text in the body, then click: your highlight is replaced by all suggested opening lines only (not the analysis)."
+      : "First highlight text in the body, then click: your highlight is replaced by the full suggestion.",
+    copy: hasOpeningAngles
+      ? "Copies the explanation paragraph above to the clipboard. To put a single hook in your draft, click that line under “Suggested openings” instead."
+      : "Copies the suggestion text to the clipboard.",
+    dismiss: "Closes this assist panel. Your draft is not changed.",
+    openingLine:
+      "Adds only this one line to the end of your draft. The long explanation above is not added.",
+  };
+}
+
 export function CreatorDashboard({
   publicProfileHref,
   initialSubmissions = [],
@@ -100,6 +128,7 @@ export function CreatorDashboard({
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistSuggestion, setAssistSuggestion] = useState<string | null>(null);
+  const [assistOpeningAngles, setAssistOpeningAngles] = useState<string[]>([]);
   const [assistCostEstimate, setAssistCostEstimate] = useState<number | null>(null);
   const [assistEscalation, setAssistEscalation] = useState(false);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
@@ -214,6 +243,23 @@ export function CreatorDashboard({
     requestAnimationFrame(() => {
       textarea.focus();
       textarea.setSelectionRange(cursorStart, cursorEnd);
+    });
+  }
+
+  function appendAssistAngleToBody(fragment: string) {
+    const piece = fragment.trim();
+    if (!piece) return;
+    setForm((prev) => {
+      const base = prev.body.trimEnd();
+      const sep = base.length === 0 ? "" : "\n\n";
+      return { ...prev, body: `${base}${sep}${piece}` };
+    });
+    requestAnimationFrame(() => {
+      const ta = bodyTextareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      const len = ta.value.length;
+      ta.setSelectionRange(len, len);
     });
   }
 
@@ -840,6 +886,7 @@ export function CreatorDashboard({
     setAssistBusy(true);
     setAssistError(null);
     setAssistSuggestion(null);
+    setAssistOpeningAngles([]);
     setAssistCostEstimate(null);
     setAssistEscalation(false);
     try {
@@ -908,6 +955,7 @@ export function CreatorDashboard({
                   model?: string;
                   costEstimateUsd?: number;
                   isEscalation?: boolean;
+                  openingAngles?: string[];
                 };
             if (parsed.type === "delta") {
               aggregate += parsed.delta;
@@ -916,6 +964,8 @@ export function CreatorDashboard({
               if (typeof parsed.costEstimateUsd === "number")
                 setAssistCostEstimate(parsed.costEstimateUsd);
               setAssistEscalation(parsed.isEscalation === true);
+              if (Array.isArray(parsed.openingAngles) && parsed.openingAngles.length > 0)
+                setAssistOpeningAngles(parsed.openingAngles.map((a) => String(a).trim()).filter(Boolean));
             }
           }
         }
@@ -928,12 +978,15 @@ export function CreatorDashboard({
         result?: string;
         costEstimateUsd?: number;
         isEscalation?: boolean;
+        openingAngles?: string[];
       };
       if (!payload.result) {
         setAssistError("AI assist is unavailable right now.");
         return;
       }
       setAssistSuggestion(payload.result);
+      if (Array.isArray(payload.openingAngles) && payload.openingAngles.length > 0)
+        setAssistOpeningAngles(payload.openingAngles.map((a) => String(a).trim()).filter(Boolean));
       if (typeof payload.costEstimateUsd === "number")
         setAssistCostEstimate(payload.costEstimateUsd);
       setAssistEscalation(payload.isEscalation === true);
@@ -1000,6 +1053,11 @@ export function CreatorDashboard({
     setMessage("Version restored.");
     await loadDraftVersions(activeDraftId);
   }
+
+  const assistTitles = assistActionTitles({
+    contentKind: form.contentKind,
+    hasOpeningAngles: assistOpeningAngles.length > 0,
+  });
 
   return (
     <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
@@ -1323,15 +1381,82 @@ export function CreatorDashboard({
               ) : null}
               {assistSuggestion ? (
                 <div style={{ marginTop: "0.45rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem" }}>
-                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#333" }}>{assistSuggestion}</p>
-                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.4rem" }}>
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#333", whiteSpace: "pre-wrap" }}>{assistSuggestion}</p>
+                  {assistOpeningAngles.length > 0 ? (
+                    <div style={{ marginTop: "0.45rem" }}>
+                      <span style={{ fontSize: "0.72rem", color: "#555", display: "block", marginBottom: "0.28rem" }}>
+                        Suggested openings (click a line to add only that text):
+                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "0.12rem" }}>
+                        {assistOpeningAngles.map((angle, index) => (
+                          <button
+                            key={`assist-angle-${index}-${angle.slice(0, 40)}`}
+                            type="button"
+                            title={assistTitles.openingLine}
+                            onClick={() => appendAssistAngleToBody(angle)}
+                            style={{
+                              display: "block",
+                              width: "100%",
+                              textAlign: "left",
+                              fontWeight: 600,
+                              fontSize: "0.8rem",
+                              color: "#111",
+                              background: "transparent",
+                              border: "none",
+                              padding: "0.28rem 0.2rem",
+                              cursor: "pointer",
+                              borderRadius: "4px",
+                              lineHeight: 1.35,
+                            }}
+                            onMouseEnter={(event) => {
+                              event.currentTarget.style.fontWeight = "800";
+                              event.currentTarget.style.background = "#f0ebe0";
+                            }}
+                            onMouseLeave={(event) => {
+                              event.currentTarget.style.fontWeight = "600";
+                              event.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            {angle}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {assistOpeningAngles.length > 0 ? (
+                    <p style={{ margin: "0.35rem 0 0", fontSize: "0.7rem", color: "#666" }}>
+                      Apply prepends all openings (or replaces your selection). Insert below appends them. The analysis
+                      above is never inserted by those buttons.
+                    </p>
+                  ) : null}
+                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.4rem", flexWrap: "wrap" }}>
                     <button
                       type="button"
+                      title={assistTitles.apply}
                       onClick={() => {
-                        if (form.contentKind === "user_article")
-                          setForm((f) => ({ ...f, body: assistSuggestion.trim() }));
-                        else
+                        if (!assistSuggestion) return;
+                        if (form.contentKind !== "user_article") {
                           setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
+                          return;
+                        }
+                        const anglesBlock = assistOpeningAngles.join("\n\n").trim();
+                        if (anglesBlock) {
+                          const sel = latestSelectionRef.current;
+                          if (sel && sel.start !== sel.end) {
+                            setForm((f) => ({
+                              ...f,
+                              body: `${f.body.slice(0, sel.start)}${anglesBlock}${f.body.slice(sel.end)}`,
+                            }));
+                            return;
+                          }
+                          setForm((f) => {
+                            const rest = f.body.trim();
+                            const sep = rest.length === 0 ? "" : "\n\n";
+                            return { ...f, body: `${anglesBlock}${sep}${rest}`.trim() };
+                          });
+                          return;
+                        }
+                        setForm((f) => ({ ...f, body: assistSuggestion.trim() }));
                       }}
                       style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
@@ -1339,23 +1464,34 @@ export function CreatorDashboard({
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
+                      title={assistTitles.insertBelow}
+                      onClick={() => {
+                        const block =
+                          assistOpeningAngles.length > 0
+                            ? assistOpeningAngles.join("\n\n")
+                            : assistSuggestion.trim();
+                        if (!block) return;
                         setForm((f) => ({
                           ...f,
-                          body: `${f.body.trim()}\n\n${assistSuggestion}`.trim(),
-                        }))
-                      }
+                          body: `${f.body.trim()}\n\n${block}`.trim(),
+                        }));
+                      }}
                       style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
                       Insert below
                     </button>
                     <button
                       type="button"
+                      title={assistTitles.replaceSelection}
                       onClick={() => {
                         const selection = latestSelectionRef.current;
                         if (!selection) return;
+                        const block =
+                          assistOpeningAngles.length > 0
+                            ? assistOpeningAngles.join("\n\n")
+                            : assistSuggestion;
                         setForm((f) => {
-                          const nextBody = `${f.body.slice(0, selection.start)}${assistSuggestion}${f.body.slice(selection.end)}`;
+                          const nextBody = `${f.body.slice(0, selection.start)}${block}${f.body.slice(selection.end)}`;
                           return { ...f, body: nextBody };
                         });
                       }}
@@ -1365,6 +1501,7 @@ export function CreatorDashboard({
                     </button>
                     <button
                       type="button"
+                      title={assistTitles.copy}
                       onClick={() => void navigator.clipboard.writeText(assistSuggestion)}
                       style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
@@ -1372,7 +1509,11 @@ export function CreatorDashboard({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAssistSuggestion(null)}
+                      title={assistTitles.dismiss}
+                      onClick={() => {
+                        setAssistSuggestion(null);
+                        setAssistOpeningAngles([]);
+                      }}
                       style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
                       Dismiss

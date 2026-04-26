@@ -37,8 +37,10 @@ function buildCommonJsonInstruction(): string {
     '    { "id": "s2", "title": "...", "detail": "1-2 sentences", "lengthHint": "short" },',
     '    { "id": "s3", "title": "...", "detail": "longer guidance paragraph", "lengthHint": "long" }',
     "  ],",
+    '  "openingAngles": [ "Paste-ready hook line 1", "Paste-ready hook line 2" ],',
     '  "providerMeta": { "provider": "anthropic|openai|gemini", "model": "string", "mode": "manual|auto|max" }',
     "}",
+    "openingAngles: 2–6 short standalone lines (questions or hooks) the writer can paste; do not paste the full analysis there.",
     "Do not include markdown fences.",
   ].join("\n");
 }

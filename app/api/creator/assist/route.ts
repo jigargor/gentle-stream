@@ -14,6 +14,11 @@ import { getSkillTemplateByArticleType } from "@/lib/creator/skills";
 import { CREATOR_WORKFLOW_IDS, type CreatorWorkflowId } from "@/lib/creator/workflows";
 import { getCreatorDraftById } from "@/lib/db/creatorDrafts";
 import { generateAssistDiagnosis } from "@/lib/creator/assist-diagnosis";
+import { generateAssistStartupStructured } from "@/lib/creator/assist-startup-structured";
+import {
+  formatDiagnosisDisplayText,
+  listOpeningAnglesFromDiagnosis,
+} from "@/lib/creator/assist-structured-output";
 import {
   createCreatorAuditEvent,
   createCreatorMemorySession,
@@ -242,9 +247,10 @@ export async function POST(request: NextRequest) {
     let model = "";
     let costEstimateUsd = 0;
     let structuredDiagnosis: Record<string, unknown> | null = null;
+    let openingAnglesOut: string[] | null = null;
     try {
       if (body.helpMode === "stuck") {
-        const diagnosis = await generateAssistDiagnosis({
+        const generated = await generateAssistDiagnosis({
           userId,
           workflowId,
           route: "app/api/creator/assist",
@@ -254,16 +260,43 @@ export async function POST(request: NextRequest) {
           context: body.context,
           selectedText,
         });
+        const diagnosis = generated.diagnosis;
         structuredDiagnosis = diagnosis as unknown as Record<string, unknown>;
-        provider = diagnosis.providerMeta.provider;
-        model = diagnosis.providerMeta.model;
-        text = [
-          `Diagnosis: ${diagnosis.summary}`,
-          "",
-          ...diagnosis.suggestions.map(
-            (entry, index) => `${index + 1}. ${entry.title}: ${entry.detail}`
-          ),
-        ].join("\n");
+        provider = generated.provider;
+        model = generated.model;
+        text = formatDiagnosisDisplayText(diagnosis);
+        openingAnglesOut = listOpeningAnglesFromDiagnosis(diagnosis);
+        costEstimateUsd = estimateProviderCallCostUsd(generated.provider, {
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
+        });
+      } else if (
+        body.helpMode === "inspiration" ||
+        body.helpMode === "brainstorm" ||
+        body.helpMode === "random"
+      ) {
+        const generated = await generateAssistStartupStructured({
+          userId,
+          workflowId,
+          route: "app/api/creator/assist",
+          callKind: "creator_assist_startup",
+          helpMode: body.helpMode,
+          contentKind,
+          articleType: body.articleType,
+          articleTypeCustom: body.articleTypeCustom,
+          headline,
+          body: draftBody,
+          context: body.context,
+          memorySummary,
+        });
+        text = generated.structured.explanation;
+        openingAnglesOut = generated.structured.openingAngles;
+        provider = generated.provider;
+        model = generated.model;
+        costEstimateUsd = estimateProviderCallCostUsd(generated.provider, {
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
+        });
       } else {
         const completion = await generateCreatorText({
           userId,
@@ -351,6 +384,7 @@ export async function POST(request: NextRequest) {
     responseBody.isEscalation = isAssistEscalation;
     responseBody.selectedTextApplied = selectedText.length > 0;
     if (structuredDiagnosis) responseBody.diagnosis = structuredDiagnosis;
+    if (openingAnglesOut && openingAnglesOut.length > 0) responseBody.openingAngles = openingAnglesOut;
     if (body.stream) {
       const words = text.split(/\s+/).filter(Boolean);
       const encoder = new TextEncoder();
@@ -373,6 +407,9 @@ export async function POST(request: NextRequest) {
                 model,
                 costEstimateUsd,
                 isEscalation: isAssistEscalation,
+                ...(openingAnglesOut && openingAnglesOut.length > 0
+                  ? { openingAngles: openingAnglesOut }
+                  : {}),
               })}\n\n`
             )
           );

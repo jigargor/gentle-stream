@@ -105,6 +105,13 @@ function estimateCallCostUsd(provider: LlmProvider, usage: { inputTokens: number
   return Number((usage.inputTokens * p.input + usage.outputTokens * p.output).toFixed(6));
 }
 
+export function estimateProviderCallCostUsd(
+  provider: LlmProvider,
+  usage: { inputTokens: number; outputTokens: number }
+): number {
+  return estimateCallCostUsd(provider, usage);
+}
+
 function resolveModel(provider: LlmProvider, override?: string): string {
   if (override?.trim()) return override.trim();
   const env = getEnv();

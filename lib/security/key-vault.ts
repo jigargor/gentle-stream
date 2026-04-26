@@ -13,6 +13,12 @@ export interface EncryptedProviderKeyPayload {
   last4: string;
 }
 
+export interface EncryptedSensitiveTextPayload {
+  ciphertext: string;
+  iv: string;
+  authTag: string;
+}
+
 function toBase64(value: Buffer): string {
   return value.toString("base64");
 }
@@ -87,6 +93,26 @@ export function decryptProviderKey(input: {
     ciphertext: fromBase64(input.keyCiphertext),
     iv: fromBase64(input.keyIv),
     authTag: fromBase64(input.keyAuthTag),
+  });
+  return plaintext.toString("utf8");
+}
+
+export function encryptSensitiveText(plainText: string): EncryptedSensitiveTextPayload {
+  const normalized = plainText.trim();
+  const encrypted = encryptWithKey(getMasterKey(), Buffer.from(normalized, "utf8"));
+  return {
+    ciphertext: toBase64(encrypted.ciphertext),
+    iv: toBase64(encrypted.iv),
+    authTag: toBase64(encrypted.authTag),
+  };
+}
+
+export function decryptSensitiveText(input: EncryptedSensitiveTextPayload): string {
+  const plaintext = decryptWithKey({
+    key: getMasterKey(),
+    ciphertext: fromBase64(input.ciphertext),
+    iv: fromBase64(input.iv),
+    authTag: fromBase64(input.authTag),
   });
   return plaintext.toString("utf8");
 }

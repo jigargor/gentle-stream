@@ -7,11 +7,13 @@ import {
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
 import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
-import { LlmProviderError } from "@/lib/llm/client";
+import { estimateProviderCallCostUsd, LlmProviderError } from "@/lib/llm/client";
 import { isCreatorAccessDenied, requireCreatorAccess } from "@/lib/auth/creator-security";
 import { generateCreatorText } from "@/lib/creator/model-router";
 import { getSkillTemplateByArticleType } from "@/lib/creator/skills";
 import { CREATOR_WORKFLOW_IDS, type CreatorWorkflowId } from "@/lib/creator/workflows";
+import { getCreatorDraftById } from "@/lib/db/creatorDrafts";
+import { generateAssistDiagnosis } from "@/lib/creator/assist-diagnosis";
 import {
   createCreatorAuditEvent,
   createCreatorMemorySession,
@@ -33,6 +35,11 @@ const assistBodySchema = z
     headline: z.string().max(280).optional(),
     body: z.string().max(18_000).optional(),
     context: z.string().max(2_000).optional(),
+    draftId: z.string().uuid().optional(),
+    selectedText: z.string().max(2_000).optional(),
+    selectionStart: z.number().int().min(0).optional(),
+    selectionEnd: z.number().int().min(0).optional(),
+    stream: z.boolean().optional(),
     debugRaw: z.boolean().optional(),
   })
   .strict();
@@ -168,6 +175,21 @@ export async function POST(request: NextRequest) {
     }
     const headline = (body.headline ?? "").trim();
     const draftBody = (body.body ?? "").trim();
+    const selectedText = (body.selectedText ?? "").trim();
+    if (body.draftId) {
+      const draft = await getCreatorDraftById({
+        userId,
+        draftId: body.draftId,
+      });
+      if (draft?.neverSendToAi) {
+        return apiErrorResponse({
+          request,
+          status: 403,
+          code: API_ERROR_CODES.FORBIDDEN,
+          message: "AI assist is disabled for this draft.",
+        });
+      }
+    }
     if (headline.length === 0 && mode === "headline") {
       return apiErrorResponse({
         request,
@@ -204,26 +226,62 @@ export async function POST(request: NextRequest) {
       articleTypeCustom: body.articleTypeCustom,
       headline,
       body: draftBody,
-      context: body.context,
+      context: [
+        body.context,
+        selectedText
+          ? `Selected excerpt (${body.selectionStart ?? 0}-${body.selectionEnd ?? 0}): ${selectedText}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
       debugRaw: body.debugRaw,
     } as Required<AssistRequestBody>, memorySummary);
 
     let text = "";
     let provider = "";
     let model = "";
+    let costEstimateUsd = 0;
+    let structuredDiagnosis: Record<string, unknown> | null = null;
     try {
-      const completion = await generateCreatorText({
-        userId,
-        workflowId,
-        callKind: "creator_assist",
-        route: "app/api/creator/assist",
-        prompt,
-        maxTokens: 300,
-        temperature: 0.4,
-      });
-      text = completion.text.trim();
-      provider = completion.provider;
-      model = completion.model;
+      if (body.helpMode === "stuck") {
+        const diagnosis = await generateAssistDiagnosis({
+          userId,
+          workflowId,
+          route: "app/api/creator/assist",
+          callKind: "creator_assist_diagnosis",
+          headline,
+          body: draftBody,
+          context: body.context,
+          selectedText,
+        });
+        structuredDiagnosis = diagnosis as unknown as Record<string, unknown>;
+        provider = diagnosis.providerMeta.provider;
+        model = diagnosis.providerMeta.model;
+        text = [
+          `Diagnosis: ${diagnosis.summary}`,
+          "",
+          ...diagnosis.suggestions.map(
+            (entry, index) => `${index + 1}. ${entry.title}: ${entry.detail}`
+          ),
+        ].join("\n");
+      } else {
+        const completion = await generateCreatorText({
+          userId,
+          workflowId,
+          callKind: "creator_assist",
+          route: "app/api/creator/assist",
+          prompt,
+          maxTokens: 300,
+          temperature: 0.4,
+        });
+        text = completion.text.trim();
+        provider = completion.provider;
+        model = completion.model;
+        costEstimateUsd = estimateProviderCallCostUsd(completion.provider, {
+          inputTokens: completion.inputTokens,
+          outputTokens: completion.outputTokens,
+        });
+      }
     } catch (error: unknown) {
       if (error instanceof CreatorStudioSchemaUnavailableError) {
         return internalErrorResponse({ request, error });
@@ -244,6 +302,11 @@ export async function POST(request: NextRequest) {
         message: "No assist output returned.",
       });
     }
+    const isAssistEscalation =
+      workflowId === "stuck_assist" ||
+      body.helpMode === "stuck" ||
+      settings.modelMode === "max";
+
     await Promise.all([
       createCreatorMemorySession({
         userId,
@@ -269,7 +332,9 @@ export async function POST(request: NextRequest) {
       createCreatorAuditEvent({
         userId,
         actorUserId: userId,
-        eventType: "creator_assist_invoked",
+        eventType: isAssistEscalation
+          ? "creator_assist_escalated"
+          : "creator_assist_invoked",
         route: "/api/creator/assist",
         metadata: {
           workflowId,
@@ -282,6 +347,46 @@ export async function POST(request: NextRequest) {
     ]);
 
     const responseBody: Record<string, unknown> = { result: text, provider, model };
+    responseBody.costEstimateUsd = costEstimateUsd;
+    responseBody.isEscalation = isAssistEscalation;
+    responseBody.selectedTextApplied = selectedText.length > 0;
+    if (structuredDiagnosis) responseBody.diagnosis = structuredDiagnosis;
+    if (body.stream) {
+      const words = text.split(/\s+/).filter(Boolean);
+      const encoder = new TextEncoder();
+      const chunks: string[] = [];
+      for (let i = 0; i < words.length; i += 18) {
+        chunks.push(words.slice(i, i + 18).join(" "));
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const delta of chunks) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: "delta", delta: `${delta} ` })}\n\n`)
+            );
+          }
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: "done",
+                provider,
+                model,
+                costEstimateUsd,
+                isEscalation: isAssistEscalation,
+              })}\n\n`
+            )
+          );
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
     if (env.CREATOR_DEBUG_PROMPT_LOGGING && body.debugRaw === true) {
       responseBody.prompt = redactSecrets(prompt);
     }

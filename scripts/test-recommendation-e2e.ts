@@ -42,7 +42,11 @@ function assert(condition: boolean, label: string, detail?: string) {
 
 const testUserId = `reco-e2e-${Date.now()}`;
 const insertedIds: string[] = [];
-const TEST_HEADLINE_PREFIX = "TEST_RECO_E2E";
+/**
+ * Must NOT contain `test_reco_e2e` (see `isLikelyTestFixtureRow` in lib/db/articles.ts) or
+ * fixtures are stripped from `getArticlesForFeed` / random pool and this script ranks only real rows.
+ */
+const TEST_HEADLINE_PREFIX = "RECO_E2E_FIXTURE";
 
 /**
  * Only delete reco-e2e fixture rows older than this window so parallel CI jobs
@@ -74,13 +78,21 @@ async function purgeStaleFixtures() {
     .from("articles")
     .delete()
     .or(
-      `headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST%RECO%E2E%`
+      `headline.ilike.%${TEST_HEADLINE_PREFIX}%,headline.ilike.%TEST_RECO_E2E%`
     )
     .lt("fetched_at", staleBeforeIso);
   if (articleErr) throw new Error(`purgeStaleFixtures(articles): ${articleErr.message}`);
 }
 
 async function seedArticles() {
+  const nowIso = new Date().toISOString();
+  const approvedModeration = {
+    moderationStatus: "approved" as const,
+    moderatedAt: nowIso,
+    moderatedByUserId: "reco-e2e-script",
+    moderationConfidence: 0.99,
+    moderationLabels: {} as Record<string, unknown>,
+  };
   const base = {
     subheadline: "sub",
     byline: "By Test",
@@ -94,26 +106,27 @@ async function seedArticles() {
     emotions: [],
     locale: "global",
     readingTimeSecs: 90,
+    ...approvedModeration,
   };
 
   const inserted = await insertArticles([
     {
       ...base,
-      headline: `TEST_RECO_E2E SCI TOP ${Date.now()}`,
+      headline: `${TEST_HEADLINE_PREFIX} SCI TOP ${Date.now()}`,
       category: "Science & Discovery",
       /** Engagement will be recorded on this row; boost must overcome Education below. */
       qualityScore: 0.72,
     },
     {
       ...base,
-      headline: `TEST_RECO_E2E EDU TOP ${Date.now()}`,
+      headline: `${TEST_HEADLINE_PREFIX} EDU TOP ${Date.now()}`,
       category: "Education",
       /** Higher base quality than Science before affinity; loses after Science affinity boost. */
       qualityScore: 0.85,
     },
     {
       ...base,
-      headline: `TEST_RECO_E2E SCI SECOND ${Date.now()}`,
+      headline: `${TEST_HEADLINE_PREFIX} SCI SECOND ${Date.now()}`,
       category: "Science & Discovery",
       qualityScore: 0.65,
     },

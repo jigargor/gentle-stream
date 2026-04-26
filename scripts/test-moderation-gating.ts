@@ -169,9 +169,8 @@ async function main() {
 
     insertedIds.push(approvedId, flaggedId, rejectedId);
 
-    // Feed query is ordered by quality_score desc with a limit; use a generous cap so the
-    // fixture is not excluded when many real rows share the category.
-    const feedRows = await getArticlesForFeed(category, 500, []);
+    // Feed query is ordered by quality_score desc with a limit; cap must exceed dense categories.
+    const feedRows = await getArticlesForFeed(category, 10_000, []);
     const feedIds = new Set(feedRows.map((row) => row.id));
     assert(feedIds.has(approvedId), "Feed includes approved article");
     assert(!feedIds.has(flaggedId), "Feed excludes flagged article");

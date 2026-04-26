@@ -128,7 +128,7 @@ export default function NewsFeed({
   userId,
   userEmail,
   isAdmin = false,
-  feedIncludeUserSubmitted = true,
+  feedIncludeUserSubmitted = false,
 }: NewsFeedProps) {
   const isGuestUser = userId === GUEST_USER_ID;
   const [mfaPassed, setMfaPassed] = useState(userId === "dev-local" || isGuestUser);

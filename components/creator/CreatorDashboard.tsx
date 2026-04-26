@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
 import type { ArticleSubmission } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { BUILT_IN_ARTICLE_TYPES, articleTypeLabel } from "@/lib/creator/article-types";
 import {
   formatApiClientError,
   parseApiClientError,
@@ -20,6 +21,8 @@ interface FormState {
   body: string;
   pullQuote: string;
   category: string;
+  articleType: string;
+  articleTypeCustom: string;
   contentKind: "user_article" | "recipe";
   locale: string;
   explicitHashtags: string;
@@ -38,6 +41,8 @@ const EMPTY_FORM: FormState = {
   body: "",
   pullQuote: "",
   category: CATEGORIES[0],
+  articleType: BUILT_IN_ARTICLE_TYPES[0],
+  articleTypeCustom: "",
   contentKind: "user_article",
   locale: "global",
   explicitHashtags: "",
@@ -69,7 +74,13 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
   const [assistBusy, setAssistBusy] = useState(false);
   const [assistError, setAssistError] = useState<string | null>(null);
   const [assistSuggestion, setAssistSuggestion] = useState<string | null>(null);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
+  const [helpContext, setHelpContext] = useState("");
+  const [idlePromptVisible, setIdlePromptVisible] = useState(false);
+  const [autocompleteEnabled, setAutocompleteEnabled] = useState(false);
+  const [autocompleteSuggestion, setAutocompleteSuggestion] = useState<string | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyCharacterCount = form.body.length;
   /** ~200 wpm, aligned with typical reading-time estimates for multi-column heuristic. */
   const previewReadingTimeSecs = useMemo(
@@ -110,11 +121,22 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       );
     }
 
-    return form.headline.trim().length > 0 && form.body.trim().length > 0 && !isBodyTooLong;
+    const hasArticleType =
+      form.articleType === "custom"
+        ? form.articleTypeCustom.trim().length > 1
+        : form.articleType.trim().length > 0;
+    return (
+      form.headline.trim().length > 0 &&
+      form.body.trim().length > 0 &&
+      hasArticleType &&
+      !isBodyTooLong
+    );
   }, [
     form.contentKind,
     form.headline,
     form.body,
+    form.articleType,
+    form.articleTypeCustom,
     isBodyTooLong,
     form.recipeServings,
     form.recipeIngredientsText,
@@ -167,6 +189,58 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     void loadSubmissions();
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      const response = await fetch("/api/creator/settings");
+      if (!response.ok) return;
+      const payload = (await response.json()) as { autocompleteEnabled?: boolean };
+      setAutocompleteEnabled(payload.autocompleteEnabled === true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (form.contentKind !== "user_article") return;
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    setIdlePromptVisible(false);
+    idleTimerRef.current = setTimeout(() => {
+      if (form.body.trim().length === 0) setIdlePromptVisible(true);
+    }, 5000);
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [form.body, form.contentKind]);
+
+  useEffect(() => {
+    if (!autocompleteEnabled || form.contentKind !== "user_article") return;
+    const trimmed = form.body.trim();
+    if (trimmed.length < 50) {
+      setAutocompleteSuggestion(null);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      const response = await fetch("/api/creator/autocomplete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          headline: form.headline,
+          articleType: form.articleTypeCustom.trim() || form.articleType,
+          context: trimmed.slice(-800),
+        }),
+      });
+      if (!response.ok) return;
+      const payload = (await response.json().catch(() => ({}))) as { suggestion?: string };
+      setAutocompleteSuggestion(payload.suggestion ?? null);
+    }, 450);
+    return () => clearTimeout(handle);
+  }, [
+    autocompleteEnabled,
+    form.articleType,
+    form.articleTypeCustom,
+    form.body,
+    form.contentKind,
+    form.headline,
+  ]);
+
   async function submitForm() {
     if (!canSubmit) return;
     setBusy(true);
@@ -217,6 +291,11 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
             body: bodyToSend,
             pullQuote: form.pullQuote,
             category: form.contentKind === "user_article" ? form.category : undefined,
+              articleType: form.contentKind === "user_article" ? form.articleType : undefined,
+              articleTypeCustom:
+                form.contentKind === "user_article" && form.articleType === "custom"
+                  ? form.articleTypeCustom
+                  : undefined,
             contentKind: form.contentKind,
             recipeServings: isRecipe ? recipeServings : undefined,
             recipeIngredients: isRecipe ? recipeIngredients : undefined,
@@ -251,6 +330,8 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
       body: submission.body,
       pullQuote: submission.pullQuote,
       category: submission.category,
+      articleType: submission.articleType ?? BUILT_IN_ARTICLE_TYPES[0],
+      articleTypeCustom: submission.articleTypeCustom ?? "",
       contentKind: submission.contentKind,
       locale: submission.locale,
       explicitHashtags: submission.explicitHashtags.join(", "),
@@ -390,7 +471,14 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
     }
   }
 
-  async function requestAssist(mode: "improve" | "continue" | "headline") {
+  async function requestAssist(
+    mode: "improve" | "continue" | "headline",
+    options?: {
+      workflowId?: "startup_inspiration" | "startup_brainstorm" | "startup_random" | "stuck_assist";
+      helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+      context?: string;
+    }
+  ) {
     setAssistBusy(true);
     setAssistError(null);
     setAssistSuggestion(null);
@@ -401,9 +489,14 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
         credentials: "include",
         body: JSON.stringify({
           mode,
+          workflowId: options?.workflowId,
+          helpMode: options?.helpMode,
           contentKind: form.contentKind,
+          articleType: form.articleType,
+          articleTypeCustom: form.articleType === "custom" ? form.articleTypeCustom : undefined,
           headline: form.headline,
           body: form.body,
+          context: options?.context,
         }),
       });
       if (!response.ok) {
@@ -457,6 +550,20 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                   Public profile
                 </Link>
               ) : null}
+              <Link
+                href="/creator/settings"
+                style={{
+                  padding: "0.36rem 0.62rem",
+                  border: "1px solid #1a472a",
+                  background: "#fff",
+                  color: "#1a472a",
+                  textDecoration: "none",
+                  fontSize: "0.82rem",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                Creator settings
+              </Link>
               <Link
                 href="/"
                 style={{
@@ -528,13 +635,35 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
             <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
               <input aria-label="Headline" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
               {form.contentKind === "user_article" ? (
-                <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
-                  {CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
+                    {CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={form.articleType}
+                    onChange={(e) => setForm((f) => ({ ...f, articleType: e.target.value }))}
+                    style={{ padding: "0.45rem", border: "1px solid #bbb" }}
+                  >
+                    {BUILT_IN_ARTICLE_TYPES.map((value) => (
+                      <option key={value} value={value}>
+                        {articleTypeLabel(value)}
+                      </option>
+                    ))}
+                    <option value="custom">Custom type...</option>
+                  </select>
+                  {form.articleType === "custom" ? (
+                    <input
+                      value={form.articleTypeCustom}
+                      onChange={(e) => setForm((f) => ({ ...f, articleTypeCustom: e.target.value }))}
+                      placeholder="Describe custom article type"
+                      style={{ padding: "0.45rem", border: "1px solid #bbb" }}
+                    />
+                  ) : null}
+                </>
               ) : null}
             </div>
             {form.contentKind === "user_article" ? (
@@ -547,10 +676,80 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
               >
               <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
                 <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>Article body (Markdown)</label>
-                <span style={{ fontSize: "0.78rem", color: isBodyTooLong ? "#8b4513" : "#666" }}>
-                  {bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}
-                </span>
+                <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHelpMenuOpen((prev) => !prev);
+                      setIdlePromptVisible(false);
+                    }}
+                    style={{
+                      padding: "0.2rem 0.45rem",
+                      border: "1px solid #888",
+                      background: "#fff",
+                      fontSize: "0.75rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Help
+                  </button>
+                  <span style={{ fontSize: "0.78rem", color: isBodyTooLong ? "#8b4513" : "#666" }}>
+                    {bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}
+                  </span>
+                </div>
               </div>
+              {(idlePromptVisible || helpMenuOpen) ? (
+                <div style={{ marginTop: "0.5rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem", display: "grid", gap: "0.45rem" }}>
+                  <strong style={{ fontSize: "0.82rem" }}>Need a starting push?</strong>
+                  <input
+                    value={helpContext}
+                    onChange={(event) => setHelpContext(event.target.value)}
+                    placeholder="Optional context (e.g. dramatic, intellectual, stern, cold)"
+                    style={{ padding: "0.42rem", border: "1px solid #bbb" }}
+                  />
+                  <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void requestAssist("continue", {
+                          workflowId: "startup_inspiration",
+                          helpMode: "inspiration",
+                          context: helpContext,
+                        })
+                      }
+                      style={{ padding: "0.24rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer", fontSize: "0.76rem" }}
+                    >
+                      Inspiration
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void requestAssist("improve", {
+                          workflowId: "startup_brainstorm",
+                          helpMode: "brainstorm",
+                          context: helpContext,
+                        })
+                      }
+                      style={{ padding: "0.24rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer", fontSize: "0.76rem" }}
+                    >
+                      Brainstorm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void requestAssist("continue", {
+                          workflowId: "startup_random",
+                          helpMode: "random",
+                          context: helpContext,
+                        })
+                      }
+                      style={{ padding: "0.24rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer", fontSize: "0.76rem" }}
+                    >
+                      Random
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
                 <button type="button" onClick={() => insertMarkdown("**", "**", "bold")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
@@ -601,6 +800,19 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                 >
                   Suggest headline
                 </button>
+                <button
+                  type="button"
+                  disabled={assistBusy}
+                  onClick={() =>
+                    void requestAssist("improve", {
+                      workflowId: "stuck_assist",
+                      helpMode: "stuck",
+                    })
+                  }
+                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
+                >
+                  I&apos;m stuck
+                </button>
               </div>
               {assistError ? (
                 <p style={{ margin: "0.4rem 0 0", color: "#8b4513", fontSize: "0.8rem" }}>
@@ -632,6 +844,25 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                       Dismiss
                     </button>
                   </div>
+                </div>
+              ) : null}
+              {autocompleteSuggestion && autocompleteEnabled ? (
+                <div style={{ marginTop: "0.35rem", border: "1px dashed #b9b2a4", padding: "0.45rem", background: "#fff" }}>
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#666" }}>
+                    Autocomplete suggestion: {autocompleteSuggestion}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        body: `${prev.body}${prev.body.endsWith(" ") ? "" : " "}${autocompleteSuggestion}`.trim(),
+                      }))
+                    }
+                    style={{ marginTop: "0.35rem", padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.74rem" }}
+                  >
+                    Accept suggestion
+                  </button>
                 </div>
               ) : null}
 
@@ -1010,7 +1241,7 @@ export function CreatorDashboard({ publicProfileHref }: CreatorDashboardProps = 
                   <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
                     {submission.contentKind === "recipe"
                       ? `Recipe • ${new Date(submission.createdAt).toLocaleString()}`
-                      : `${submission.category} • Article • ${new Date(submission.createdAt).toLocaleString()}`}
+                      : `${submission.category} • ${(submission.articleTypeCustom || submission.articleType || "article").replaceAll("_", " ")} • ${new Date(submission.createdAt).toLocaleString()}`}
                   </p>
                   {submission.adminNote ? (
                     <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>

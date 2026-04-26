@@ -6,7 +6,11 @@ import {
   isCreatorAccessDenied,
   requireCreatorAccess,
 } from "@/lib/auth/creator-security";
-import { createCreatorMemorySession, getCreatorSettings } from "@/lib/db/creatorStudio";
+import {
+  createCreatorMemorySession,
+  CreatorStudioSchemaUnavailableError,
+  getCreatorSettings,
+} from "@/lib/db/creatorStudio";
 import { generateCreatorText } from "@/lib/creator/model-router";
 import {
   buildRateLimitKey,
@@ -40,7 +44,10 @@ export async function POST(request: NextRequest) {
     });
     if (!rate.allowed) return rateLimitExceededResponse(rate, request);
 
-    const settings = await getCreatorSettings(access.userId);
+    const { settings, schemaAvailable } = await getCreatorSettings(access.userId);
+    if (!schemaAvailable) {
+      return internalErrorResponse({ request, error: new CreatorStudioSchemaUnavailableError() });
+    }
     if (!settings.autocompleteEnabled) {
       return apiErrorResponse({
         request,

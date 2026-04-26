@@ -32,7 +32,7 @@ const PROVIDERS: Array<ProviderKeyMeta["provider"]> = ["anthropic", "openai", "g
 
 const DEFAULT_SETTINGS: CreatorSettingsResponse = {
   modelMode: "manual",
-  defaultProvider: "anthropic",
+  defaultProvider: null,
   defaultModel: "",
   maxModeEnabled: false,
   maxModeBudgetCents: 0,
@@ -51,6 +51,7 @@ export function CreatorSettingsConsole() {
   const [keys, setKeys] = useState<ProviderKeyMeta[]>([]);
   const [draftKeys, setDraftKeys] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [schemaNotice, setSchemaNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function loadState() {
@@ -58,6 +59,9 @@ export function CreatorSettingsConsole() {
       fetch("/api/creator/settings"),
       fetch("/api/creator/settings/provider-keys"),
     ]);
+    const dbUnavailable =
+      settingsRes.headers.get("X-Gentle-Stream-Creator-Db") === "unavailable" ||
+      keysRes.headers.get("X-Gentle-Stream-Creator-Db") === "unavailable";
     if (settingsRes.ok) {
       setSettings((await settingsRes.json()) as CreatorSettingsResponse);
     }
@@ -65,6 +69,11 @@ export function CreatorSettingsConsole() {
       const payload = (await keysRes.json()) as { keys?: ProviderKeyMeta[] };
       setKeys(payload.keys ?? []);
     }
+    setSchemaNotice(
+      dbUnavailable
+        ? "Creator Studio tables are not visible to the API yet. Run lib/db/migrations/060_creator_studio_foundation.sql in the Supabase SQL editor, then reload the schema cache under Project Settings → API. The form shows defaults; saves and keys will not persist until then."
+        : null
+    );
   }
 
   useEffect(() => {
@@ -81,7 +90,8 @@ export function CreatorSettingsConsole() {
         body: JSON.stringify(settings),
       });
       if (!res.ok) {
-        setMessage("Could not save settings.");
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setMessage(body?.error ?? "Could not save settings.");
         return;
       }
       setMessage("Settings saved.");
@@ -165,6 +175,22 @@ export function CreatorSettingsConsole() {
             Bring-your-own-key model controls, budgets, autocomplete, and memory policy.
           </p>
         </section>
+
+        {schemaNotice ? (
+          <section
+            role="status"
+            style={{
+              background: "#fff8e6",
+              border: "1px solid #c9a227",
+              padding: "0.85rem 1rem",
+              color: "#3d3200",
+              fontSize: "0.9rem",
+              lineHeight: 1.45,
+            }}
+          >
+            {schemaNotice}
+          </section>
+        ) : null}
 
         <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem", display: "grid", gap: "0.6rem" }}>
           <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Model Router</h2>

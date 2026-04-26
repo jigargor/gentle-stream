@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isCreatorStudioSchemaUnavailableError } from "@/lib/db/creatorStudio";
 
 export const API_ERROR_CODES = {
   BAD_GATEWAY: "ERR_BAD_GATEWAY",
@@ -10,6 +11,7 @@ export const API_ERROR_CODES = {
   MISSING_FIELD: "ERR_MISSING_FIELD",
   NOT_FOUND: "ERR_NOT_FOUND",
   RATE_LIMITED: "ERR_RATE_LIMITED",
+  SERVICE_UNAVAILABLE: "ERR_SERVICE_UNAVAILABLE",
   UNAUTHORIZED: "ERR_UNAUTHORIZED",
   VALIDATION: "ERR_VALIDATION",
 } as const;
@@ -79,6 +81,20 @@ export interface InternalErrorInput {
 
 export function internalErrorResponse(input: InternalErrorInput): NextResponse<ApiErrorBody> {
   if (input.error !== undefined) {
+    if (isCreatorStudioSchemaUnavailableError(input.error)) {
+      console.warn("[api] Creator Studio schema unavailable", input.error);
+      const message =
+        input.error instanceof Error && input.error.name === "CreatorStudioSchemaUnavailableError"
+          ? input.error.message
+          : "Creator Studio tables are not available yet. Run lib/db/migrations/060_creator_studio_foundation.sql in the Supabase SQL editor, then reload the API schema cache (Project Settings → API → Reload schema).";
+      return apiErrorResponse({
+        request: input.request,
+        status: 503,
+        code: API_ERROR_CODES.SERVICE_UNAVAILABLE,
+        message,
+        headers: input.headers,
+      });
+    }
     console.error("[api] Internal error", input.error);
   }
   return apiErrorResponse({

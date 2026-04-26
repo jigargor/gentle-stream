@@ -3,6 +3,40 @@ import { createHash, randomBytes } from "node:crypto";
 import { decryptProviderKey, encryptProviderKey } from "@/lib/security/key-vault";
 import { redactSecrets } from "@/lib/security/redaction";
 
+/** PostgREST when tables are missing or the API schema cache is stale after migration. */
+function creatorStudioTableMissingFromMessage(message: string): boolean {
+  const m = message.toLowerCase();
+  const mentionsCreatorTable =
+    m.includes("creator_settings") ||
+    m.includes("creator_provider_keys") ||
+    m.includes("creator_memory_sessions") ||
+    m.includes("creator_memory_summaries") ||
+    m.includes("creator_audit_events") ||
+    m.includes("creator_mfa_recovery_codes");
+  if (!mentionsCreatorTable) return false;
+  return (
+    m.includes("schema cache") ||
+    m.includes("could not find the table") ||
+    m.includes("does not exist")
+  );
+}
+
+export class CreatorStudioSchemaUnavailableError extends Error {
+  override readonly name = "CreatorStudioSchemaUnavailableError";
+  constructor() {
+    super(
+      "Creator Studio tables are missing or not visible to the API yet. Run lib/db/migrations/060_creator_studio_foundation.sql in the Supabase SQL editor, then open Project Settings → API → reload the schema cache."
+    );
+  }
+}
+
+export function isCreatorStudioSchemaUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof CreatorStudioSchemaUnavailableError ||
+    (error instanceof Error && creatorStudioTableMissingFromMessage(error.message))
+  );
+}
+
 export type CreatorModelMode = "manual" | "auto" | "max";
 export type ProviderKeyStatus = "active" | "revoked" | "invalid";
 export type CreatorProvider = "anthropic" | "openai" | "gemini";
@@ -81,6 +115,39 @@ export interface CreatorSettings {
   perRequestBudgetCents: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface GetCreatorSettingsResult {
+  settings: CreatorSettings;
+  /** False when `creator_settings` is missing from PostgREST (migration not applied or schema cache stale). */
+  schemaAvailable: boolean;
+}
+
+export interface ListCreatorProviderKeysResult {
+  keys: CreatorProviderKeyMetadata[];
+  schemaAvailable: boolean;
+}
+
+function defaultCreatorSettings(userId: string): CreatorSettings {
+  const now = new Date().toISOString();
+  return {
+    userId,
+    modelMode: "manual",
+    defaultProvider: null,
+    defaultModel: null,
+    maxModeEnabled: false,
+    maxModeBudgetCents: 0,
+    autocompleteEnabled: false,
+    autocompletePrompt: "",
+    autocompleteSensitiveDraftsBlocked: false,
+    memoryEnabled: true,
+    memoryRetentionDays: 90,
+    monthlyBudgetCents: 0,
+    dailyBudgetCents: 0,
+    perRequestBudgetCents: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export interface CreatorProviderKeyMetadata {
@@ -215,29 +282,52 @@ export async function upsertCreatorSettings(
     .upsert(row, { onConflict: "user_id" })
     .select("*")
     .single();
-  if (error) throw new Error(`upsertCreatorSettings: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`upsertCreatorSettings: ${error.message}`);
+  }
   return rowToSettings(data as CreatorSettingsRow);
 }
 
-export async function getCreatorSettings(userId: string): Promise<CreatorSettings> {
+export async function getCreatorSettings(userId: string): Promise<GetCreatorSettingsResult> {
   const { data, error } = await db
     .from("creator_settings")
     .select("*")
     .eq("user_id", userId)
     .maybeSingle();
-  if (error) throw new Error(`getCreatorSettings: ${error.message}`);
-  if (data) return rowToSettings(data as CreatorSettingsRow);
-  return upsertCreatorSettings(userId, {});
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      return { settings: defaultCreatorSettings(userId), schemaAvailable: false };
+    }
+    throw new Error(`getCreatorSettings: ${error.message}`);
+  }
+  if (data) return { settings: rowToSettings(data as CreatorSettingsRow), schemaAvailable: true };
+  try {
+    const settings = await upsertCreatorSettings(userId, {});
+    return { settings, schemaAvailable: true };
+  } catch (e: unknown) {
+    if (isCreatorStudioSchemaUnavailableError(e)) {
+      return { settings: defaultCreatorSettings(userId), schemaAvailable: false };
+    }
+    throw e;
+  }
 }
 
-export async function listCreatorProviderKeys(userId: string): Promise<CreatorProviderKeyMetadata[]> {
+export async function listCreatorProviderKeys(userId: string): Promise<ListCreatorProviderKeysResult> {
   const { data, error } = await db
     .from("creator_provider_keys")
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
-  if (error) throw new Error(`listCreatorProviderKeys: ${error.message}`);
-  return (data as CreatorProviderKeyRow[]).map(rowToProviderKeyMetadata);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      return { keys: [], schemaAvailable: false };
+    }
+    throw new Error(`listCreatorProviderKeys: ${error.message}`);
+  }
+  return { keys: (data as CreatorProviderKeyRow[]).map(rowToProviderKeyMetadata), schemaAvailable: true };
 }
 
 export async function upsertCreatorProviderKey(input: {
@@ -263,7 +353,12 @@ export async function upsertCreatorProviderKey(input: {
     .upsert(row, { onConflict: "user_id,provider" })
     .select("*")
     .single();
-  if (error) throw new Error(`upsertCreatorProviderKey: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`upsertCreatorProviderKey: ${error.message}`);
+  }
   return rowToProviderKeyMetadata(data as CreatorProviderKeyRow);
 }
 
@@ -279,7 +374,12 @@ export async function setCreatorProviderKeyStatus(input: {
     .eq("provider", input.provider)
     .select("*")
     .maybeSingle();
-  if (error) throw new Error(`setCreatorProviderKeyStatus: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`setCreatorProviderKeyStatus: ${error.message}`);
+  }
   if (!data) return null;
   return rowToProviderKeyMetadata(data as CreatorProviderKeyRow);
 }
@@ -293,7 +393,12 @@ export async function deleteCreatorProviderKey(input: {
     .delete()
     .eq("user_id", input.userId)
     .eq("provider", input.provider);
-  if (error) throw new Error(`deleteCreatorProviderKey: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`deleteCreatorProviderKey: ${error.message}`);
+  }
 }
 
 export async function getCreatorProviderApiKey(input: {
@@ -307,7 +412,12 @@ export async function getCreatorProviderApiKey(input: {
     .eq("provider", input.provider)
     .eq("status", "active")
     .maybeSingle();
-  if (error) throw new Error(`getCreatorProviderApiKey: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`getCreatorProviderApiKey: ${error.message}`);
+  }
   if (!data) return null;
   const row = data as CreatorProviderKeyRow;
   const plaintext = decryptProviderKey({
@@ -341,7 +451,13 @@ export async function createCreatorAuditEvent(input: {
     target_id: input.targetId ?? null,
     metadata: input.metadata ?? {},
   });
-  if (error) throw new Error(`createCreatorAuditEvent: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      console.warn("[creatorStudio] audit event skipped (schema unavailable)", input.eventType);
+      return;
+    }
+    throw new Error(`createCreatorAuditEvent: ${error.message}`);
+  }
 }
 
 export async function listCreatorAuditEvents(userId: string, limit = 100) {
@@ -351,7 +467,10 @@ export async function listCreatorAuditEvents(userId: string, limit = 100) {
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(Math.max(1, Math.min(500, Math.trunc(limit))));
-  if (error) throw new Error(`listCreatorAuditEvents: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) return [];
+    throw new Error(`listCreatorAuditEvents: ${error.message}`);
+  }
   return data ?? [];
 }
 
@@ -367,7 +486,12 @@ export async function regenerateCreatorRecoveryCodes(userId: string): Promise<st
     code_hash: hashRecoveryCode(userId, code),
   }));
   const { error } = await db.from("creator_mfa_recovery_codes").insert(rows);
-  if (error) throw new Error(`regenerateCreatorRecoveryCodes: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`regenerateCreatorRecoveryCodes: ${error.message}`);
+  }
   return codes;
 }
 
@@ -377,7 +501,10 @@ export async function listCreatorRecoveryCodeStates(userId: string) {
     .select("id, used_at, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
-  if (error) throw new Error(`listCreatorRecoveryCodeStates: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) return [];
+    throw new Error(`listCreatorRecoveryCodeStates: ${error.message}`);
+  }
   return data ?? [];
 }
 
@@ -392,7 +519,12 @@ export async function consumeCreatorRecoveryCode(input: {
     .eq("user_id", input.userId)
     .eq("code_hash", hash)
     .maybeSingle();
-  if (error) throw new Error(`consumeCreatorRecoveryCode: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`consumeCreatorRecoveryCode: ${error.message}`);
+  }
   if (!data) return false;
   if ((data as { used_at?: string | null }).used_at) return false;
   const { error: updateError } = await db
@@ -424,7 +556,12 @@ export async function createCreatorMemorySession(input: {
     })
     .select("*")
     .single();
-  if (error) throw new Error(`createCreatorMemorySession: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`createCreatorMemorySession: ${error.message}`);
+  }
   return rowToMemorySession(data as CreatorMemorySessionRow);
 }
 
@@ -441,7 +578,10 @@ export async function listCreatorMemory(input: {
     .limit(Math.max(1, Math.min(500, Math.trunc(input.limit ?? 100))));
   if (input.workflowId) query = query.eq("workflow_id", input.workflowId);
   const { data, error } = await query;
-  if (error) throw new Error(`listCreatorMemory: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) return [];
+    throw new Error(`listCreatorMemory: ${error.message}`);
+  }
   return (data as CreatorMemorySessionRow[]).map(rowToMemorySession);
 }
 
@@ -452,7 +592,12 @@ export async function deleteCreatorMemory(input: {
   let query = db.from("creator_memory_sessions").delete().eq("user_id", input.userId);
   if (input.workflowId) query = query.eq("workflow_id", input.workflowId);
   const { error } = await query;
-  if (error) throw new Error(`deleteCreatorMemory: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`deleteCreatorMemory: ${error.message}`);
+  }
 }
 
 export async function upsertCreatorMemorySummary(input: {
@@ -474,7 +619,12 @@ export async function upsertCreatorMemorySummary(input: {
     .insert(row)
     .select("*")
     .single();
-  if (error) throw new Error(`upsertCreatorMemorySummary: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) {
+      throw new CreatorStudioSchemaUnavailableError();
+    }
+    throw new Error(`upsertCreatorMemorySummary: ${error.message}`);
+  }
   return rowToMemorySummary(data as CreatorMemorySummaryRow);
 }
 
@@ -491,6 +641,9 @@ export async function listCreatorMemorySummaries(input: {
     .limit(Math.max(1, Math.min(200, Math.trunc(input.limit ?? 30))));
   if (input.workflowId) query = query.eq("workflow_id", input.workflowId);
   const { data, error } = await query;
-  if (error) throw new Error(`listCreatorMemorySummaries: ${error.message}`);
+  if (error) {
+    if (creatorStudioTableMissingFromMessage(error.message)) return [];
+    throw new Error(`listCreatorMemorySummaries: ${error.message}`);
+  }
   return (data as CreatorMemorySummaryRow[]).map(rowToMemorySummary);
 }

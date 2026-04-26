@@ -9,6 +9,7 @@ import {
 import {
   createCreatorAuditEvent,
   createCreatorMemorySession,
+  CreatorStudioSchemaUnavailableError,
   deleteCreatorMemory,
   getCreatorSettings,
   listCreatorMemory,
@@ -71,7 +72,10 @@ export async function POST(request: NextRequest) {
         details: parsed.error.flatten(),
       });
     }
-    const settings = await getCreatorSettings(access.userId);
+    const { settings, schemaAvailable } = await getCreatorSettings(access.userId);
+    if (!schemaAvailable) {
+      return internalErrorResponse({ request, error: new CreatorStudioSchemaUnavailableError() });
+    }
     if (!settings.memoryEnabled) {
       return apiErrorResponse({
         request,
@@ -110,7 +114,10 @@ export async function PATCH(request: NextRequest) {
         details: parsed.error.flatten(),
       });
     }
-    const settings = await getCreatorSettings(access.userId);
+    const { settings, schemaAvailable } = await getCreatorSettings(access.userId);
+    if (!schemaAvailable) {
+      return internalErrorResponse({ request, error: new CreatorStudioSchemaUnavailableError() });
+    }
     const summary = await upsertCreatorMemorySummary({
       userId: access.userId,
       workflowId: parsed.data.workflowId,

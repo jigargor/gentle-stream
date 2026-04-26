@@ -68,7 +68,12 @@ const FORCE_INGEST_CLIENT_COOLDOWN_MS = 8_000;
 const FEED_CACHE_TTL_MS = 35_000;
 const FEED_STALE_TTL_MS = 120_000;
 const FEED_PERSIST_TTL_MS = 24 * 60 * 60 * 1000;
-const FEED_PERSIST_VERSION = 1;
+/** Bumped when persisted snapshot shape or mix semantics change (invalidates stale on-disk feeds). */
+const FEED_PERSIST_VERSION = 2;
+/** Per-user client cache for game mix — avoids sharing one key between guest and signed-in sessions. */
+function gameRatioLocalStorageKey(userId: string): string {
+  return `gentle_stream_game_ratio_v2:${userId}`;
+}
 const FEED_PERSIST_MAX_SECTIONS_DEFAULT = 48;
 const FEED_PERSIST_MAX_BYTES_DEFAULT = 350_000;
 const GUEST_USER_ID = "anonymous";
@@ -107,6 +112,8 @@ interface PersistedFeedSnapshot {
   createdAtMs: number;
   sectionCount: number;
   articleSectionsRendered: number;
+  /** Mix used when this snapshot was written — reject hydrate if it no longer matches. */
+  feedGameRatio?: number;
   sections: FeedSection[];
   renderedArticleKeys: string[];
   renderedDbArticleIds: string[];
@@ -286,6 +293,15 @@ export default function NewsFeed({
         return false;
       }
       if (Date.now() - parsed.createdAtMs > FEED_PERSIST_TTL_MS) {
+        localStorage.removeItem(persistedFeedKey);
+        return false;
+      }
+      const snapRatio = parsed.feedGameRatio;
+      if (
+        typeof snapRatio !== "number" ||
+        Number.isNaN(snapRatio) ||
+        Math.abs(snapRatio - gameRatioRef.current) > 0.02
+      ) {
         localStorage.removeItem(persistedFeedKey);
         return false;
       }
@@ -1248,7 +1264,6 @@ export default function NewsFeed({
     firstSectionTelemetryLoggedRef.current = false;
     persistentCacheHydrateAttemptedRef.current = false;
     persistentCacheHydrateHitRef.current = false;
-    feedBootstrapFnsRef.current.hydratePersistedSections();
 
     const gen = ++feedBootstrapGenRef.current;
     let cancelled = false;
@@ -1268,13 +1283,21 @@ export default function NewsFeed({
             const profile = await res.json();
             if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
-            if (
-              typeof profile.gameRatio === "number" &&
-              !Number.isNaN(profile.gameRatio)
-            ) {
-              const r = Math.min(1, Math.max(0, profile.gameRatio));
+            const rawGameRatio = (profile as { gameRatio?: unknown }).gameRatio;
+            const parsedGameRatio =
+              typeof rawGameRatio === "number"
+                ? rawGameRatio
+                : typeof rawGameRatio === "string"
+                  ? Number.parseFloat(rawGameRatio)
+                  : NaN;
+            if (!Number.isNaN(parsedGameRatio)) {
+              const r = Math.min(1, Math.max(0, parsedGameRatio));
               gameRatioRef.current = r;
-              localStorage.setItem("gentle_stream_game_ratio", String(r));
+              try {
+                localStorage.setItem(gameRatioLocalStorageKey(userId), String(r));
+              } catch {
+                /* ignore */
+              }
               usedServerRatio = true;
             }
 
@@ -1340,12 +1363,16 @@ export default function NewsFeed({
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
       if (!usedServerRatio && !isGuestUser) {
-        const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
-        if (storedRatio !== null) {
-          const ratio = parseFloat(storedRatio);
-          if (!Number.isNaN(ratio)) {
-            gameRatioRef.current = Math.min(1, Math.max(0, ratio));
+        try {
+          const storedRatio = localStorage.getItem(gameRatioLocalStorageKey(userId));
+          if (storedRatio !== null) {
+            const ratio = Number.parseFloat(storedRatio);
+            if (!Number.isNaN(ratio)) {
+              gameRatioRef.current = Math.min(1, Math.max(0, ratio));
+            }
           }
+        } catch {
+          /* ignore */
         }
       }
 
@@ -1404,6 +1431,10 @@ export default function NewsFeed({
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
+      feedBootstrapFnsRef.current.hydratePersistedSections();
+
+      if (cancelled || gen !== feedBootstrapGenRef.current) return;
+
       await feedBootstrapFnsRef.current.ensureSingletonFeedCached();
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
@@ -1445,6 +1476,7 @@ export default function NewsFeed({
         createdAtMs: Date.now(),
         sectionCount: boundedSections.length,
         articleSectionsRendered: articleSectionsRenderedRef.current,
+        feedGameRatio: gameRatioRef.current,
         sections: boundedSections,
         renderedArticleKeys: Array.from(renderedArticleKeysRef.current),
         renderedDbArticleIds: Array.from(renderedDbArticleIdsRef.current),
@@ -1681,7 +1713,11 @@ export default function NewsFeed({
   const handleGameRatioSaved = useCallback(
     (ratio: number) => {
       gameRatioRef.current = ratio;
-      localStorage.setItem("gentle_stream_game_ratio", String(ratio));
+      try {
+        localStorage.setItem(gameRatioLocalStorageKey(userId), String(ratio));
+      } catch {
+        /* ignore */
+      }
       reachedEndRef.current = false;
       if (reachedEndTimeoutIdRef.current) {
         window.clearTimeout(reachedEndTimeoutIdRef.current);
@@ -1700,7 +1736,7 @@ export default function NewsFeed({
       renderedDbArticleIdsRef.current = new Set();
       resetSectionsAndLoadMore();
     },
-    [resetSectionsAndLoadMore]
+    [resetSectionsAndLoadMore, userId]
   );
 
   const handleKindFilterSelect = useCallback(

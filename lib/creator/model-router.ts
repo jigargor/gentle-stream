@@ -2,6 +2,7 @@ import { db } from "@/lib/db/client";
 import {
   type CreatorModelMode,
   type CreatorProvider,
+  CreatorStudioSchemaUnavailableError,
   getCreatorProviderApiKey,
   getCreatorSettings,
 } from "@/lib/db/creatorStudio";
@@ -167,7 +168,10 @@ async function runMaxMode(input: {
 }
 
 export async function generateCreatorText(input: CreatorRouterInput): Promise<LlmGenerateTextResult> {
-  const settings = await getCreatorSettings(input.userId);
+  const { settings, schemaAvailable } = await getCreatorSettings(input.userId);
+  if (!schemaAvailable) {
+    throw new CreatorStudioSchemaUnavailableError();
+  }
   const mode = modeFromSettings({
     settingsMode: settings.modelMode,
     override: input.modelModeOverride,

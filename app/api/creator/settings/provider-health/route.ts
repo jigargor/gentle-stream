@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const access = await requireCreatorAccess(request, { requireMfa: true });
     if (isCreatorAccessDenied(access)) return access;
 
-    const keys = await listCreatorProviderKeys(access.userId);
+    const { keys, schemaAvailable } = await listCreatorProviderKeys(access.userId);
     const providers = ["anthropic", "openai", "gemini"].map((provider) => {
       const key = keys.find((entry) => entry.provider === provider);
       return {
@@ -18,7 +18,11 @@ export async function GET(request: NextRequest) {
         lastUsedAt: key?.lastUsedAt ?? null,
       };
     });
-    return NextResponse.json({ providers });
+    const res = NextResponse.json({ providers });
+    if (!schemaAvailable) {
+      res.headers.set("X-Gentle-Stream-Creator-Db", "unavailable");
+    }
+    return res;
   } catch (error: unknown) {
     return internalErrorResponse({ request, error });
   }

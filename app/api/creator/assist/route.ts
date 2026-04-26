@@ -15,6 +15,7 @@ import { CREATOR_WORKFLOW_IDS, type CreatorWorkflowId } from "@/lib/creator/work
 import {
   createCreatorAuditEvent,
   createCreatorMemorySession,
+  CreatorStudioSchemaUnavailableError,
   getCreatorSettings,
   listCreatorMemorySummaries,
   upsertCreatorMemorySummary,
@@ -125,7 +126,10 @@ export async function POST(request: NextRequest) {
     if (isCreatorAccessDenied(access)) return access;
     const userId = access.userId;
     const env = getEnv();
-    const settings = await getCreatorSettings(userId);
+    const { settings, schemaAvailable } = await getCreatorSettings(userId);
+    if (!schemaAvailable) {
+      return internalErrorResponse({ request, error: new CreatorStudioSchemaUnavailableError() });
+    }
     const rateLimit = await consumeRateLimit({
       policy: { id: "creator-assist", windowMs: 60_000, max: 20 },
       key: buildRateLimitKey({
@@ -221,6 +225,9 @@ export async function POST(request: NextRequest) {
       provider = completion.provider;
       model = completion.model;
     } catch (error: unknown) {
+      if (error instanceof CreatorStudioSchemaUnavailableError) {
+        return internalErrorResponse({ request, error });
+      }
       if (!(error instanceof LlmProviderError) && !(error instanceof Error)) throw error;
       return apiErrorResponse({
         request,

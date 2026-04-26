@@ -26,8 +26,12 @@ export async function GET(request: NextRequest) {
   try {
     const access = await requireCreatorAccess(request, { requireMfa: true });
     if (isCreatorAccessDenied(access)) return access;
-    const keys = await listCreatorProviderKeys(access.userId);
-    return NextResponse.json({ keys });
+    const { keys, schemaAvailable } = await listCreatorProviderKeys(access.userId);
+    const res = NextResponse.json({ keys });
+    if (!schemaAvailable) {
+      res.headers.set("X-Gentle-Stream-Creator-Db", "unavailable");
+    }
+    return res;
   } catch (error: unknown) {
     return internalErrorResponse({ request, error });
   }

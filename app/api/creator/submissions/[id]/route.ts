@@ -6,7 +6,7 @@ import type { SubmissionContentKind } from "@/lib/types";
 import { getOrCreateUserProfile } from "@/lib/db/users";
 import { updateSubmissionForAuthor } from "@/lib/db/creator";
 import { parseJsonBody } from "@/lib/validation/http";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -259,23 +259,28 @@ export async function PATCH(
     const submission = await updateSubmissionForAuthor(updates);
     return NextResponse.json({ submission });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = message.includes("not found")
+    const rawMessage = error instanceof Error ? error.message : "";
+    const status = rawMessage.includes("not found")
       ? 404
-      : message.includes("pending")
+      : rawMessage.includes("pending")
         ? 409
         : 500;
-    const code =
-      status === 404
-        ? API_ERROR_CODES.NOT_FOUND
-        : status === 409
-          ? API_ERROR_CODES.INVALID_REQUEST
-          : API_ERROR_CODES.INTERNAL;
-    return apiErrorResponse({
-      request,
-      status,
-      code,
-      message,
-    });
+    if (status === 404) {
+      return apiErrorResponse({
+        request,
+        status,
+        code: API_ERROR_CODES.NOT_FOUND,
+        message: "Not found",
+      });
+    }
+    if (status === 409) {
+      return apiErrorResponse({
+        request,
+        status,
+        code: API_ERROR_CODES.INVALID_REQUEST,
+        message: "Submission must be pending",
+      });
+    }
+    return internalErrorResponse({ request, error });
   }
 }

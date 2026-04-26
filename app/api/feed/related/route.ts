@@ -9,7 +9,7 @@ import {
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
 import { getSessionUserId } from "@/lib/api/sessionUser";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 const ANONYMOUS_USER_ID = "anonymous";
 
@@ -76,12 +76,6 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ headlines });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }

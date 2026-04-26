@@ -6,9 +6,8 @@ import {
   consumeRateLimit,
   rateLimitExceededResponse,
 } from "@/lib/security/rateLimit";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
+import { generateLlmText, LlmProviderError } from "@/lib/llm/client";
 
 const assistBodySchema = z
   .object({
@@ -101,16 +100,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-    if (!apiKey) {
-      return apiErrorResponse({
-        request,
-        status: 503,
-        code: API_ERROR_CODES.BAD_GATEWAY,
-        message: "AI assist is not configured on the server.",
-      });
-    }
-
     const prompt = buildPrompt({
       mode,
       contentKind,
@@ -118,35 +107,27 @@ export async function POST(request: NextRequest) {
       body: draftBody,
     });
 
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-haiku-latest",
-        max_tokens: 300,
+    let text = "";
+    try {
+      const completion = await generateLlmText({
+        callKind: "creator_assist",
+        route: "app/api/creator/assist",
+        agent: "creator_assist",
+        correlationId: userId,
+        prompt,
+        maxTokens: 300,
         temperature: 0.4,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    const payload = (await response.json().catch(() => ({}))) as {
-      content?: Array<{ type?: string; text?: string }>;
-      error?: { message?: string };
-    };
-    if (!response.ok) {
+      });
+      text = completion.text.trim();
+    } catch (error: unknown) {
+      if (!(error instanceof LlmProviderError)) throw error;
       return apiErrorResponse({
         request,
-        status: response.status,
+        status: 502,
         code: API_ERROR_CODES.BAD_GATEWAY,
-        message: payload.error?.message ?? "AI assist failed.",
+        message: "AI assist failed.",
       });
     }
-
-    const text =
-      payload.content?.find((entry) => entry.type === "text")?.text?.trim() ?? "";
     if (!text) {
       return apiErrorResponse({
         request,
@@ -157,12 +138,6 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ result: text });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }

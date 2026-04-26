@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 const GUEST_USER_ID = "anonymous";
 
 export default async function Home() {
-  const feedIncludeUserSubmitted = getEnv().FEED_INCLUDE_USER_SUBMITTED ?? true;
+  const feedIncludeUserSubmitted = getEnv().FEED_INCLUDE_USER_SUBMITTED ?? false;
 
   if (process.env.AUTH_DISABLED === "1") {
     return (

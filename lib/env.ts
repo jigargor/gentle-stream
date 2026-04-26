@@ -35,6 +35,11 @@ const envSchema = z.object({
   NEXT_PUBLIC_SUPPORT_EMAIL: optionalTrimmedString,
   NEXT_PUBLIC_LEGAL_LAST_UPDATED: optionalTrimmedString,
   ANTHROPIC_API_KEY: optionalTrimmedString,
+  ANTHROPIC_DEFAULT_MODEL: optionalTrimmedString,
+  OPENAI_API_KEY: optionalTrimmedString,
+  OPENAI_DEFAULT_MODEL: optionalTrimmedString,
+  GEMINI_API_KEY: optionalTrimmedString,
+  GEMINI_DEFAULT_MODEL: optionalTrimmedString,
   ANTHROPIC_CROSSWORD_MODEL: optionalTrimmedString,
   SENTRY_DSN: optionalTrimmedString,
   SENTRY_ENVIRONMENT: optionalTrimmedString,
@@ -109,11 +114,6 @@ let cachedEnv: Env | null = null;
 export function getEnv(): Env {
   if (!cachedEnv) {
     cachedEnv = parseEnv(process.env);
-    if (!cachedEnv.ANTHROPIC_API_KEY) {
-      console.warn(
-        "[env] ANTHROPIC_API_KEY is not set — ingest and tagger agents will fail at runtime."
-      );
-    }
   }
   return cachedEnv;
 }

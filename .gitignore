@@ -43,5 +43,6 @@ playwright-report/
 test-results/
 blob-report
 .cursor/plans/
+.cursor/code-review/
 .cursor/debug-edacaf.log
 .claude/

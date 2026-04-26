@@ -33,7 +33,7 @@ import {
   STOCK_TOP_UP_MAX_PER_RUN,
 } from "@/lib/constants";
 import type { Category } from "@/lib/constants";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
 import { logError, logInfo, logWarning } from "@/lib/observability/logger";
 
@@ -109,13 +109,11 @@ export async function GET(request: NextRequest) {
       context: { runId, triggerSource, traceId },
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
     captureException(error, { route: "cron.scheduler", phase: "create_run", traceId });
-    return apiErrorResponse({
+    return internalErrorResponse({
       request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message: `Could not create ingest run: ${message}`,
+      error,
+      message: "Could not create ingest run",
     });
   }
 

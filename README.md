@@ -105,6 +105,8 @@ The ingest agent tracks real `usage.input_tokens` against a conservative per-min
 
 ## Quality: tests & CI/CD
 
+Use `npm run ci:local` before pushing when you want the closest local match to the GitHub fast-check job. It runs the same command list that Actions runs through `npm run ci:fast`, with local `.env.local` values loaded before placeholder defaults. Use `npm run ci:local:full` when you also want the DB-backed integration suite that normally runs in Actions with Production environment secrets.
+
 | Layer | What runs |
 |-------|-----------|
 | **Typecheck & build** | `tsc --noEmit` and `next build` with placeholder public env vars (no secrets on fork PRs). |
@@ -244,6 +246,8 @@ npx tsx scripts/test-killer-nonogram.ts
 npx tsx scripts/test-dedup.ts          # Supabase secrets required
 npx tsx scripts/test-url-dedup.ts      # Supabase secrets required
 
+npm run ci:local                # closest local match for GitHub fast checks
+npm run ci:local:full           # fast checks + DB integration; Supabase secrets required
 npm run test:unit               # vitest (node) unit/routes
 npm run test:component          # vitest + react-testing-library (jsdom)
 npm run storybook               # Storybook UI dev server

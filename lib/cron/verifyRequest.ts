@@ -23,7 +23,7 @@ function isCronIpAllowed(request: NextRequest): boolean {
 }
 
 function warnIfUnexpectedCronIp(request: NextRequest): void {
-  if (process.env.NODE_ENV !== "production" || isCronIpAllowed(request)) return;
+  if (isCronIpAllowed(request)) return;
   const ip = getCronRequestIp(request) || "unknown";
   const nowMs = Date.now();
   const lastWarnAt = cronIpWarningState.get(ip) ?? 0;
@@ -38,22 +38,16 @@ function warnIfUnexpectedCronIp(request: NextRequest): void {
 
 /**
  * Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`.
- * Manual / legacy calls may use `x-cron-secret`.
  */
 export function isAuthorizedCronRequest(request: NextRequest): boolean {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
 
   const auth = request.headers.get("authorization");
-  if (auth === `Bearer ${expected}`) {
-    warnIfUnexpectedCronIp(request);
-    return true;
-  }
-
-  if (request.headers.get("x-cron-secret") === expected) {
-    warnIfUnexpectedCronIp(request);
-    return true;
-  }
+  if (auth !== `Bearer ${expected}`) return false;
+  if (process.env.NODE_ENV !== "production") return true;
+  if (isCronIpAllowed(request)) return true;
+  warnIfUnexpectedCronIp(request);
 
   return false;
 }

@@ -13,9 +13,8 @@
 import { getArticleById, getUntaggedArticles, updateArticleTags } from "../db/articles";
 import type { StoredArticle } from "../types";
 import { captureException, captureMessage, startSpan } from "@/lib/observability";
-import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
+import { generateLlmText, LlmProviderError } from "@/lib/llm/client";
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const AUTO_REJECT_MIN_CONFIDENCE = 0.88;
 
 function messageLooksLikeCreditExhaustion(message: string): boolean {
@@ -74,75 +73,44 @@ export async function runTaggerAgent(limit = 20): Promise<void> {
 }
 
 async function tagSingleArticle(article: StoredArticle): Promise<TagSingleOutcome> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
   if (article.tagged) return "skipped_already_tagged";
 
   const prompt = buildTaggerPrompt(article);
-  const startedAt = Date.now();
-
-  const response = await fetch(ANTHROPIC_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    const creditsExhausted =
-      response.status === 429 && messageLooksLikeCreditExhaustion(responseText);
-    await logLlmProviderCall({
-      provider: "anthropic",
+  let completionText = "";
+  try {
+    const completion = await generateLlmText({
       callKind: "tagger_classification",
       route: "lib/agents/taggerAgent",
       agent: "tagger",
       category: article.category,
-      model: "claude-sonnet-4-20250514",
-      durationMs: Date.now() - startedAt,
-      httpStatus: response.status,
-      success: false,
-      errorCode: `http_${response.status}`,
-      errorMessage: responseText.slice(0, 500),
       correlationId: article.id,
+      prompt,
+      maxTokens: 300,
+      temperature: 0,
     });
-    console.error(`[TaggerAgent] API error for article ${article.id}: ${response.status}`);
-    captureException(new Error(`tagger_api_${response.status}`), {
-      agent: "tagger",
-      articleId: article.id,
-      status: response.status,
-    });
-    return creditsExhausted ? "credits_exhausted" : "api_error";
+    completionText = completion.text;
+  } catch (error: unknown) {
+    if (error instanceof LlmProviderError) {
+      const creditsExhausted =
+        error.provider === "anthropic" &&
+        error.status === 429 &&
+        messageLooksLikeCreditExhaustion(error.responseBody);
+      console.error(`[TaggerAgent] API error for article ${article.id}: ${error.status ?? "unknown"}`);
+      captureException(new Error(`tagger_api_${error.status ?? "unknown"}`), {
+        agent: "tagger",
+        articleId: article.id,
+        status: error.status ?? undefined,
+        provider: error.provider,
+        model: error.model,
+      });
+      return creditsExhausted ? "credits_exhausted" : "api_error";
+    }
+    throw error;
   }
-
-  const data = await response.json();
-  const usage = data.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-  await logLlmProviderCall({
-    provider: "anthropic",
-    callKind: "tagger_classification",
-    route: "lib/agents/taggerAgent",
-    agent: "tagger",
-    category: article.category,
-    model: "claude-sonnet-4-20250514",
-    inputTokens: usage?.input_tokens ?? 0,
-    outputTokens: usage?.output_tokens ?? 0,
-    durationMs: Date.now() - startedAt,
-    httpStatus: response.status,
-    success: true,
-    correlationId: article.id,
-  });
-  const textBlock = data.content?.find((b: { type: string }) => b.type === "text");
-  if (!textBlock?.text) return "parse_error";
+  if (!completionText) return "parse_error";
 
   try {
-    const raw = textBlock.text.replace(/```json|```/g, "").trim();
+    const raw = completionText.replace(/```json|```/g, "").trim();
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     const enrichment: TaggerEnrichment = JSON.parse(raw.slice(start, end + 1));

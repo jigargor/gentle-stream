@@ -33,6 +33,8 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   authorUsername?: string | null;
   submissionId?: string | null;
   creatorExplicitTags?: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
 
   // Written by tagger agent
   tags: string[]; // ["ocean", "coral", "australia"]
@@ -130,6 +132,8 @@ export interface ArticleSubmission {
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
   status: ArticleSubmissionStatus;
   adminNote: string | null;
   rejectionReason: string | null;

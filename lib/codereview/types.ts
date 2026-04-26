@@ -1,4 +1,5 @@
-export type ReviewMode = "standard" | "max";
+/** `challenger_validation`: optional extra reviewers (see `.codereview.yml`); not adaptive routing. */
+export type ReviewMode = "standard" | "challenger_validation";
 export type ReviewProvider = "anthropic" | "openai" | "gemini";
 export type ReviewSeverity = "critical" | "high" | "medium" | "low";
 export type ReviewValidity = "unknown" | "confirmed" | "rejected";

@@ -53,13 +53,14 @@ const DEFAULT_MODELS: Record<LlmProvider, string> = {
   gemini: "gemini-2.5-flash",
 };
 
-export function resolveLlmProvider(preferred?: LlmProvider): LlmProvider {
-  if (preferred) return preferred;
-  const envProvider = getEnv().LLM_DEFAULT_PROVIDER?.trim().toLowerCase();
-  if (envProvider === "openai" || envProvider === "gemini" || envProvider === "anthropic") {
-    return envProvider;
-  }
-  return "anthropic";
+/** Primary → fallback order for `generateLlmText` when `provider` is omitted. */
+const PROVIDER_FALLBACK_CHAIN: LlmProvider[] = ["anthropic", "openai", "gemini"];
+
+function hasProviderApiKey(provider: LlmProvider): boolean {
+  const env = getEnv();
+  if (provider === "anthropic") return Boolean(env.ANTHROPIC_API_KEY?.trim());
+  if (provider === "openai") return Boolean(env.OPENAI_API_KEY?.trim());
+  return Boolean(env.GEMINI_API_KEY?.trim());
 }
 
 function resolveModel(provider: LlmProvider, override?: string): string {
@@ -284,9 +285,39 @@ async function runGemini(input: LlmGenerateTextInput): Promise<LlmGenerateTextRe
   };
 }
 
-export async function generateLlmText(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
-  const provider = resolveLlmProvider(input.provider);
+async function runProvider(
+  input: LlmGenerateTextInput,
+  provider: LlmProvider
+): Promise<LlmGenerateTextResult> {
   if (provider === "anthropic") return runAnthropic(input);
   if (provider === "openai") return runOpenAi(input);
   return runGemini(input);
+}
+
+export async function generateLlmText(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
+  if (input.provider) {
+    if (!hasProviderApiKey(input.provider)) {
+      throw new Error(`${input.provider} was requested but its API key is not set`);
+    }
+    return runProvider(input, input.provider);
+  }
+
+  const errors: LlmProviderError[] = [];
+  for (const provider of PROVIDER_FALLBACK_CHAIN) {
+    if (!hasProviderApiKey(provider)) continue;
+    try {
+      return await runProvider(input, provider);
+    } catch (error) {
+      if (error instanceof LlmProviderError) {
+        errors.push(error);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (errors.length > 0) throw errors[errors.length - 1]!;
+  throw new Error(
+    "No LLM provider available: set ANTHROPIC_API_KEY and/or OPENAI_API_KEY and/or GEMINI_API_KEY"
+  );
 }

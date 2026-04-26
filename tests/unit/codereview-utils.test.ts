@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildContextPackage,
   deterministicReviewerOrder,
-  isFindingAcceptedByDebate,
   rankFindingsForTieBreak,
 } from "@/lib/codereview";
 
-describe("code review debate helpers", () => {
+describe("code review ordering helpers", () => {
   it("orders reviewers deterministically for a seed", () => {
     const ordered = deterministicReviewerOrder(
       [
@@ -21,23 +20,6 @@ describe("code review debate helpers", () => {
       "gemini",
       "openai",
     ]);
-  });
-
-  it("accepts findings by agreement or executable evidence", () => {
-    expect(
-      isFindingAcceptedByDebate({
-        agreeingModelCount: 2,
-        minimumAgreement: 2,
-        hasExecutableEvidence: false,
-      })
-    ).toBe(true);
-    expect(
-      isFindingAcceptedByDebate({
-        agreeingModelCount: 1,
-        minimumAgreement: 2,
-        hasExecutableEvidence: true,
-      })
-    ).toBe(true);
   });
 
   it("ranks findings with security-first tie-break", () => {

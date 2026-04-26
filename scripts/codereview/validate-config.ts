@@ -3,10 +3,9 @@ import path from "path";
 
 const requiredFragments = [
   "modes:",
-  "max:",
+  "challenger_validation:",
   "reviewers:",
   "adjudicator:",
-  "tieBreakPriority:",
   "audit:",
   "contextPackaging:",
 ];

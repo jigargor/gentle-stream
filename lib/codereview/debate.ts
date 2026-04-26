@@ -14,8 +14,8 @@ const CATEGORY_PRIORITY: Record<ReviewCategory, number> = {
   style: 5,
 };
 
-export function chooseReviewMode(isMaxMode: boolean): ReviewMode {
-  return isMaxMode ? "max" : "standard";
+export function chooseReviewMode(isChallengerValidationEnabled: boolean): ReviewMode {
+  return isChallengerValidationEnabled ? "challenger_validation" : "standard";
 }
 
 export function deterministicReviewerOrder(
@@ -42,13 +42,4 @@ export function rankFindingsForTieBreak(
     }
     return left.findingId.localeCompare(right.findingId);
   });
-}
-
-export function isFindingAcceptedByDebate(input: {
-  agreeingModelCount: number;
-  minimumAgreement: number;
-  hasExecutableEvidence: boolean;
-}): boolean {
-  if (input.agreeingModelCount >= input.minimumAgreement) return true;
-  return input.hasExecutableEvidence;
 }

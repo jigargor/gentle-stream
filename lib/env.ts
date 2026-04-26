@@ -36,7 +36,6 @@ const envSchema = z.object({
   NEXT_PUBLIC_LEGAL_LAST_UPDATED: optionalTrimmedString,
   ANTHROPIC_API_KEY: optionalTrimmedString,
   ANTHROPIC_DEFAULT_MODEL: optionalTrimmedString,
-  LLM_DEFAULT_PROVIDER: optionalTrimmedString,
   OPENAI_API_KEY: optionalTrimmedString,
   OPENAI_DEFAULT_MODEL: optionalTrimmedString,
   GEMINI_API_KEY: optionalTrimmedString,

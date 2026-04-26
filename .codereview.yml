@@ -1,3 +1,6 @@
+# Code review modes are consumed by Cursor / local tooling — not production routing.
+# `challenger_validation` runs extra models as a gated second opinion; it is not adaptive switching.
+
 version: 1
 
 defaults:
@@ -13,9 +16,8 @@ modes:
     adjudicator:
       provider: anthropic
       model: claude-sonnet-4-20250514
-    minAgreement: 1
 
-  max:
+  challenger_validation:
     reviewers:
       - provider: anthropic
         model: claude-sonnet-4-20250514
@@ -26,21 +28,6 @@ modes:
     adjudicator:
       provider: anthropic
       model: claude-sonnet-4-20250514
-    minAgreement: 2
-    tieBreakPriority:
-      - security
-      - correctness
-      - data_loss
-      - performance
-      - reliability
-      - style
-    acceptancePolicy:
-      requireEvidenceForSingleModel: true
-      evidenceKinds:
-        - failing_test
-        - repro_steps
-        - source_reference
-      advisoryWhenLowConfidence: true
 
 audit:
   enabled: true

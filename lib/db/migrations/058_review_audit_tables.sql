@@ -1,4 +1,4 @@
--- AI code review audit trail for model-comparison studies.
+-- AI code review audit trail (optional multi-reviewer / challenger validation; see `.codereview.yml`).
 
 CREATE TABLE IF NOT EXISTS review_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS review_runs (
   branch TEXT NOT NULL,
   pr_number INTEGER NOT NULL,
   commit_sha TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('standard', 'max')),
+  mode TEXT NOT NULL CHECK (mode IN ('standard', 'challenger_validation')),
   prompt_template_id TEXT,
   context_package_hash TEXT,
   reviewer_models JSONB NOT NULL DEFAULT '[]'::jsonb,

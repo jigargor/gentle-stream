@@ -19,9 +19,6 @@ export function mfaFailureResponse(request: Request, error: unknown): NextRespon
     rawStatus !== undefined && rawStatus >= 400 && rawStatus < 600 ? rawStatus : 400;
   return applyTraceIdHeader(
     request,
-    NextResponse.json(
-      { error: message, status: rawStatus ?? httpStatus },
-      { status: httpStatus }
-    )
+    NextResponse.json({ error: message }, { status: httpStatus })
   );
 }

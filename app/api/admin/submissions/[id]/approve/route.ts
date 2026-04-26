@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/api/adminAuth";
 import { reviewSubmission } from "@/lib/db/creator";
 import { parseJsonBody } from "@/lib/validation/http";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 // Client sends null for empty fields (JSON), not omitted keys — use nullish, not optional-only.
 const approveBodySchema = z.object({
@@ -40,22 +40,28 @@ export async function POST(
     });
     return NextResponse.json(reviewed);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = message.includes("pending")
+    const rawMessage = error instanceof Error ? error.message : "";
+    const status = rawMessage.includes("pending")
       ? 409
-      : message.includes("not found")
+      : rawMessage.includes("not found")
         ? 404
         : 500;
-    return apiErrorResponse({
-      request,
-      status,
-      code:
-        status === 404
-          ? API_ERROR_CODES.NOT_FOUND
-          : status === 409
-            ? API_ERROR_CODES.INVALID_REQUEST
-            : API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    if (status === 404) {
+      return apiErrorResponse({
+        request,
+        status,
+        code: API_ERROR_CODES.NOT_FOUND,
+        message: "Not found",
+      });
+    }
+    if (status === 409) {
+      return apiErrorResponse({
+        request,
+        status,
+        code: API_ERROR_CODES.INVALID_REQUEST,
+        message: "Submission must be pending",
+      });
+    }
+    return internalErrorResponse({ request, error });
   }
 }

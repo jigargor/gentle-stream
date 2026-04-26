@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./sudoku/reducer": "./src/sudoku/reducer.ts",
+    "./connections/reducer": "./src/connections/reducer.ts",
     "./rabbit-hole/generator": "./src/rabbit-hole/generator.ts",
     "./rabbit-hole/wiki-reader": "./src/rabbit-hole/wiki-reader.ts"
   },

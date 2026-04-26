@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 import { db } from "@/lib/db/client";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
 import { logInfo, logWarning } from "@/lib/observability/logger";
 import { getEnv } from "@/lib/env";
@@ -152,18 +152,12 @@ export async function GET(request: NextRequest) {
     await flushOnShutdown();
     return NextResponse.json(status);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
     captureException(error, {
       route: "cron.engagement_health",
       traceId: request.headers.get("x-trace-id") ?? undefined,
     });
     await flushOnShutdown();
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }
 

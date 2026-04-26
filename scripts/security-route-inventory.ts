@@ -30,7 +30,7 @@ async function listRouteFiles(dir: string): Promise<string[]> {
 
 function detectAuthModel(content: string): RouteInventoryItem["authModel"] {
   const hasCron = content.includes("isAuthorizedCronRequest(");
-  const hasAdmin = content.includes("isAdmin(");
+  const hasAdmin = content.includes("isAdmin(") || content.includes("requireAdmin(");
   const hasSession = content.includes("getSessionUserId(");
   if (hasCron) return "cron_secret";
   if (hasAdmin) return "admin_guard";

@@ -91,6 +91,11 @@ export async function updateSession(
     return finish(nextResponse());
   }
 
+  // Browser CSP violation reports (no session cookies; must not 401)
+  if (pathname === "/api/csp-report") {
+    return finish(nextResponse());
+  }
+
   // Let the Route Handler own cookie exchange; refreshing here can keep the prior session
   // while /auth/callback sets the new one, so the wrong user can appear signed in.
   if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {

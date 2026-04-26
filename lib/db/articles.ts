@@ -15,7 +15,7 @@ const isSeenTableReadsEnabled =
   env.FEED_SEEN_TABLE_READS_ENABLED == null
     ? true
     : env.FEED_SEEN_TABLE_READS_ENABLED;
-const isUserSubmittedEnabled = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
+const isUserSubmittedEnabled = env.FEED_INCLUDE_USER_SUBMITTED ?? false;
 let isFeedSeenRpcAvailable = true;
 let isModerationColumnsAvailable = true;
 const shouldFailOnUrlOverlapError =

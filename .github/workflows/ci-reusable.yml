@@ -45,37 +45,10 @@ jobs:
           npm --version
           node --version
           npm ci || npm ci --legacy-peer-deps
-      - run: npm run env:check
-      - run: npm run security:inventory
-      - run: npm run security:rls-audit
-      - run: npm run validation:route-json-casts
-      - run: npm run lint
-      - run: npm run security:audit
-        continue-on-error: true
-      - run: npx tsc --noEmit
-      - run: npm run build
-        env:
-          ANTHROPIC_API_KEY: "placeholder-anthropic-key"
-          CRON_SECRET: "placeholder-cron-secret"
-      - run: npx tsx scripts/test-sudoku.ts
-      - run: npx tsx scripts/test-word-search.ts
-      - run: npx tsx scripts/test-killer-nonogram.ts
-      - run: npx tsx scripts/test-citations.ts
-      - run: npx tsx scripts/test-article-engagement-api.ts
-      - run: npx tsx scripts/test-recommendation-ranking.ts
-      - run: npx tsx scripts/test-engagement-guardrails.ts
-        env:
-          # engagement-health/route imports db; job-level placeholders cover Supabase keys.
-          CRON_SECRET: "placeholder-cron-secret"
-      - run: npm run test:unit
-      - run: npx vitest run -c vitest.unit.config.ts tests/unit/articleDedupKeys.test.ts
-      - name: Dedup key semantics are unit-tested here
+      - name: Dedup key semantics are unit-tested in ci:fast
         run: echo "DB-backed dedup integration scripts run only in the integration job."
-      - run: npm run test:component
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:stories
-      - run: npm run test:e2e:smoke
-      - run: npm run test:integration
+      - run: npm run ci:fast
 
   integration:
     name: DB integration tests
@@ -102,8 +75,4 @@ jobs:
           npm --version
           node --version
           npm ci || npm ci --legacy-peer-deps
-      - run: npx tsx scripts/test-dedup.ts
-      - run: npx tsx scripts/test-url-dedup.ts
-      - run: npx tsx scripts/test-moderation-gating.ts
-      - run: npx tsx scripts/test-article-engagement-db.ts
-      - run: npx tsx scripts/test-recommendation-e2e.ts
+      - run: npm run ci:integration

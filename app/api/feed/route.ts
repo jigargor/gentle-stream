@@ -244,7 +244,7 @@ export async function GET(request: NextRequest) {
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
 
   const categoryParam = searchParams.get("category");
-  const includeUserSubmitted = env.FEED_INCLUDE_USER_SUBMITTED ?? true;
+  const includeUserSubmitted = env.FEED_INCLUDE_USER_SUBMITTED ?? false;
   const contentKinds = parseContentKinds(searchParams, includeUserSubmitted);
   const sectionIndex = parseInt(searchParams.get("sectionIndex") || "0", 10);
   const pageSize = parseInt(searchParams.get("pageSize") || "3", 10);

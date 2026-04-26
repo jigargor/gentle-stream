@@ -43,12 +43,12 @@ export async function PATCH(
     const updated = await updateRssFeed(params.data.id, parsed.data);
     return NextResponse.json(updated);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Could not update RSS feed";
+    console.error("[admin.rss-feeds.update] failed", error);
     return apiErrorResponse({
       request,
       status: 400,
       code: API_ERROR_CODES.INVALID_REQUEST,
-      message,
+      message: "Could not update RSS feed",
     });
   }
 }
@@ -71,12 +71,12 @@ export async function DELETE(
     await deleteRssFeed(params.data.id);
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Could not delete RSS feed";
+    console.error("[admin.rss-feeds.delete] failed", error);
     return apiErrorResponse({
       request,
       status: 400,
       code: API_ERROR_CODES.INVALID_REQUEST,
-      message,
+      message: "Could not delete RSS feed",
     });
   }
 }

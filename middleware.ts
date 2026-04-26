@@ -13,6 +13,9 @@ export async function middleware(request: NextRequest) {
   } catch {
     supabaseOrigin = "";
   }
+  const isDev = process.env.NODE_ENV === "development";
+  // Next.js Fast Refresh / dev runtime uses eval(); OAuth popups need Google/Facebook origins.
+  const scriptSrcUnsafeEval = isDev ? " 'unsafe-eval'" : "";
   const cspDirectives = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -22,9 +25,10 @@ export async function middleware(request: NextRequest) {
     "img-src 'self' data: blob: https:",
     "font-src 'self' data: https://fonts.gstatic.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://places.googleapis.com`,
-    `script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com`,
-    "frame-src https://challenges.cloudflare.com",
+    `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://places.googleapis.com https://accounts.google.com https://www.googleapis.com https://www.facebook.com https://graph.facebook.com`,
+    `script-src 'self' 'nonce-${nonce}'${scriptSrcUnsafeEval} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://accounts.google.com https://apis.google.com`,
+    "frame-src https://challenges.cloudflare.com https://accounts.google.com https://www.facebook.com",
+    "worker-src 'self' blob: https://challenges.cloudflare.com",
     "report-uri /api/csp-report",
   ].join("; ");
   response.headers.set("Content-Security-Policy", cspDirectives);

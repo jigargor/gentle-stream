@@ -7,7 +7,7 @@ import {
   updateDailyTodoItem,
 } from "@/lib/db/dailyTodos";
 import { parseJsonBody } from "@/lib/validation/http";
-import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 
 const todoActionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -66,13 +66,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }
 
@@ -154,12 +148,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return apiErrorResponse({
-      request,
-      status: 500,
-      code: API_ERROR_CODES.INTERNAL,
-      message,
-    });
+    return internalErrorResponse({ request, error });
   }
 }

@@ -109,7 +109,8 @@ async function main() {
       emotions: [],
       locale: "global",
       reading_time_secs: 60,
-      quality_score: 0.6,
+      // High score so the row is not pushed out of getArticlesForFeed's quality-ordered window.
+      quality_score: 1,
       used_count: 0,
       tagged: true,
       source_urls: [],
@@ -168,7 +169,8 @@ async function main() {
 
     insertedIds.push(approvedId, flaggedId, rejectedId);
 
-    const feedRows = await getArticlesForFeed(category, 25, []);
+    // Feed query is ordered by quality_score desc with a limit; cap must exceed dense categories.
+    const feedRows = await getArticlesForFeed(category, 10_000, []);
     const feedIds = new Set(feedRows.map((row) => row.id));
     assert(feedIds.has(approvedId), "Feed includes approved article");
     assert(!feedIds.has(flaggedId), "Feed excludes flagged article");

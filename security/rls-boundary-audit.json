@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-04-19T19:42:27.060Z",
+  "generatedAt": "2026-04-26T18:31:27.723Z",
   "summary": {
-    "totalTables": 25,
-    "tablesWithRlsEnabled": 25,
+    "totalTables": 28,
+    "tablesWithRlsEnabled": 28,
     "tablesWithPolicies": 13,
     "serviceRoleRouteCount": 14
   },
@@ -91,6 +91,21 @@
       "table": "recipe_ratings",
       "rlsEnabled": true,
       "policyCount": 3
+    },
+    {
+      "table": "review_finding_outcomes",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "review_findings",
+      "rlsEnabled": true,
+      "policyCount": 0
+    },
+    {
+      "table": "review_runs",
+      "rlsEnabled": true,
+      "policyCount": 0
     },
     {
       "table": "rss_discovery_state",

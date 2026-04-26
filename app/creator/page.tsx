@@ -12,6 +12,15 @@ export default async function CreatorPage() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/creator");
+  if (!user.email_confirmed_at) redirect("/account/settings?reason=creator_email_verification_required");
+
+  const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const requiresStepUp =
+    (aalData?.nextLevel ?? null) === "aal2" &&
+    (aalData?.currentLevel ?? null) !== "aal2";
+  if (requiresStepUp) {
+    redirect("/account/settings?reason=creator_mfa_required");
+  }
 
   const userProfile = await getOrCreateUserProfile(user.id);
   if (userProfile.userRole !== "creator") {

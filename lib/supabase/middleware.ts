@@ -225,5 +225,55 @@ export async function updateSession(
     }
   }
 
+  if (user) {
+    const isCreatorStudioPage =
+      pathname.startsWith("/creator") &&
+      pathname !== "/creator/login" &&
+      pathname !== "/creator/onboarding";
+    const isCreatorStudioApi =
+      pathname.startsWith("/api/creator") &&
+      pathname !== "/api/creator/onboarding";
+    if ((isCreatorStudioPage || isCreatorStudioApi) && !user.email_confirmed_at) {
+      if (isCreatorStudioApi) {
+        return finish(
+          apiErrorResponse({
+            request,
+            traceId: requestTraceId,
+            status: 403,
+            code: API_ERROR_CODES.FORBIDDEN,
+            message: "Creator Studio requires verified email.",
+          })
+        );
+      }
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/account/settings";
+      redirectUrl.searchParams.set("reason", "creator_email_verification_required");
+      return finish(NextResponse.redirect(redirectUrl));
+    }
+    if (isCreatorStudioPage || isCreatorStudioApi) {
+      const { data: aalData, error: aalError } =
+        await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      const requiresStepUp =
+        !aalError && aalData.nextLevel === "aal2" && aalData.currentLevel !== "aal2";
+      if (requiresStepUp) {
+        if (isCreatorStudioApi) {
+          return finish(
+            apiErrorResponse({
+              request,
+              traceId: requestTraceId,
+              status: 403,
+              code: API_ERROR_CODES.FORBIDDEN,
+              message: "Creator Studio requires TOTP MFA verification.",
+            })
+          );
+        }
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = "/account/settings";
+        redirectUrl.searchParams.set("reason", "creator_mfa_required");
+        return finish(NextResponse.redirect(redirectUrl));
+      }
+    }
+  }
+
   return finish(supabaseResponse);
 }

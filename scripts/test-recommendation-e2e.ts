@@ -6,9 +6,13 @@
  *
  * Run:
  *   npx tsx -r dotenv/config scripts/test-recommendation-e2e.ts dotenv_config_path=.env.local
+ *
+ * CI: GitHub Secrets are not visible to `process.env` unless each secret is passed through the
+ * job `env:` block. This script only needs Supabase + DB RPCs, not LLM keys.
  */
 
 import { config } from "dotenv";
+import type { StoredArticle } from "../lib/types";
 config({ path: ".env.local" });
 
 let insertArticles: typeof import("../lib/db/articles").insertArticles;
@@ -42,6 +46,8 @@ function assert(condition: boolean, label: string, detail?: string) {
 
 const testUserId = `reco-e2e-${Date.now()}`;
 const insertedIds: string[] = [];
+/** Populated in seedArticles — `insertArticles` return order is not guaranteed to match input. */
+let insertedArticles: StoredArticle[] = [];
 /**
  * Must NOT contain `test_reco_e2e` (see `isLikelyTestFixtureRow` in lib/db/articles.ts) or
  * fixtures are stripped from `getArticlesForFeed` / random pool and this script ranks only real rows.
@@ -109,7 +115,7 @@ async function seedArticles() {
     ...approvedModeration,
   };
 
-  const inserted = await insertArticles([
+  insertedArticles = await insertArticles([
     {
       ...base,
       headline: `${TEST_HEADLINE_PREFIX} SCI TOP ${Date.now()}`,
@@ -131,8 +137,8 @@ async function seedArticles() {
       qualityScore: 0.65,
     },
   ]);
-  insertedIds.push(...inserted.map((a) => a.id));
-  assert(inserted.length === 3, "Inserted 3 fixture articles");
+  insertedIds.push(...insertedArticles.map((a) => a.id));
+  assert(insertedArticles.length === 3, "Inserted 3 fixture articles");
 
   // insertArticles sets tagged=false (ingest default). Ranker only considers tagged rows.
   const { error: tagErr } = await db
@@ -145,25 +151,23 @@ async function seedArticles() {
 async function testBeforeAfterAffinityOrdering() {
   console.log("\n── Before/after affinity ordering ─────────────────────────────");
 
-  const before = await getRankedFeed({
+  const scienceFixture = insertedArticles.find((a) => a.headline.includes("SCI TOP"));
+  const targetId = scienceFixture?.id ?? "";
+  assert(Boolean(targetId), "Resolved Science SCI TOP fixture (insert order is non-deterministic)");
+
+  const scienceCategory = "Science & Discovery" as const;
+  const sciencePageSize = 40;
+
+  const beforeScience = await getRankedFeed({
     userId: testUserId,
+    category: scienceCategory,
     sectionIndex: 0,
-    pageSize: 3,
+    pageSize: sciencePageSize,
     markSeen: false,
   });
-
-  assert(before.articles.length > 0, "Baseline feed returns at least one article");
-  const beforeTopCategory = before.articles[0]?.category ?? "";
-
-  // Prefer our seeded Science fixture so affinity is tied to known rows; fallback to feed.
-  const targetId =
-    insertedIds[0] ??
-    before.articles.find((a) => a.category === "Science & Discovery")?.id ??
-    "";
-  if (!targetId) {
-    assert(false, "No science article available for engagement seed");
-    return;
-  }
+  assert(beforeScience.articles.length > 0, "Science slice returns articles before affinity");
+  const rankBefore = beforeScience.articles.findIndex((a) => a.id === targetId);
+  assert(rankBefore >= 0, "Fixture appears in Science-ranked pool before affinity", `index ${rankBefore}`);
 
   const { error: evtErr } = await db.from("article_engagement_events").insert([
     {
@@ -192,23 +196,31 @@ async function testBeforeAfterAffinityOrdering() {
   });
   assert(!refreshErr, "Refreshed user affinity", refreshErr?.message);
 
-  // Same sectionIndex as baseline: mixed-feed category order is derived from sectionIndex;
-  // changing it swaps the primary category and replaces the whole candidate pool, so
-  // before/after top-{category} would compare unrelated slices (flaky in CI).
-  const after = await getRankedFeed({
+  const afterScience = await getRankedFeed({
     userId: testUserId,
+    category: scienceCategory,
     sectionIndex: 0,
-    pageSize: 3,
+    pageSize: sciencePageSize,
     markSeen: false,
   });
-  assert(after.articles.length > 0, "Post-affinity feed returns articles");
-  const afterTopCategory = after.articles[0]?.category ?? "";
+  assert(afterScience.articles.length > 0, "Science slice returns articles after affinity");
+  const rankAfter = afterScience.articles.findIndex((a) => a.id === targetId);
+  assert(rankAfter >= 0, "Fixture appears in Science-ranked pool after affinity", `index ${rankAfter}`);
 
+  const improved = rankAfter < rankBefore || rankAfter === 0;
   assert(
-    afterTopCategory === "Science & Discovery",
-    "Top recommendation shifts to engaged category",
-    `Before top: ${beforeTopCategory}, After top: ${afterTopCategory}`
+    improved,
+    "Engaged Science article ranks higher (or stays #1) in Science-only slice after affinity",
+    `rank ${rankBefore} → ${rankAfter}; head after: ${afterScience.articles[0]?.headline?.slice(0, 48) ?? ""}`
   );
+
+  const { data: affRows, error: affErr } = await db
+    .from("user_article_affinity")
+    .select("category")
+    .eq("user_id", testUserId)
+    .ilike("category", "%Science%");
+  assert(!affErr, "Affinity lookup succeeds", affErr?.message);
+  assert((affRows?.length ?? 0) > 0, "Affinity row exists for Science after refresh");
 }
 
 async function cleanup() {

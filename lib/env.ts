@@ -114,19 +114,6 @@ let cachedEnv: Env | null = null;
 export function getEnv(): Env {
   if (!cachedEnv) {
     cachedEnv = parseEnv(process.env);
-    if (!cachedEnv.ANTHROPIC_API_KEY) {
-      const hasOtherLlmKey =
-        Boolean(cachedEnv.OPENAI_API_KEY?.trim()) || Boolean(cachedEnv.GEMINI_API_KEY?.trim());
-      if (hasOtherLlmKey) {
-        console.warn(
-          "[env] ANTHROPIC_API_KEY is not set — Anthropic-only paths (e.g. parts of ingest) may fail; `generateLlmText` can still use OpenAI/Gemini when configured."
-        );
-      } else {
-        console.warn(
-          "[env] No LLM keys configured (set ANTHROPIC_API_KEY and/or OPENAI_API_KEY / GEMINI_API_KEY) — ingest and tagger agents will fail at runtime."
-        );
-      }
-    }
   }
   return cachedEnv;
 }

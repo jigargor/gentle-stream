@@ -47,11 +47,32 @@ export class LlmProviderError extends Error {
   }
 }
 
+/**
+ * Used when `*_DEFAULT_MODEL` env vars are unset — mid-tier / cost-balanced defaults per provider.
+ */
 const DEFAULT_MODELS: Record<LlmProvider, string> = {
   anthropic: "claude-sonnet-4-20250514",
   openai: "gpt-4o-mini",
   gemini: "gemini-2.5-flash",
 };
+
+let warnedMissingAllLlmKeys = false;
+
+function warnMissingAllLlmKeysOnce(): void {
+  if (warnedMissingAllLlmKeys) return;
+  const env = getEnv();
+  const hasAny =
+    Boolean(env.ANTHROPIC_API_KEY?.trim()) ||
+    Boolean(env.OPENAI_API_KEY?.trim()) ||
+    Boolean(env.GEMINI_API_KEY?.trim());
+  if (hasAny) return;
+  warnedMissingAllLlmKeys = true;
+  console.warn(
+    "[llm] No ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY — generateLlmText will fail. " +
+      "GitHub Secrets are not in process.env unless your workflow maps them (e.g. env: ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}). " +
+      "Local scripts: use .env.local or `dotenv_config_path=`."
+  );
+}
 
 /** Primary → fallback order for `generateLlmText` when `provider` is omitted. */
 const PROVIDER_FALLBACK_CHAIN: LlmProvider[] = ["anthropic", "openai", "gemini"];
@@ -297,10 +318,13 @@ async function runProvider(
 export async function generateLlmText(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
   if (input.provider) {
     if (!hasProviderApiKey(input.provider)) {
+      warnMissingAllLlmKeysOnce();
       throw new Error(`${input.provider} was requested but its API key is not set`);
     }
     return runProvider(input, input.provider);
   }
+
+  warnMissingAllLlmKeysOnce();
 
   const errors: LlmProviderError[] = [];
   for (const provider of PROVIDER_FALLBACK_CHAIN) {

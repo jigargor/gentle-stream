@@ -1,4 +1,5 @@
 import { getEnv } from "@/lib/env";
+import { captureMessage } from "@/lib/observability";
 
 const DEFAULT_DEEPL_URL = "https://api-free.deepl.com";
 
@@ -41,35 +42,54 @@ export async function translateTextsWithDeepL(
 
   for (const text of texts) params.append("text", text);
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `DeepL-Auth-Key ${apiKey}`,
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-    cache: "no-store",
-  });
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `DeepL-Auth-Key ${apiKey}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`DeepL translate failed: ${response.status} ${body.slice(0, 180)}`);
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      captureMessage({
+        level: "warning",
+        message: "deepl.translate.http_error",
+        context: {
+          status: response.status,
+          bodySnippet: errorBody.slice(0, 180),
+        },
+      });
+      return null;
+    }
+
+    const payload = (await response.json()) as DeepLResponseShape;
+    const translations = payload.translations ?? [];
+    if (translations.length === 0) return null;
+
+    const translatedTexts = translations.map((entry, index) => entry.text ?? texts[index] ?? "");
+    const detectedSourceLanguages = translations
+      .map((entry) => entry.detected_source_language?.toUpperCase() ?? "")
+      .filter((language) => language.length > 0);
+    const detectedSourceLanguage =
+      detectedSourceLanguages[0] ?? null;
+
+    return {
+      texts: translatedTexts,
+      detectedSourceLanguage,
+      detectedSourceLanguages,
+    };
+  } catch (error: unknown) {
+    captureMessage({
+      level: "warning",
+      message: "deepl.translate.request_failed",
+      context: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+    return null;
   }
-
-  const payload = (await response.json()) as DeepLResponseShape;
-  const translations = payload.translations ?? [];
-  if (translations.length === 0) return null;
-
-  const translatedTexts = translations.map((entry, index) => entry.text ?? texts[index] ?? "");
-  const detectedSourceLanguages = translations
-    .map((entry) => entry.detected_source_language?.toUpperCase() ?? "")
-    .filter((language) => language.length > 0);
-  const detectedSourceLanguage =
-    detectedSourceLanguages[0] ?? null;
-
-  return {
-    texts: translatedTexts,
-    detectedSourceLanguage,
-    detectedSourceLanguages,
-  };
 }

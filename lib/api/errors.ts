@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isCreatorStudioSchemaUnavailableError } from "@/lib/db/creatorStudio";
 
 export const API_ERROR_CODES = {
   BAD_GATEWAY: "ERR_BAD_GATEWAY",
@@ -79,9 +78,34 @@ export interface InternalErrorInput {
   headers?: Record<string, string>;
 }
 
+function hasCreatorStudioTableMessage(message: string): boolean {
+  const normalizedMessage = message.toLowerCase();
+  const mentionsCreatorTable =
+    normalizedMessage.includes("creator_settings") ||
+    normalizedMessage.includes("creator_provider_keys") ||
+    normalizedMessage.includes("creator_memory_sessions") ||
+    normalizedMessage.includes("creator_memory_summaries") ||
+    normalizedMessage.includes("creator_audit_events") ||
+    normalizedMessage.includes("creator_mfa_recovery_codes");
+  if (!mentionsCreatorTable) return false;
+  return (
+    normalizedMessage.includes("schema cache") ||
+    normalizedMessage.includes("could not find the table") ||
+    normalizedMessage.includes("does not exist")
+  );
+}
+
+function isCreatorStudioSchemaUnavailableErrorLocal(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "CreatorStudioSchemaUnavailableError" ||
+    hasCreatorStudioTableMessage(error.message)
+  );
+}
+
 export function internalErrorResponse(input: InternalErrorInput): NextResponse<ApiErrorBody> {
   if (input.error !== undefined) {
-    if (isCreatorStudioSchemaUnavailableError(input.error)) {
+    if (isCreatorStudioSchemaUnavailableErrorLocal(input.error)) {
       console.warn("[api] Creator Studio schema unavailable", input.error);
       const message =
         input.error instanceof Error && input.error.name === "CreatorStudioSchemaUnavailableError"

@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 
 interface CreatorSettingsResponse {
+  /** Present after GET from API; never sent on PATCH (schema is `.strict()`). */
+  userId?: string;
+  createdAt?: string;
+  updatedAt?: string;
   modelMode: "manual" | "auto" | "max";
   defaultProvider: "anthropic" | "openai" | "gemini" | null;
   defaultModel: string | null;
@@ -16,6 +20,24 @@ interface CreatorSettingsResponse {
   monthlyBudgetCents: number;
   dailyBudgetCents: number;
   perRequestBudgetCents: number;
+}
+
+function buildSettingsPatchBody(state: CreatorSettingsResponse): Record<string, unknown> {
+  return {
+    modelMode: state.modelMode,
+    defaultProvider: state.defaultProvider,
+    defaultModel: state.defaultModel === "" ? null : state.defaultModel,
+    maxModeEnabled: state.maxModeEnabled,
+    maxModeBudgetCents: state.maxModeBudgetCents,
+    autocompleteEnabled: state.autocompleteEnabled,
+    autocompletePrompt: state.autocompletePrompt,
+    autocompleteSensitiveDraftsBlocked: state.autocompleteSensitiveDraftsBlocked,
+    memoryEnabled: state.memoryEnabled,
+    memoryRetentionDays: state.memoryRetentionDays,
+    monthlyBudgetCents: state.monthlyBudgetCents,
+    dailyBudgetCents: state.dailyBudgetCents,
+    perRequestBudgetCents: state.perRequestBudgetCents,
+  };
 }
 
 interface ProviderKeyMeta {
@@ -87,7 +109,7 @@ export function CreatorSettingsConsole() {
       const res = await fetch("/api/creator/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(buildSettingsPatchBody(settings)),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;

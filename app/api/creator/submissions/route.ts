@@ -58,8 +58,18 @@ export async function GET(request: NextRequest) {
   if (isCreatorAccessDenied(access)) return access;
   const userId = access.userId;
 
-  const submissions = await listSubmissionsByAuthor(userId);
-  return NextResponse.json({ submissions });
+  const search = request.nextUrl.searchParams;
+  const limitRaw = Number.parseInt(search.get("limit") ?? "12", 10);
+  const limit = Number.isFinite(limitRaw) ? limitRaw : 12;
+  const cursor = search.get("cursor");
+  const includeBody = search.get("includeBody") === "1";
+  const { submissions, nextCursor } = await listSubmissionsByAuthor({
+    authorUserId: userId,
+    limit,
+    cursorCreatedAt: cursor,
+    includeBody,
+  });
+  return NextResponse.json({ submissions, nextCursor });
 }
 
 export async function POST(request: NextRequest) {

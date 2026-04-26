@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CATEGORIES, RECIPE_CATEGORY, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
-import { updateSubmissionForAuthor } from "@/lib/db/creator";
+import { getSubmissionByIdForAuthor, updateSubmissionForAuthor } from "@/lib/db/creator";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 import { hasTrustedOrigin } from "@/lib/security/origin";
@@ -42,6 +42,28 @@ const updateSubmissionBodySchema = z.object({
   recipeCookTimeMinutes: z.union([z.number(), z.string()]).optional(),
   recipeImages: z.array(z.string()).optional(),
 });
+
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const params = await context.params;
+  const access = await requireCreatorAccess(request, { requireMfa: true });
+  if (isCreatorAccessDenied(access)) return access;
+  const match = await getSubmissionByIdForAuthor({
+    id: params.id,
+    authorUserId: access.userId,
+  });
+  if (!match) {
+    return apiErrorResponse({
+      request,
+      status: 404,
+      code: API_ERROR_CODES.NOT_FOUND,
+      message: "Submission not found.",
+    });
+  }
+  return NextResponse.json({ submission: match });
+}
 
 export async function PATCH(
   request: NextRequest,

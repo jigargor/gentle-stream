@@ -303,15 +303,84 @@ export async function createSubmission(input: {
   return rowToSubmission(data as ArticleSubmissionRow);
 }
 
-export async function listSubmissionsByAuthor(authorUserId: string): Promise<ArticleSubmission[]> {
+export async function listSubmissionsByAuthor(input: {
+  authorUserId: string;
+  limit?: number;
+  cursorCreatedAt?: string | null;
+  includeBody?: boolean;
+}): Promise<{ submissions: ArticleSubmission[]; nextCursor: string | null }> {
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 12)));
+  const includeBody = input.includeBody === true;
+  const baseColumns = [
+    "id",
+    "author_user_id",
+    "headline",
+    "subheadline",
+    "pull_quote",
+    "category",
+    "content_kind",
+    "locale",
+    "explicit_hashtags",
+    "article_type",
+    "article_type_custom",
+    "status",
+    "admin_note",
+    "rejection_reason",
+    "reviewed_by_user_id",
+    "reviewed_at",
+    "published_article_id",
+    "created_at",
+    "updated_at",
+    "deleted_at",
+    "deleted_by_user_id",
+    "delete_reason",
+    "recipe_servings",
+    "recipe_ingredients",
+    "recipe_instructions",
+    "recipe_prep_time_minutes",
+    "recipe_cook_time_minutes",
+    "recipe_images",
+  ];
+  const columns = includeBody ? ["body", ...baseColumns] : baseColumns;
+
+  let query = db
+    .from("article_submissions")
+    .select(columns.join(","))
+    .eq("author_user_id", input.authorUserId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (input.cursorCreatedAt) query = query.lt("created_at", input.cursorCreatedAt);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`listSubmissionsByAuthor: ${error.message}`);
+  const parsedRows = (data ?? []) as unknown as ArticleSubmissionRow[];
+  const rows = parsedRows.slice(0, limit);
+  const submissions = rows.map((row) =>
+    rowToSubmission({
+      ...row,
+      body: includeBody ? row.body ?? "" : "",
+    } as ArticleSubmissionRow)
+  );
+  const hasMore = parsedRows.length > limit;
+  const nextCursor = hasMore ? rows[rows.length - 1]?.created_at ?? null : null;
+  return { submissions, nextCursor };
+}
+
+export async function getSubmissionByIdForAuthor(input: {
+  id: string;
+  authorUserId: string;
+}): Promise<ArticleSubmission | null> {
   const { data, error } = await db
     .from("article_submissions")
     .select("*")
-    .eq("author_user_id", authorUserId)
+    .eq("id", input.id)
+    .eq("author_user_id", input.authorUserId)
     .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(`listSubmissionsByAuthor: ${error.message}`);
-  return (data as ArticleSubmissionRow[]).map(rowToSubmission);
+    .maybeSingle();
+  if (error) throw new Error(`getSubmissionByIdForAuthor: ${error.message}`);
+  if (!data) return null;
+  return rowToSubmission(data as ArticleSubmissionRow);
 }
 
 export async function updateSubmissionForAuthor(input: {

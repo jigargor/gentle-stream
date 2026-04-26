@@ -101,6 +101,35 @@ describe("/api/auth/email-password", () => {
     });
   });
 
+  it("returns 400 when birthdate results in negative age", async () => {
+    hasTrustedOriginMock.mockReturnValueOnce(true);
+    consumeRateLimitMock.mockReturnValue({ allowed: true });
+    verifyTurnstileTokenMock.mockResolvedValueOnce({ success: true });
+    process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN = "http://localhost:3000";
+
+    const futureBirthDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const { POST } = await import("@/app/api/auth/email-password/route");
+    const req = new NextRequest("http://localhost:3000/api/auth/email-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: "person@example.com",
+        password: "password123",
+        mode: "sign_up",
+        birthDate: futureBirthDate,
+        redirectTo: "http://localhost:3000/login",
+        turnstileToken: "token",
+      }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Birthdate cannot result in a negative age.",
+    });
+  });
+
   it("returns 200 for valid sign-in request", async () => {
     hasTrustedOriginMock.mockReturnValueOnce(true);
     consumeRateLimitMock.mockReturnValue({ allowed: true });

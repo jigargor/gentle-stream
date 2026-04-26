@@ -120,13 +120,33 @@ describe("updateSession middleware", () => {
     expect(res.status).toBe(200);
   });
 
-  it("logs out signed-in users when session start cookie is missing", async () => {
+  it("starts session clock for signed-in users when session start cookie is missing", async () => {
     const mutableEnv = process.env as Record<string, string | undefined>;
     mutableEnv.NODE_ENV = "development";
     delete mutableEnv.AUTH_DISABLED;
     mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
     mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
     getUserMock.mockResolvedValueOnce({ data: { user: { id: "user-1" } } });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/profile");
+    const res = await updateSession(req);
+
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("gs_sess_start")?.value).toMatch(/^\d+$/);
+    expect(signOutMock).not.toHaveBeenCalled();
+  });
+
+  it("expires signed-in users when inferred sign-in time is older than session wall", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    const staleSignInIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "user-1", last_sign_in_at: staleSignInIso } },
+    });
 
     const { updateSession } = await import("@/lib/supabase/middleware");
     const req = new NextRequest("http://localhost:3000/profile");

@@ -1,6 +1,6 @@
 {
   "name": "gentle-stream",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -21,7 +21,7 @@
     "dev-light": "cross-env DEV_LIGHT=1 next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ext .js,.ts,.tsx --max-warnings=50",
+    "lint": "eslint . --ext .js,.ts,.tsx --max-warnings=10",
     "ingest": "tsx scripts/ingest/run.ts",
     "ingest:all": "tsx scripts/ingest/run.ts --all",
     "ingest:tag": "tsx scripts/ingest/run.ts --tag-only",

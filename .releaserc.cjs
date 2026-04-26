@@ -8,6 +8,8 @@ const plugins = [
       parserOpts: {
         noteKeywords: ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"],
       },
+      // Version bumps are chosen from commits since the last tag (not from release.yml).
+      // Patch: fix / perf / revert (and the message patterns below). Minor: feat. Major: BREAKING CHANGE.
       releaseRules: [
         { type: "feat", release: "minor" },
         { type: "fix", release: "patch" },

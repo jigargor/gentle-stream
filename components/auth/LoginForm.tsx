@@ -87,6 +87,7 @@ export function LoginForm({
   const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
   const isCreatorLogin = audience === "creator";
   const isCreatorLoginDisabled = isCreatorLogin && !CREATOR_LOGIN_ENABLED;
+  const todayIsoDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   useEffect(() => {
     if (getTurnstileApi()) setTurnstileScriptReady(true);
@@ -172,6 +173,19 @@ export function LoginForm({
     if (password.trim().length < 8) {
       setMessage("Use at least 8 characters for your password.");
       return;
+    }
+
+    if (!isCreatorLogin && emailMode === "sign_up") {
+      const parsedBirthDate = Date.parse(birthDate);
+      if (Number.isNaN(parsedBirthDate)) {
+        setMessage("Birthdate must be a valid date.");
+        return;
+      }
+      const ageMs = Date.now() - parsedBirthDate;
+      if (ageMs <= 0) {
+        setMessage("Birthdate cannot result in a negative age.");
+        return;
+      }
     }
 
     if (needsTurnstileChallenge) {
@@ -282,6 +296,7 @@ export function LoginForm({
             email={email}
             password={password}
             birthDate={birthDate}
+            maxBirthDate={todayIsoDate}
             showPassword={showPassword}
             emailBusy={emailBusy}
             needsTurnstileChallenge={needsTurnstileChallenge}

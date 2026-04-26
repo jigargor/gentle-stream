@@ -5,6 +5,7 @@ import {
   parseSessionStart,
   SESSION_MAX_AGE_SEC,
   SESSION_START_COOKIE,
+  sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
@@ -52,9 +53,20 @@ function isPublicApiPath(pathname: string): boolean {
   );
 }
 
-export async function updateSession(request: NextRequest, traceId?: string) {
+export async function updateSession(
+  request: NextRequest,
+  traceId?: string,
+  nonceHeader?: string
+) {
   const requestTraceId = traceId ?? crypto.randomUUID();
+  const nonce = nonceHeader?.trim() || request.headers.get("x-nonce")?.trim() || null;
+  const forwardedHeaders = new Headers(request.headers);
+  if (nonce) forwardedHeaders.set("x-nonce", nonce);
+  function nextResponse() {
+    return NextResponse.next({ request: { headers: forwardedHeaders } });
+  }
   function finish(response: NextResponse) {
+    if (nonce) response.headers.set("x-nonce", nonce);
     response.headers.set("X-Trace-Id", requestTraceId);
     return response;
   }
@@ -64,7 +76,7 @@ export async function updateSession(request: NextRequest, traceId?: string) {
     throw new Error("AUTH_DISABLED must never be enabled in production.");
   }
   if (env.AUTH_DISABLED) {
-    return finish(NextResponse.next({ request }));
+    return finish(nextResponse());
   }
 
   const { pathname } = request.nextUrl;
@@ -76,25 +88,25 @@ export async function updateSession(request: NextRequest, traceId?: string) {
   const allowsAnonymousFeedApi = hasGuestAccess && isPublicApiPath(pathname);
   // Scheduled jobs use CRON_SECRET, not browser cookies
   if (pathname.startsWith("/api/cron")) {
-    return finish(NextResponse.next({ request }));
+    return finish(nextResponse());
   }
 
   // Let the Route Handler own cookie exchange; refreshing here can keep the prior session
   // while /auth/callback sets the new one, so the wrong user can appear signed in.
   if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {
-    return finish(NextResponse.next({ request }));
+    return finish(nextResponse());
   }
 
   const url = env.NEXT_PUBLIC_SUPABASE_URL;
   const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
-    return finish(NextResponse.next({ request }));
+    return finish(nextResponse());
   }
 
   rejectIfSupabaseKeyIsPlatformSecret(key);
   rejectIfSupabaseKeyIsServiceRole(key);
 
-  let supabaseResponse = NextResponse.next({ request });
+  let supabaseResponse = nextResponse();
 
   const supabase = createServerClient(url, key, {
     cookies: {
@@ -105,7 +117,7 @@ export async function updateSession(request: NextRequest, traceId?: string) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value)
         );
-        supabaseResponse = NextResponse.next({ request });
+        supabaseResponse = nextResponse();
         cookiesToSet.forEach(({ name, value, options }) =>
           supabaseResponse.cookies.set(name, value, options)
         );
@@ -122,7 +134,36 @@ export async function updateSession(request: NextRequest, traceId?: string) {
   const started = parseSessionStart(startRaw);
 
   if (user) {
-    if (started === null || nowSec - started > SESSION_MAX_AGE_SEC) {
+    if (started === null) {
+      const inferredStartSec = (() => {
+        const fromUser =
+          (user as { last_sign_in_at?: string | null }).last_sign_in_at ??
+          (user as { created_at?: string | null }).created_at ??
+          null;
+        if (!fromUser) return nowSec;
+        const parsed = Math.floor(Date.parse(fromUser) / 1000);
+        if (!Number.isFinite(parsed)) return nowSec;
+        return Math.min(parsed, nowSec);
+      })();
+      if (nowSec - inferredStartSec > SESSION_MAX_AGE_SEC) {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = "/login";
+        redirectUrl.searchParams.set("reason", "session_expired");
+        if (!isPublicPath(pathname)) {
+          redirectUrl.searchParams.set("next", pathname);
+        }
+        const r = NextResponse.redirect(redirectUrl);
+        const signOutClient = createSupabaseResponseClient(request, r);
+        await signOutClient.auth.signOut();
+        r.cookies.delete(SESSION_START_COOKIE);
+        return finish(r);
+      }
+      supabaseResponse.cookies.set(
+        SESSION_START_COOKIE,
+        String(inferredStartSec),
+        sessionStartCookieOptions()
+      );
+    } else if (nowSec - started > SESSION_MAX_AGE_SEC) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/login";
       redirectUrl.searchParams.set("reason", "session_expired");

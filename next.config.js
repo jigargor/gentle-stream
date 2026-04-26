@@ -1,26 +1,4 @@
 /** @type {import('next').NextConfig} */
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-let supabaseOrigin = "";
-try {
-  supabaseOrigin = supabaseUrl ? new URL(supabaseUrl).origin : "";
-} catch {
-  supabaseOrigin = "";
-}
-
-const cspDirectives = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://places.googleapis.com`,
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com",
-  "frame-src https://challenges.cloudflare.com",
-].join("; ");
-
 const nextConfig = {
   // Next 16+ Turbopack walks up for lockfiles; a package-lock.json in a parent folder
   // (e.g. the user home directory) makes it infer the wrong workspace root. That breaks
@@ -30,14 +8,17 @@ const nextConfig = {
   },
   // Allow the Google Fonts domain for font loading
   images: {
-    domains: [],
+    remotePatterns: [
+      { protocol: "https", hostname: "**.supabase.co" },
+      { protocol: "https", hostname: "image.pollinations.ai" },
+      { protocol: "https", hostname: "picsum.photos" },
+    ],
   },
   async headers() {
     return [
       {
         source: "/:path*",
         headers: [
-          { key: "Content-Security-Policy", value: cspDirectives },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },

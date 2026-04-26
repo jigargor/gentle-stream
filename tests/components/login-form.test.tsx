@@ -137,6 +137,35 @@ describe("LoginForm", () => {
     expect(screen.getByRole("button", { name: "Sign in with email" })).toBeInTheDocument();
   });
 
+  it("blocks sign-up when birthdate would produce negative age", async () => {
+    const fetchMock = vi.mocked(fetch);
+    render(<LoginForm authRedirectBaseFromServer="http://127.0.0.1:3000" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign up" }));
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "reader@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "password123" },
+    });
+    const futureBirthDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    fireEvent.change(screen.getByLabelText("Birthdate"), {
+      target: { value: futureBirthDate },
+    });
+
+    const submitButton = screen.getByRole("button", { name: "Create account" });
+    const form = submitButton.closest("form");
+    if (!form) throw new Error("Expected sign-up form to exist");
+    fireEvent.submit(form);
+
+    expect(
+      await screen.findByText("Birthdate cannot result in a negative age.")
+    ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("shows creator-disabled screen when creator login is not enabled", () => {
     render(<LoginForm audience="creator" />);
 

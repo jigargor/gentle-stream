@@ -38,7 +38,7 @@ import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { logError, logInfo, logWarning } from "@/lib/observability/logger";
 
 const ANONYMOUS_USER_ID = "anonymous";
-const COLD_START_DEDUPE_MS = 45_000;
+const COLD_START_DEDUPE_MS = 300_000;
 const env = getEnv();
 
 function makeRequestId(request: NextRequest): string {
@@ -94,7 +94,9 @@ function buildColdStartKey(params: {
   contentKinds: ArticleContentKind[] | null;
 }): string {
   const kinds = params.contentKinds?.slice().sort().join(",") ?? "all";
-  return `${params.userId}|${params.category}|${kinds}`;
+  const normalizedUserId =
+    params.userId === ANONYMOUS_USER_ID ? "anon" : params.userId;
+  return `${normalizedUserId}|${params.category}|${kinds}`;
 }
 
 function startColdStartInBackground(input: {

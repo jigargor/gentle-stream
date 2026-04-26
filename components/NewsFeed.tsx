@@ -1257,87 +1257,89 @@ export default function NewsFeed({
       let usedServerRatio = false;
       let serverThemePreference: "light" | "dark" | null = null;
 
-      try {
-        const res = await fetch("/api/user/preferences", {
-          credentials: "include",
-        });
-        if (cancelled || gen !== feedBootstrapGenRef.current) return;
-
-        if (res.ok) {
-          const profile = await res.json();
+      if (!isGuestUser) {
+        try {
+          const res = await fetch("/api/user/preferences", {
+            credentials: "include",
+          });
           if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
-          if (
-            typeof profile.gameRatio === "number" &&
-            !Number.isNaN(profile.gameRatio)
-          ) {
-            const r = Math.min(1, Math.max(0, profile.gameRatio));
-            gameRatioRef.current = r;
-            localStorage.setItem("gentle_stream_game_ratio", String(r));
-            usedServerRatio = true;
-          }
+          if (res.ok) {
+            const profile = await res.json();
+            if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
-          if (Array.isArray(profile.enabledGameTypes)) {
-            enabledGameTypesRef.current = profile.enabledGameTypes.filter(
-              (v: unknown): v is GameType => typeof v === "string"
-            );
-            try {
-              localStorage.setItem(
-                "gentle_stream_enabled_game_types",
-                JSON.stringify(enabledGameTypesRef.current)
-              );
-            } catch {
-              /* ignore */
+            if (
+              typeof profile.gameRatio === "number" &&
+              !Number.isNaN(profile.gameRatio)
+            ) {
+              const r = Math.min(1, Math.max(0, profile.gameRatio));
+              gameRatioRef.current = r;
+              localStorage.setItem("gentle_stream_game_ratio", String(r));
+              usedServerRatio = true;
             }
-          }
 
-          if (typeof profile.weatherLocation === "string" && profile.weatherLocation.trim()) {
-            const weatherLocation = profile.weatherLocation.trim();
-            preferredWeatherLocationRef.current = weatherLocation;
-            try {
-              localStorage.setItem(
-                "gentle_stream_weather_location",
-                weatherLocation
+            if (Array.isArray(profile.enabledGameTypes)) {
+              enabledGameTypesRef.current = profile.enabledGameTypes.filter(
+                (v: unknown): v is GameType => typeof v === "string"
               );
-            } catch {
-              /* ignore */
+              try {
+                localStorage.setItem(
+                  "gentle_stream_enabled_game_types",
+                  JSON.stringify(enabledGameTypesRef.current)
+                );
+              } catch {
+                /* ignore */
+              }
             }
-          } else {
-            preferredWeatherLocationRef.current = null;
-          }
-          if (
-            profile.weatherUnitSystem === "metric" ||
-            profile.weatherUnitSystem === "imperial"
-          ) {
-            setWeatherUnitSystem(profile.weatherUnitSystem);
-            try {
-              localStorage.setItem(
-                "gentle_stream_weather_unit_system",
-                profile.weatherUnitSystem
-              );
-            } catch {
-              /* ignore */
+
+            if (typeof profile.weatherLocation === "string" && profile.weatherLocation.trim()) {
+              const weatherLocation = profile.weatherLocation.trim();
+              preferredWeatherLocationRef.current = weatherLocation;
+              try {
+                localStorage.setItem(
+                  "gentle_stream_weather_location",
+                  weatherLocation
+                );
+              } catch {
+                /* ignore */
+              }
+            } else {
+              preferredWeatherLocationRef.current = null;
+            }
+            if (
+              profile.weatherUnitSystem === "metric" ||
+              profile.weatherUnitSystem === "imperial"
+            ) {
+              setWeatherUnitSystem(profile.weatherUnitSystem);
+              try {
+                localStorage.setItem(
+                  "gentle_stream_weather_unit_system",
+                  profile.weatherUnitSystem
+                );
+              } catch {
+                /* ignore */
+              }
+            }
+            if (profile.themePreference === "light" || profile.themePreference === "dark") {
+              serverThemePreference = profile.themePreference;
+              try {
+                localStorage.setItem(
+                  "gentle_stream_theme_preference",
+                  profile.themePreference
+                );
+              } catch {
+                /* ignore */
+              }
             }
           }
-          if (profile.themePreference === "light" || profile.themePreference === "dark") {
-            serverThemePreference = profile.themePreference;
-            try {
-              localStorage.setItem(
-                "gentle_stream_theme_preference",
-                profile.themePreference
-              );
-            } catch {
-              /* ignore */
-            }
-          }
+        } catch {
+          /* offline or unauthenticated preview */
         }
-      } catch {
-        /* offline or unauthenticated preview */
       }
 
       if (cancelled || gen !== feedBootstrapGenRef.current) return;
 
-      if (!usedServerRatio) {
+      if (!usedServerRatio && !isGuestUser) {
         const storedRatio = localStorage.getItem("gentle_stream_game_ratio");
         if (storedRatio !== null) {
           const ratio = parseFloat(storedRatio);

@@ -16,6 +16,11 @@ import {
   listCreatorMemorySummaries,
   upsertCreatorMemorySummary,
 } from "@/lib/db/creatorStudio";
+import {
+  buildRateLimitKey,
+  consumeRateLimit,
+  rateLimitExceededResponse,
+} from "@/lib/security/rateLimit";
 
 const createMemoryBodySchema = z
   .object({
@@ -137,6 +142,15 @@ export async function DELETE(request: NextRequest) {
     if (originError) return originError;
     const access = await requireCreatorAccess(request, { requireStepUp: true });
     if (isCreatorAccessDenied(access)) return access;
+    const deleteRate = await consumeRateLimit({
+      policy: { id: "creator-memory-delete", windowMs: 60_000, max: 12 },
+      key: buildRateLimitKey({
+        request,
+        userId: access.userId,
+        routeId: "api-creator-memory-delete",
+      }),
+    });
+    if (!deleteRate.allowed) return rateLimitExceededResponse(deleteRate, request);
 
     const parsed = deleteBodySchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) {

@@ -50,15 +50,15 @@ export async function GET(
     const params = await context.params;
     const access = await requireCreatorAccess(request, { requireMfa: true });
     if (isCreatorAccessDenied(access)) return access;
-    const patchRate = await consumeRateLimit({
-      policy: { id: "creator-drafts-update", windowMs: 60_000, max: 60 },
+    const readRate = await consumeRateLimit({
+      policy: { id: "creator-drafts-read", windowMs: 60_000, max: 180 },
       key: buildRateLimitKey({
         request,
         userId: access.userId,
-        routeId: "api-creator-drafts-update",
+        routeId: "api-creator-drafts-read",
       }),
     });
-    if (!patchRate.allowed) return rateLimitExceededResponse(patchRate, request);
+    if (!readRate.allowed) return rateLimitExceededResponse(readRate, request);
     const draft = await getCreatorDraftById({
       userId: access.userId,
       draftId: params.id,
@@ -94,15 +94,15 @@ export async function PATCH(
     const params = await context.params;
     const access = await requireCreatorAccess(request, { requireMfa: true });
     if (isCreatorAccessDenied(access)) return access;
-    const deleteRate = await consumeRateLimit({
-      policy: { id: "creator-drafts-delete", windowMs: 60_000, max: 20 },
+    const patchRate = await consumeRateLimit({
+      policy: { id: "creator-drafts-update", windowMs: 60_000, max: 60 },
       key: buildRateLimitKey({
         request,
         userId: access.userId,
-        routeId: "api-creator-drafts-delete",
+        routeId: "api-creator-drafts-update",
       }),
     });
-    if (!deleteRate.allowed) return rateLimitExceededResponse(deleteRate, request);
+    if (!patchRate.allowed) return rateLimitExceededResponse(patchRate, request);
     const parsed = draftPatchSchema.safeParse(await request.json());
     if (!parsed.success) {
       return apiErrorResponse({
@@ -243,6 +243,15 @@ export async function DELETE(
     const params = await context.params;
     const access = await requireCreatorAccess(request, { requireMfa: true });
     if (isCreatorAccessDenied(access)) return access;
+    const deleteRate = await consumeRateLimit({
+      policy: { id: "creator-drafts-delete", windowMs: 60_000, max: 20 },
+      key: buildRateLimitKey({
+        request,
+        userId: access.userId,
+        routeId: "api-creator-drafts-delete",
+      }),
+    });
+    if (!deleteRate.allowed) return rateLimitExceededResponse(deleteRate, request);
     const shouldPurge = request.nextUrl.searchParams.get("purge") === "1";
     if (shouldPurge) {
       await purgeCreatorDraft({ userId: access.userId, draftId: params.id });

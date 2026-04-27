@@ -15,6 +15,7 @@ import { CREATOR_WORKFLOW_IDS, type CreatorWorkflowId } from "@/lib/creator/work
 import { getCreatorDraftById } from "@/lib/db/creatorDrafts";
 import { generateAssistDiagnosis } from "@/lib/creator/assist-diagnosis";
 import { generateAssistStartupStructured } from "@/lib/creator/assist-startup-structured";
+import { generateRecipeAssistStructured } from "@/lib/creator/assist/recipe-assist-structured";
 import {
   formatDiagnosisDisplayText,
   listOpeningAnglesFromDiagnosis,
@@ -44,6 +45,11 @@ const assistBodySchema = z
     selectedText: z.string().max(2_000).optional(),
     selectionStart: z.number().int().min(0).optional(),
     selectionEnd: z.number().int().min(0).optional(),
+    recipeServings: z.number().int().min(1).max(100).nullable().optional(),
+    recipePrepTimeMinutes: z.number().int().min(0).max(10_000).nullable().optional(),
+    recipeCookTimeMinutes: z.number().int().min(0).max(10_000).nullable().optional(),
+    recipeIngredients: z.array(z.string().trim().min(1).max(240)).max(40).optional(),
+    recipeInstructions: z.array(z.string().trim().min(1).max(600)).max(40).optional(),
     stream: z.boolean().optional(),
     debugRaw: z.boolean().optional(),
   })
@@ -61,12 +67,23 @@ const INSPIRATION_CONTEXT_SEEDS = [
 ];
 // TODO: replace this static list with generated personalized suggestions.
 
-function buildPrompt(input: Required<AssistRequestBody>, memorySummary: string): string {
+interface ArticleAssistPromptInput {
+  mode: "improve" | "continue" | "headline";
+  workflowId: CreatorWorkflowId;
+  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+  articleType?: string;
+  articleTypeCustom?: string;
+  headline: string;
+  body: string;
+  context?: string;
+}
+
+function buildPrompt(input: ArticleAssistPromptInput, memorySummary: string): string {
   const workflowId: CreatorWorkflowId = input.workflowId ?? "startup_brainstorm";
   const selectedArticleType =
     input.articleTypeCustom?.trim() ||
     input.articleType?.trim() ||
-    (input.contentKind === "recipe" ? "recipe" : "article");
+    "article";
   const skill = getSkillTemplateByArticleType(input.articleType || "custom");
   const styleGuide =
     "Keep tone uplifting, practical, and concise. Never invent facts. Keep output plain text without markdown code fences. " +
@@ -110,7 +127,7 @@ ${input.body.slice(0, 1600)}`;
   }
   if (input.mode === "headline") {
     return `${sharedHeader}
-Task: suggest one better headline for this ${input.contentKind}.
+Task: suggest one better headline for this article.
 Current headline: ${input.headline}
 Body excerpt:
 ${input.body.slice(0, 1200)}
@@ -118,14 +135,14 @@ Return only the revised headline.`;
   }
   if (input.mode === "continue") {
     return `${sharedHeader}
-Task: continue this ${input.contentKind} draft with one short paragraph (max 80 words), matching voice.
+Task: continue this article draft with one short paragraph (max 80 words), matching voice.
 Headline: ${input.headline}
 Draft:
 ${input.body.slice(0, 1800)}
 Return only the continuation paragraph.`;
   }
   return `${sharedHeader}
-Task: improve this ${input.contentKind} draft paragraph for clarity and flow.
+Task: improve this article draft paragraph for clarity and flow.
 Headline: ${input.headline}
 Draft:
 ${input.body.slice(0, 1800)}
@@ -181,6 +198,17 @@ export async function POST(request: NextRequest) {
     const headline = (body.headline ?? "").trim();
     const draftBody = (body.body ?? "").trim();
     const selectedText = (body.selectedText ?? "").trim();
+    const recipeIngredients = (body.recipeIngredients ?? [])
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const recipeInstructions = (body.recipeInstructions ?? [])
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const recipeHasSignal =
+      headline.length > 0 ||
+      draftBody.length > 0 ||
+      recipeIngredients.length > 0 ||
+      recipeInstructions.length > 0;
     if (body.draftId) {
       const draft = await getCreatorDraftById({
         userId,
@@ -203,18 +231,26 @@ export async function POST(request: NextRequest) {
         message: "Provide a headline to refine.",
       });
     }
-    if (draftBody.length < 40) {
-      if (body.helpMode && body.helpMode !== "stuck") {
-        // allow startup help workflows without full draft
-      } else {
+    if (contentKind === "user_article" && draftBody.length < 40) {
+      if (!body.helpMode || body.helpMode === "stuck")
         return apiErrorResponse({
           request,
           status: 400,
           code: API_ERROR_CODES.VALIDATION,
           message: "Add at least a short draft before using AI assist.",
         });
-      }
     }
+    if (
+      contentKind === "recipe" &&
+      !recipeHasSignal &&
+      body.helpMode === "stuck"
+    )
+      return apiErrorResponse({
+        request,
+        status: 400,
+        code: API_ERROR_CODES.VALIDATION,
+        message: "Add a recipe idea, ingredients, or instructions before using stuck assist.",
+      });
 
     const summaries = await listCreatorMemorySummaries({
       userId,
@@ -222,25 +258,24 @@ export async function POST(request: NextRequest) {
       limit: 1,
     });
     const memorySummary = summaries[0]?.summary ?? "";
+    const contextualInput = [
+      body.context,
+      selectedText
+        ? `Selected excerpt (${body.selectionStart ?? 0}-${body.selectionEnd ?? 0}): ${selectedText}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
     const prompt = buildPrompt({
       mode,
       workflowId,
       helpMode: body.helpMode,
-      contentKind,
       articleType: body.articleType,
       articleTypeCustom: body.articleTypeCustom,
       headline,
       body: draftBody,
-      context: [
-        body.context,
-        selectedText
-          ? `Selected excerpt (${body.selectionStart ?? 0}-${body.selectionEnd ?? 0}): ${selectedText}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      debugRaw: body.debugRaw,
-    } as Required<AssistRequestBody>, memorySummary);
+      context: contextualInput,
+    }, memorySummary);
 
     let text = "";
     let provider = "";
@@ -248,8 +283,48 @@ export async function POST(request: NextRequest) {
     let costEstimateUsd = 0;
     let structuredDiagnosis: Record<string, unknown> | null = null;
     let openingAnglesOut: string[] | null = null;
+    let recipeAssistOut: Record<string, unknown> | null = null;
     try {
-      if (body.helpMode === "stuck") {
+      if (contentKind === "recipe") {
+        const intent =
+          body.helpMode === "inspiration" ||
+          body.helpMode === "brainstorm" ||
+          body.helpMode === "random" ||
+          (!recipeHasSignal && !body.helpMode)
+            ? "startup"
+            : body.helpMode === "stuck"
+              ? "stuck"
+              : mode === "headline"
+                ? "headline"
+                : mode === "continue"
+                  ? "continue"
+                  : "improve";
+        const generated = await generateRecipeAssistStructured({
+          userId,
+          workflowId,
+          route: "app/api/creator/assist",
+          callKind: "creator_recipe_assist",
+          intent,
+          helpMode: body.helpMode,
+          headline,
+          body: draftBody,
+          context: contextualInput,
+          memorySummary,
+          recipeServings: body.recipeServings ?? null,
+          recipePrepTimeMinutes: body.recipePrepTimeMinutes ?? null,
+          recipeCookTimeMinutes: body.recipeCookTimeMinutes ?? null,
+          recipeIngredients,
+          recipeInstructions,
+        });
+        text = generated.displayText;
+        recipeAssistOut = generated.structured as unknown as Record<string, unknown>;
+        provider = generated.provider;
+        model = generated.model;
+        costEstimateUsd = estimateProviderCallCostUsd(generated.provider, {
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
+        });
+      } else if (body.helpMode === "stuck") {
         const generated = await generateAssistDiagnosis({
           userId,
           workflowId,
@@ -257,7 +332,7 @@ export async function POST(request: NextRequest) {
           callKind: "creator_assist_diagnosis",
           headline,
           body: draftBody,
-          context: body.context,
+          context: contextualInput,
           selectedText,
         });
         const diagnosis = generated.diagnosis;
@@ -286,7 +361,7 @@ export async function POST(request: NextRequest) {
           articleTypeCustom: body.articleTypeCustom,
           headline,
           body: draftBody,
-          context: body.context,
+          context: contextualInput,
           memorySummary,
         });
         text = generated.structured.explanation;
@@ -345,7 +420,20 @@ export async function POST(request: NextRequest) {
         userId,
         workflowId,
         role: "user",
-        content: draftBody || headline || body.context || "",
+        content:
+          draftBody ||
+          [
+            headline,
+            recipeIngredients.length > 0
+              ? `Ingredients: ${recipeIngredients.join("; ")}`
+              : "",
+            recipeInstructions.length > 0
+              ? `Instructions: ${recipeInstructions.join(" | ")}`
+              : "",
+            body.context ?? "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
         retentionDays: settings.memoryRetentionDays,
       }),
       createCreatorMemorySession({
@@ -385,6 +473,7 @@ export async function POST(request: NextRequest) {
     responseBody.selectedTextApplied = selectedText.length > 0;
     if (structuredDiagnosis) responseBody.diagnosis = structuredDiagnosis;
     if (openingAnglesOut && openingAnglesOut.length > 0) responseBody.openingAngles = openingAnglesOut;
+    if (recipeAssistOut) responseBody.recipeAssist = recipeAssistOut;
     if (body.stream) {
       const words = text.split(/\s+/).filter(Boolean);
       const encoder = new TextEncoder();
@@ -410,6 +499,7 @@ export async function POST(request: NextRequest) {
                 ...(openingAnglesOut && openingAnglesOut.length > 0
                   ? { openingAngles: openingAnglesOut }
                   : {}),
+                ...(recipeAssistOut ? { recipeAssist: recipeAssistOut } : {}),
               })}\n\n`
             )
           );

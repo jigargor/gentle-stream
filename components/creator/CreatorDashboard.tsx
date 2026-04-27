@@ -35,6 +35,7 @@ import type {
   CreatorDraftVersion,
 } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { SubmissionPreviewModal } from "@/components/creator/SubmissionPreviewModal";
 import { BUILT_IN_ARTICLE_TYPES, articleTypeLabel } from "@/lib/creator/article-types";
 import {
   formatApiClientError,
@@ -96,6 +97,15 @@ interface LlmActivity {
   stage: LlmActivityStage;
   label: string;
   costEstimateUsd?: number;
+}
+
+interface RecipeAssistPayload {
+  summary: string;
+  suggestedHeadline?: string | null;
+  suggestedIngredients: string[];
+  suggestedInstructions: string[];
+  starterOption?: string | null;
+  nextAction: string;
 }
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -177,6 +187,34 @@ function submissionStatusClass(status: ArticleSubmission["status"]): string {
   return "creator-status-pill--neutral";
 }
 
+function parseRecipeDraftBodySections(body: string): {
+  ingredientsText: string;
+  instructionsText: string;
+  notesBody: string;
+} {
+  const normalized = body.replace(/\r\n/g, "\n");
+  const ingredientsMatch = normalized.match(
+    /(?:^|\n)Ingredients:\n([\s\S]*?)(?=\n\nInstructions:\n|\n\n(?![-\s])|$)/i
+  );
+  const instructionsMatch = normalized.match(
+    /(?:^|\n)Instructions:\n([\s\S]*?)(?=\n\n(?![-\s])|$)/i
+  );
+  const ingredientsText = (ingredientsMatch?.[1] ?? "")
+    .split("\n")
+    .map((line) => line.replace(/^\s*-\s*/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+  const instructionsText = (instructionsMatch?.[1] ?? "")
+    .split(/\n\s*\n/)
+    .map((line) => line.replace(/^\s*-\s*/, "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  let notesBody = normalized;
+  if (ingredientsMatch?.[0]) notesBody = notesBody.replace(ingredientsMatch[0], "").trim();
+  if (instructionsMatch?.[0]) notesBody = notesBody.replace(instructionsMatch[0], "").trim();
+  return { ingredientsText, instructionsText, notesBody };
+}
+
 const EMPTY_FORM: FormState = {
   headline: "",
   body: "",
@@ -207,10 +245,14 @@ function assistActionTitles(params: {
   const applyArticle = hasOpeningAngles
     ? "Uses only the suggested opening lines below-not the analysis paragraph above. If you highlighted text in the body, that selection is replaced with those lines. If nothing is highlighted, every opening line is inserted at the very start of your draft."
     : "Replaces your entire article body with the suggestion text. This overwrites the draft; use Copy first if you want to keep a backup.";
+  const applyRecipe =
+    "Updates your recipe fields from the suggestion (headline, ingredients, and instructions when provided).";
   return {
     apply:
-      contentKind !== "user_article"
-        ? "Replaces your headline with the suggestion. The article body is not changed."
+      contentKind === "recipe"
+        ? applyRecipe
+        : contentKind !== "user_article"
+          ? "Replaces your headline with the suggestion. The article body is not changed."
         : applyArticle,
     insertBelow: hasOpeningAngles
       ? "Adds every suggested opening line after the end of your draft. The analysis paragraph above is not inserted."
@@ -238,6 +280,10 @@ export function CreatorDashboard({
 }: CreatorDashboardProps = {}) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [submissions, setSubmissions] = useState<ArticleSubmission[]>(initialSubmissions);
+  const [previewSubmissionId, setPreviewSubmissionId] = useState<string | null>(null);
+  const [previewSubmission, setPreviewSubmission] = useState<ArticleSubmission | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(() => !serverListBootstrap);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
@@ -258,6 +304,7 @@ export function CreatorDashboard({
   const [assistOpeningAngles, setAssistOpeningAngles] = useState<string[]>([]);
   const [assistCostEstimate, setAssistCostEstimate] = useState<number | null>(null);
   const [assistEscalation, setAssistEscalation] = useState(false);
+  const [assistRecipePayload, setAssistRecipePayload] = useState<RecipeAssistPayload | null>(null);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const [helpContext, setHelpContext] = useState("");
   const [idlePromptVisible, setIdlePromptVisible] = useState(false);
@@ -331,10 +378,9 @@ export function CreatorDashboard({
     }, 1600);
   }
 
-  const canSubmit = useMemo(() => {
+  const submitBlockingReasons = useMemo(() => {
     if (form.contentKind === "recipe") {
       const servings = Math.trunc(Number(form.recipeServings));
-      const servingsOk = Number.isFinite(servings) && servings > 0;
       const ingredients = form.recipeIngredientsText
         .split("\n")
         .map((l) => l.trim())
@@ -346,29 +392,34 @@ export function CreatorDashboard({
 
       const prep = Math.trunc(Number(form.recipePrepTimeMinutes));
       const cook = Math.trunc(Number(form.recipeCookTimeMinutes));
-      const prepOk = Number.isFinite(prep) && prep >= 0;
-      const cookOk = Number.isFinite(cook) && cook >= 0;
-
-      return (
-        form.headline.trim().length > 0 &&
-        servingsOk &&
-        ingredients.length > 0 &&
-        instructions.length > 0 &&
-        prepOk &&
-        cookOk
-      );
+      const reasons: string[] = [];
+      if (form.headline.trim().length === 0) reasons.push("Add a recipe headline.");
+      if (!Number.isFinite(servings) || servings <= 0) reasons.push("Set servings to at least 1.");
+      if (ingredients.length === 0) reasons.push("Add at least one ingredient.");
+      if (instructions.length === 0) reasons.push("Add at least one instruction step.");
+      if (!Number.isFinite(prep) || prep < 0) reasons.push("Set prep time to 0 minutes or more.");
+      if (!Number.isFinite(cook) || cook < 0) reasons.push("Set cook time to 0 minutes or more.");
+      return reasons;
     }
 
     const hasArticleType =
       form.articleType === "custom"
         ? form.articleTypeCustom.trim().length > 1
         : form.articleType.trim().length > 0;
-    return (
-      form.headline.trim().length > 0 &&
-      form.body.trim().length > 0 &&
-      hasArticleType &&
-      !isBodyTooLong
-    );
+    const reasons: string[] = [];
+    if (form.headline.trim().length === 0) reasons.push("Add a headline.");
+    if (form.body.trim().length === 0) reasons.push("Write article body text.");
+    if (!hasArticleType)
+      reasons.push(
+        form.articleType === "custom"
+          ? "Set a custom article type (2+ characters)."
+          : "Select an article type."
+      );
+    if (isBodyTooLong)
+      reasons.push(
+        `Reduce body length below ${MAX_SUBMISSION_BODY_CHARS.toLocaleString()} characters.`
+      );
+    return reasons;
   }, [
     form.contentKind,
     form.headline,
@@ -382,6 +433,7 @@ export function CreatorDashboard({
     form.recipePrepTimeMinutes,
     form.recipeCookTimeMinutes,
   ]);
+  const canSubmit = submitBlockingReasons.length === 0;
 
   function insertMarkdown(before: string, after = "", placeholder = "text") {
     const textarea = bodyTextareaRef.current;
@@ -463,12 +515,19 @@ export function CreatorDashboard({
   }
 
   function applyFullDraftToForm(latest: CreatorDraft) {
+    const recipeSections =
+      latest.contentKind === "recipe"
+        ? parseRecipeDraftBodySections(latest.body ?? "")
+        : null;
     setActiveDraftId(latest.id);
     setActiveDraftRevision(latest.revision);
     setForm((prev) => ({
       ...prev,
       headline: latest.title ?? prev.headline,
-      body: latest.body ?? prev.body,
+      body:
+        latest.contentKind === "recipe"
+          ? recipeSections?.notesBody ?? ""
+          : (latest.body ?? prev.body),
       pullQuote: latest.pullQuote ?? prev.pullQuote,
       category: latest.category ?? prev.category,
       articleType: latest.articleType ?? prev.articleType,
@@ -477,6 +536,14 @@ export function CreatorDashboard({
       locale: latest.locale ?? prev.locale,
       explicitHashtags: latest.explicitHashtags.join(", "),
       neverSendToAi: latest.neverSendToAi === true,
+      recipeIngredientsText:
+        latest.contentKind === "recipe"
+          ? (recipeSections?.ingredientsText ?? "")
+          : prev.recipeIngredientsText,
+      recipeInstructionsText:
+        latest.contentKind === "recipe"
+          ? (recipeSections?.instructionsText ?? "")
+          : prev.recipeInstructionsText,
     }));
     lastSavedFingerprintRef.current = JSON.stringify({
       title: latest.title,
@@ -789,9 +856,21 @@ export function CreatorDashboard({
   }, [activeDraftId]);
 
   useEffect(() => {
-    const worker = new Worker(
-      new URL("./writer-analyst.worker.ts", import.meta.url)
-    );
+    if (typeof Worker === "undefined") {
+      setAnalystEnabled(false);
+      return;
+    }
+
+    let worker: Worker | null = null;
+    try {
+      worker = new Worker(new URL("./writer-analyst.worker.ts", import.meta.url));
+    } catch (error) {
+      console.warn("[creator-analyst] Worker unavailable; continuing without analyst.", error);
+      setAnalystEnabled(false);
+      analystWorkerRef.current = null;
+      return;
+    }
+
     analystWorkerRef.current = worker;
     worker.onmessage = (event: MessageEvent<AnalystCheckpoint>) => {
       const checkpoint = event.data;
@@ -820,7 +899,7 @@ export function CreatorDashboard({
       // ignore bad local payloads
     }
     return () => {
-      worker.terminate();
+      worker?.terminate();
       analystWorkerRef.current = null;
     };
   }, []);
@@ -990,6 +1069,40 @@ export function CreatorDashboard({
     }
   }
 
+  async function openSubmissionPreview(submission: ArticleSubmission) {
+    setPreviewSubmissionId(submission.id);
+    setPreviewSubmission(submission);
+    setPreviewBusy(true);
+    setPreviewError(null);
+    try {
+      const response = await fetch(`/api/creator/submissions/${submission.id}`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const apiError = await parseApiClientError(response);
+        setPreviewError(formatApiClientError(apiError));
+        return;
+      }
+      const payload = (await response.json()) as { submission?: ArticleSubmission };
+      if (!payload.submission) {
+        setPreviewError("Could not load full submission.");
+        return;
+      }
+      setPreviewSubmission(payload.submission);
+    } catch {
+      setPreviewError("Could not load full submission.");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  function closeSubmissionPreview() {
+    setPreviewSubmissionId(null);
+    setPreviewSubmission(null);
+    setPreviewBusy(false);
+    setPreviewError(null);
+  }
+
   async function withdrawSubmission(id: string) {
     setBusy(true);
     setMessage(null);
@@ -1117,6 +1230,7 @@ export function CreatorDashboard({
     setAssistOpeningAngles([]);
     setAssistCostEstimate(null);
     setAssistEscalation(false);
+    setAssistRecipePayload(null);
     try {
       const textarea = bodyTextareaRef.current;
       const selection =
@@ -1128,6 +1242,17 @@ export function CreatorDashboard({
             }
           : null;
       latestSelectionRef.current = selection;
+      const recipeIngredients = form.recipeIngredientsText
+        .split("\n")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const recipeInstructions = form.recipeInstructionsText
+        .split(/\n\s*\n/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const recipeServings = Math.trunc(Number(form.recipeServings));
+      const recipePrepTimeMinutes = Math.trunc(Number(form.recipePrepTimeMinutes));
+      const recipeCookTimeMinutes = Math.trunc(Number(form.recipeCookTimeMinutes));
       const response = await fetch("/api/creator/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1147,6 +1272,24 @@ export function CreatorDashboard({
           selectionEnd: selection?.end,
           stream: true,
           context: options?.context,
+          recipeServings:
+            form.contentKind === "recipe" && Number.isFinite(recipeServings) && recipeServings > 0
+              ? recipeServings
+              : undefined,
+          recipePrepTimeMinutes:
+            form.contentKind === "recipe" &&
+            Number.isFinite(recipePrepTimeMinutes) &&
+            recipePrepTimeMinutes >= 0
+              ? recipePrepTimeMinutes
+              : undefined,
+          recipeCookTimeMinutes:
+            form.contentKind === "recipe" &&
+            Number.isFinite(recipeCookTimeMinutes) &&
+            recipeCookTimeMinutes >= 0
+              ? recipeCookTimeMinutes
+              : undefined,
+          recipeIngredients: form.contentKind === "recipe" ? recipeIngredients : undefined,
+          recipeInstructions: form.contentKind === "recipe" ? recipeInstructions : undefined,
         }),
       });
       if (!response.ok) {
@@ -1186,6 +1329,7 @@ export function CreatorDashboard({
                   costEstimateUsd?: number;
                   isEscalation?: boolean;
                   openingAngles?: string[];
+                  recipeAssist?: RecipeAssistPayload;
                 };
             if (parsed.type === "delta") {
               aggregate += parsed.delta;
@@ -1206,6 +1350,7 @@ export function CreatorDashboard({
               setAssistEscalation(parsed.isEscalation === true);
               if (Array.isArray(parsed.openingAngles) && parsed.openingAngles.length > 0)
                 setAssistOpeningAngles(parsed.openingAngles.map((a) => String(a).trim()).filter(Boolean));
+              if (parsed.recipeAssist) setAssistRecipePayload(parsed.recipeAssist);
             }
           }
         }
@@ -1220,6 +1365,7 @@ export function CreatorDashboard({
         costEstimateUsd?: number;
         isEscalation?: boolean;
         openingAngles?: string[];
+        recipeAssist?: RecipeAssistPayload;
       };
       if (!payload.result) {
         setAssistError("AI assist is unavailable right now.");
@@ -1232,9 +1378,25 @@ export function CreatorDashboard({
       if (typeof payload.costEstimateUsd === "number")
         setAssistCostEstimate(payload.costEstimateUsd);
       setAssistEscalation(payload.isEscalation === true);
+      if (payload.recipeAssist) setAssistRecipePayload(payload.recipeAssist);
     } finally {
       setAssistBusy(false);
     }
+  }
+
+  function applyRecipeAssistToForm(payload: RecipeAssistPayload) {
+    setForm((prev) => ({
+      ...prev,
+      headline: payload.suggestedHeadline?.trim() || prev.headline,
+      recipeIngredientsText:
+        payload.suggestedIngredients.length > 0
+          ? payload.suggestedIngredients.join("\n")
+          : prev.recipeIngredientsText,
+      recipeInstructionsText:
+        payload.suggestedInstructions.length > 0
+          ? payload.suggestedInstructions.join("\n\n")
+          : prev.recipeInstructionsText,
+    }));
   }
 
   async function createManualCheckpoint() {
@@ -1414,7 +1576,20 @@ export function CreatorDashboard({
               ) : (
                 <div className="creator-submission-list">
                   {submissions.map((submission) => (
-                    <article key={submission.id} className="creator-submission-card">
+                    <article
+                      key={submission.id}
+                      className="creator-submission-card creator-submission-card--interactive"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open submission preview for ${submission.headline}`}
+                      onClick={() => void openSubmissionPreview(submission)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          void openSubmissionPreview(submission);
+                        }
+                      }}
+                    >
                       <div className="creator-submission-card__top">
                         <strong>{submission.headline}</strong>
                         <span className={cx("creator-status-pill", submissionStatusClass(submission.status))}>
@@ -1430,10 +1605,24 @@ export function CreatorDashboard({
                       ) : null}
                       {submission.status === "pending" || submission.status === "changes_requested" ? (
                         <div className="creator-button-row">
-                          <button type="button" className="creator-button creator-button--small" onClick={() => void beginEdit(submission)}>
+                          <button
+                            type="button"
+                            className="creator-button creator-button--small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void beginEdit(submission);
+                            }}
+                          >
                             {submission.status === "changes_requested" ? "Revise" : "Edit"}
                           </button>
-                          <button type="button" className="creator-button creator-button--small creator-button--danger" onClick={() => void withdrawSubmission(submission.id)}>
+                          <button
+                            type="button"
+                            className="creator-button creator-button--small creator-button--danger"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void withdrawSubmission(submission.id);
+                            }}
+                          >
                             Withdraw
                           </button>
                         </div>
@@ -1448,6 +1637,16 @@ export function CreatorDashboard({
                 </div>
               )}
             </section>
+            {previewBusy ? (
+              <p className="creator-note creator-note--warning" aria-live="polite">
+                Loading submission preview...
+              </p>
+            ) : null}
+            {previewError ? (
+              <p className="creator-note creator-note--danger" aria-live="polite">
+                Could not open preview: {previewError}
+              </p>
+            ) : null}
           </aside>
 
           <section className="creator-editor" aria-label="Creator editor">
@@ -1628,6 +1827,11 @@ export function CreatorDashboard({
 
             {autosaveConflict ? <p className="creator-note creator-note--danger" aria-live="polite">Another tab changed this draft. Reload the page or restore a version before continuing.</p> : null}
             {message ? <p className="creator-note creator-note--warning" aria-live="polite">{message}</p> : null}
+            {!canSubmit ? (
+              <p className="creator-note creator-note--warning" aria-live="polite">
+                To enable submit: {submitBlockingReasons.join(" ")}
+              </p>
+            ) : null}
 
             <div className="creator-editor__footer">
               <div className="creator-status-stack creator-status-stack--inline">
@@ -1722,6 +1926,10 @@ export function CreatorDashboard({
                       onClick={() => {
                         if (!assistSuggestion) return;
                         if (form.contentKind !== "user_article") {
+                          if (assistRecipePayload) {
+                            applyRecipeAssistToForm(assistRecipePayload);
+                            return;
+                          }
                           setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
                           return;
                         }
@@ -1751,6 +1959,12 @@ export function CreatorDashboard({
                       onClick={() => {
                         const block = assistOpeningAngles.length > 0 ? assistOpeningAngles.join("\n\n") : assistSuggestion.trim();
                         if (!block) return;
+                        if (form.contentKind === "recipe") {
+                          if (assistRecipePayload) {
+                            applyRecipeAssistToForm(assistRecipePayload);
+                          }
+                          return;
+                        }
                         setForm((f) => ({ ...f, body: (f.body.trim() + "\n\n" + block).trim() }));
                       }}
                     >
@@ -1763,6 +1977,12 @@ export function CreatorDashboard({
                       onClick={() => {
                         const selection = latestSelectionRef.current;
                         if (!selection) return;
+                        if (form.contentKind === "recipe") {
+                          if (assistRecipePayload) {
+                            applyRecipeAssistToForm(assistRecipePayload);
+                          }
+                          return;
+                        }
                         const block = assistOpeningAngles.length > 0 ? assistOpeningAngles.join("\n\n") : assistSuggestion;
                         setForm((f) => ({ ...f, body: f.body.slice(0, selection.start) + block + f.body.slice(selection.end) }));
                       }}
@@ -1830,6 +2050,11 @@ export function CreatorDashboard({
           </aside>
         </div>
       </div>
+      <SubmissionPreviewModal
+        open={previewSubmissionId != null}
+        submission={previewSubmission}
+        onClose={closeSubmissionPreview}
+      />
     </main>
   );
 }

@@ -1100,7 +1100,7 @@ async function maybeNormalizeInsertedArticle(input: {
 }): Promise<void> {
   const guardEnabled =
     env.INGEST_TRANSLATION_GUARD_ENABLED == null
-      ? true
+      ? false
       : env.INGEST_TRANSLATION_GUARD_ENABLED;
   if (!guardEnabled) return;
   if (!isLikelyEnglishLocale(input.targetLocale)) return;

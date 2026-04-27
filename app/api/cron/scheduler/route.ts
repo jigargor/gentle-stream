@@ -147,6 +147,7 @@ export async function GET(request: NextRequest) {
   let totalBatchFallbacks = 0;
   let totalAnthropicExhausted = 0;
   let totalTranslatedPostIngest = 0;
+  const insertedArticleIdsThisRun: string[] = [];
   const discoveryRunsByProvider: Record<string, number> = {};
   const insertedByProvider: Record<string, number> = {};
   let categoriesChecked = 0;
@@ -315,13 +316,7 @@ export async function GET(request: NextRequest) {
           (insertedByProvider[result.discoveryProvider] ?? 0) + insertedCount;
         remainingExpansionBudget = Math.max(0, remainingExpansionBudget - result.expansionCount);
         if (result.inserted.length > 0) {
-          const normalized = await runArticleTranslationNormalization({
-            articleIds: result.inserted.map((article) => article.id),
-            maxRows: result.inserted.length,
-            apply: true,
-            reason: "cron_scheduler_post_ingest",
-          });
-          totalTranslatedPostIngest += normalized.translated;
+          for (const article of result.inserted) insertedArticleIdsThisRun.push(article.id);
         }
 
         if (result.errorSummary) {
@@ -403,6 +398,16 @@ export async function GET(request: NextRequest) {
           pipelineMode: resolveIngestPipeline(cat as Category),
         });
       }
+    }
+
+    if (insertedArticleIdsThisRun.length > 0) {
+      const normalized = await runArticleTranslationNormalization({
+        articleIds: insertedArticleIdsThisRun,
+        maxRows: insertedArticleIdsThisRun.length,
+        apply: true,
+        reason: "cron_scheduler_post_ingest",
+      });
+      totalTranslatedPostIngest = normalized.translated;
     }
   } catch (e) {
     captureException(e, { route: "cron.scheduler", runId, phase: "loop", traceId });

@@ -66,7 +66,7 @@ function buildUsageSummary(rows: LlmProviderCallListRow[]) {
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const { searchParams } = new URL(request.url);
     const parsed = querySchema.safeParse({

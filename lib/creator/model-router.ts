@@ -127,25 +127,24 @@ async function runMaxMode(input: {
   routerInput: CreatorRouterInput;
   providerApiKeys: Partial<Record<CreatorProvider, string>>;
 }) {
-  const candidates: LlmGenerateTextResult[] = [];
-  for (const provider of ROUTER_PROVIDER_ORDER) {
-    if (!input.providerApiKeys[provider]) continue;
-    const candidate = await runWithRetries({
-      provider,
-      callKind: `${input.routerInput.callKind}_max_candidate`,
-      route: input.routerInput.route,
-      workflowId: input.routerInput.workflowId,
-      userId: input.routerInput.userId,
-      prompt: input.routerInput.prompt,
-      systemPrompt: input.routerInput.systemPrompt,
-      maxTokens: input.routerInput.maxTokens,
-      temperature: 0.5,
-      timeoutMs: 25_000,
-      providerApiKeys: input.providerApiKeys,
-      fallbackReason: "max_mode_debate",
-    });
-    candidates.push(candidate);
-  }
+  const candidates = await Promise.all(
+    ROUTER_PROVIDER_ORDER.filter((p) => input.providerApiKeys[p]).map((provider) =>
+      runWithRetries({
+        provider,
+        callKind: `${input.routerInput.callKind}_max_candidate`,
+        route: input.routerInput.route,
+        workflowId: input.routerInput.workflowId,
+        userId: input.routerInput.userId,
+        prompt: input.routerInput.prompt,
+        systemPrompt: input.routerInput.systemPrompt,
+        maxTokens: input.routerInput.maxTokens,
+        temperature: 0.5,
+        timeoutMs: 25_000,
+        providerApiKeys: input.providerApiKeys,
+        fallbackReason: "max_mode_debate",
+      })
+    )
+  );
   if (candidates.length === 0) throw new Error("No provider keys configured for max mode.");
   if (candidates.length === 1) return candidates[0]!;
   const mergedPrompt = [

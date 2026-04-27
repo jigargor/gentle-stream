@@ -23,7 +23,7 @@ export interface RecipeAssistStructuredGeneration {
 function buildRecipePrompt(input: {
   workflowId: CreatorWorkflowId;
   intent: RecipeAssistIntent;
-  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck" | "prompt_ideas" | "close";
   headline: string;
   body: string;
   context?: string;
@@ -73,7 +73,7 @@ export async function generateRecipeAssistStructured(input: {
   route: string;
   callKind: string;
   intent: RecipeAssistIntent;
-  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck" | "prompt_ideas" | "close";
   headline: string;
   body: string;
   context?: string;

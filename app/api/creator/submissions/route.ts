@@ -54,7 +54,7 @@ function toSafeText(value: unknown, maxLen: number): string {
 }
 
 export async function GET(request: NextRequest) {
-  const access = await requireCreatorAccess(request, { requireMfa: true });
+  const access = await requireCreatorAccess(request);
   if (isCreatorAccessDenied(access)) return access;
   const userId = access.userId;
 
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const access = await requireCreatorAccess(request, { requireMfa: true });
+  const access = await requireCreatorAccess(request);
   if (isCreatorAccessDenied(access)) return access;
   const userId = access.userId;
 

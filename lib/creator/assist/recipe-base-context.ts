@@ -3,7 +3,7 @@ import type { RecipeAssistIntent } from "@/lib/creator/assist/recipe-skill";
 export interface RecipeAssistContextInput {
   intent: RecipeAssistIntent;
   workflowId: string;
-  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck" | "prompt_ideas" | "close";
   headline: string;
   body: string;
   memorySummary: string;

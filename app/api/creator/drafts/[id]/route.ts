@@ -48,7 +48,7 @@ export async function GET(
 ) {
   try {
     const params = await context.params;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const readRate = await consumeRateLimit({
       policy: { id: "creator-drafts-read", windowMs: 60_000, max: 180 },
@@ -92,7 +92,7 @@ export async function PATCH(
       });
     }
     const params = await context.params;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const patchRate = await consumeRateLimit({
       policy: { id: "creator-drafts-update", windowMs: 60_000, max: 60 },
@@ -233,7 +233,7 @@ export async function DELETE(
       });
     }
     const params = await context.params;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const deleteRate = await consumeRateLimit({
       policy: { id: "creator-drafts-delete", windowMs: 60_000, max: 20 },

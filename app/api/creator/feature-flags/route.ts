@@ -20,7 +20,7 @@ const patchSchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const flags = await listEffectiveCreatorFeatureFlags({
       userId: access.userId,
@@ -36,7 +36,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const originError = assertCreatorMutationOrigin(request);
     if (originError) return originError;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const parsed = patchSchema.safeParse(await request.json());
     if (!parsed.success) {

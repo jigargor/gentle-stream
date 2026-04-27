@@ -36,7 +36,7 @@ const createDraftSchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const search = request.nextUrl.searchParams;
     const limitRaw = Number.parseInt(search.get("limit") ?? "12", 10);
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         message: "Invalid request origin.",
       });
     }
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const rate = await consumeRateLimit({
       policy: { id: "creator-drafts-write", windowMs: 60_000, max: 25 },

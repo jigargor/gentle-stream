@@ -145,7 +145,14 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
     codeInputRef.current?.focus();
   }, [busy, challengeId, checking]);
 
-  if (!required && !checking) return null;
+  // While checking we don't yet know if MFA is needed — render a blank same-background
+  // placeholder so the page doesn't flash the challenge form then immediately disappear.
+  if (checking) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--gs-bg)" }} aria-hidden="true" />
+    );
+  }
+  if (!required) return null;
 
   return (
     <div

@@ -13,23 +13,18 @@ export default async function CreatorSettingsPage() {
   if (!user) redirect("/login?next=/creator/settings");
   if (!user.email_confirmed_at) redirect("/account/settings?reason=creator_email_verification_required");
 
+  // Check MFA enrollment status — not to gate access, but to show a gentle prompt
+  // in the settings page encouraging users to protect their API keys with MFA.
   const env = getEnv();
+  let hasMfa = false;
   if (!env.AUTH_DISABLED) {
-    const { data: factorData, error: factorsError } = await supabase.auth.mfa.listFactors();
-    if (!factorsError && factorData) {
-      const factors = [...(factorData.totp ?? []), ...(factorData.phone ?? [])];
-      const hasVerifiedMfa = factors.some((f) => f.status === "verified");
-      if (!hasVerifiedMfa) {
-        redirect("/account/settings?reason=creator_mfa_enrollment_required");
-      }
+    const { data: factorData } = await supabase.auth.mfa.listFactors();
+    if (factorData) {
+      hasMfa = [...(factorData.totp ?? []), ...(factorData.phone ?? [])].some(
+        (f) => f.status === "verified"
+      );
     }
-
-    const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    const needsMfa =
-      (aalData?.nextLevel ?? null) === "aal2" &&
-      (aalData?.currentLevel ?? null) !== "aal2";
-    if (needsMfa) redirect("/account/settings?reason=creator_mfa_required");
   }
 
-  return <CreatorSettingsConsole />;
+  return <CreatorSettingsConsole hasMfa={hasMfa} />;
 }

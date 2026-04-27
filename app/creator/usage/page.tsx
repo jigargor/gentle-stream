@@ -12,11 +12,5 @@ export default async function CreatorUsagePage() {
   if (!user) redirect("/login?next=/creator/usage");
   if (!user.email_confirmed_at) redirect("/account/settings?reason=creator_email_verification_required");
 
-  const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-  const needsMfa =
-    (aalData?.nextLevel ?? null) === "aal2" &&
-    (aalData?.currentLevel ?? null) !== "aal2";
-  if (needsMfa) redirect("/account/settings?reason=creator_mfa_required");
-
   return <CreatorUsageConsole />;
 }

@@ -214,7 +214,15 @@ export async function POST(request: NextRequest) {
         userId,
         draftId: body.draftId,
       });
-      if (draft?.neverSendToAi) {
+      if (!draft || draft.deletedAt) {
+        return apiErrorResponse({
+          request,
+          status: 404,
+          code: API_ERROR_CODES.NOT_FOUND,
+          message: "Draft not found.",
+        });
+      }
+      if (draft.neverSendToAi) {
         return apiErrorResponse({
           request,
           status: 403,
@@ -232,13 +240,21 @@ export async function POST(request: NextRequest) {
       });
     }
     if (contentKind === "user_article" && draftBody.length < 40) {
-      if (!body.helpMode || body.helpMode === "stuck")
+      const ideationModes =
+        body.helpMode === "inspiration" ||
+        body.helpMode === "brainstorm" ||
+        body.helpMode === "random";
+      if (!ideationModes) {
         return apiErrorResponse({
           request,
           status: 400,
           code: API_ERROR_CODES.VALIDATION,
-          message: "Add at least a short draft before using AI assist.",
+          message:
+            body.helpMode === "stuck"
+              ? "Add at least a short draft before using stuck assist."
+              : "Add at least a short draft for this assist mode, or use inspiration, brainstorm, or random to ideate with little or no draft text.",
         });
+      }
     }
     if (
       contentKind === "recipe" &&
@@ -514,7 +530,12 @@ export async function POST(request: NextRequest) {
         },
       });
     }
-    if (env.CREATOR_DEBUG_PROMPT_LOGGING && body.debugRaw === true) {
+    // Never return assembled prompts in production: they include user draft text and context (redactSecrets only strips secrets).
+    if (
+      env.NODE_ENV !== "production" &&
+      env.CREATOR_DEBUG_PROMPT_LOGGING &&
+      body.debugRaw === true
+    ) {
       responseBody.prompt = redactSecrets(prompt);
     }
     return NextResponse.json(responseBody);

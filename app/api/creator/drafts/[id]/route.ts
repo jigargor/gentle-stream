@@ -140,6 +140,7 @@ export async function PATCH(
       return NextResponse.json({ draft: restored });
     }
 
+    // Single fetch: revision check and publish payload both use this row (no second round-trip).
     if (body.action === "publish") {
       const draft = await getCreatorDraftById({
         userId: access.userId,

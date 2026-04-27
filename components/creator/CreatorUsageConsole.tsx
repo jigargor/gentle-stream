@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CreatorBetaPill } from "@/components/creator/creator-beta-pill";
 import { useCallback, useEffect, useState } from "react";
 
 interface UsageByModel {
@@ -104,7 +105,10 @@ export function CreatorUsageConsole() {
         <header className="creator-commandbar">
           <div className="creator-commandbar__copy">
             <p className="creator-eyebrow">Creator telemetry</p>
-            <h1>Usage</h1>
+            <div className="creator-commandbar__title-row">
+              <h1>Usage</h1>
+              <CreatorBetaPill />
+            </div>
             <p>Estimated costs and token use from logged Creator Studio LLM calls.</p>
           </div>
           <nav className="creator-commandbar__actions" aria-label="Creator usage navigation">

@@ -35,6 +35,7 @@ import type {
   CreatorDraftVersion,
 } from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
+import { CreatorBetaPill } from "@/components/creator/creator-beta-pill";
 import { SubmissionPreviewModal } from "@/components/creator/SubmissionPreviewModal";
 import { BUILT_IN_ARTICLE_TYPES, articleTypeLabel } from "@/lib/creator/article-types";
 import {
@@ -1580,7 +1581,10 @@ export function CreatorDashboard({
         <header className="creator-commandbar">
           <div className="creator-commandbar__copy">
             <p className="creator-eyebrow">Gentle Stream</p>
-            <h1>Creator Studio</h1>
+            <div className="creator-commandbar__title-row">
+              <h1>Creator Studio</h1>
+              <CreatorBetaPill />
+            </div>
             <p>Draft, revise, and submit work without leaving the writing flow.</p>
           </div>
           <nav className="creator-commandbar__actions" aria-label="Creator Studio navigation">

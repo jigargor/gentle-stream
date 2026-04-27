@@ -697,7 +697,33 @@ html[data-theme="dark"] .gs-guest-auth-cta-primary {
   letter-spacing: 0;
 }
 
-.creator-commandbar__copy h1 { font-size: clamp(1.55rem, 2vw, 2.15rem); }
+.creator-commandbar__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.65rem;
+}
+
+.creator-commandbar__title-row h1 {
+  font-size: clamp(1.55rem, 2vw, 2.15rem);
+}
+
+.creator-beta-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.18rem 0.58rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #c53030 52%, transparent);
+  background: color-mix(in srgb, #c53030 11%, transparent);
+  color: #9b2c2c;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: inherit;
+  line-height: 1;
+}
 .creator-commandbar__copy p:not(.creator-eyebrow),
 .creator-editor__masthead p,
 .creator-muted {

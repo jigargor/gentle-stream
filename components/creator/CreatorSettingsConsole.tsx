@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CreatorBetaPill } from "@/components/creator/creator-beta-pill";
 import { useEffect, useState } from "react";
 
 interface CreatorSettingsResponse {
@@ -217,7 +218,10 @@ export function CreatorSettingsConsole() {
         <header className="creator-commandbar">
           <div className="creator-commandbar__copy">
             <p className="creator-eyebrow">Creator controls</p>
-            <h1>Creator Settings</h1>
+            <div className="creator-commandbar__title-row">
+              <h1>Creator Settings</h1>
+              <CreatorBetaPill />
+            </div>
             <p>Bring-your-own-key model controls, budgets, autocomplete, and memory policy.</p>
           </div>
           <nav className="creator-commandbar__actions" aria-label="Creator settings navigation">

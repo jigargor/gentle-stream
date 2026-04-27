@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { FEED_GAME_TYPES } from "@/lib/games/feedPick";
 import type { GameType } from "@/lib/games/types";
-import { isCreator } from "@/lib/user/creator";
 import {
   isUsernameChangeLocked,
   usernameChangeUnlocksAtIso,
@@ -599,8 +598,6 @@ export function ProfileMenu({
     return true;
   }
 
-  const creator = profile ? isCreator(profile) : false;
-
   const label =
     profile?.displayName?.trim() ||
     (profile?.username ? `@${profile.username}` : null) ||
@@ -791,25 +788,6 @@ export function ProfileMenu({
         >
           {loadError && (
             <p style={{ color: "var(--gs-warning)", fontSize: "0.78rem" }}>{loadError}</p>
-          )}
-
-          {creator && (
-            <div
-              style={{
-                fontSize: "0.72rem",
-                color: "var(--gs-accent)",
-                background: "var(--gs-surface-soft)",
-                padding: "0.45rem 0.55rem",
-                marginBottom: "0.75rem",
-                border: "1px solid var(--gs-border)",
-                fontFamily: "'IM Fell English', Georgia, serif",
-              }}
-            >
-              <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-                Creator
-              </strong>
-              — your submissions are routed through approval before publishing.
-            </div>
           )}
 
           <section style={{ marginBottom: "1rem" }}>
@@ -1020,7 +998,7 @@ export function ProfileMenu({
               Creator tools
             </h3>
             <Link
-              href={creator ? "/creator" : "/creator/onboarding"}
+              href="/creator"
               onClick={() => setOpen(false)}
               style={{
                 display: "inline-block",
@@ -1032,7 +1010,7 @@ export function ProfileMenu({
                 textUnderlineOffset: "3px",
               }}
             >
-              {creator ? "Open creator studio" : "Apply as a creator"}
+              Open creator studio
             </Link>
           </section>
 

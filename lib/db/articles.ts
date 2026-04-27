@@ -130,6 +130,12 @@ interface ArticleRow {
   moderation_labels?: Record<string, unknown> | null;
   moderated_at?: string | null;
   moderated_by_user_id?: string | null;
+  original_headline?: string | null;
+  original_subheadline?: string | null;
+  original_body?: string | null;
+  translated_at?: string | null;
+  translation_provider?: string | null;
+  source_language?: string | null;
   fingerprint: string;
   source_urls: string[];
   source?: string;
@@ -148,7 +154,7 @@ interface ArticleRow {
 
 /** Full row projection for `rowToArticle` — avoids `select('*')` on hot random/resurface paths. */
 const ARTICLE_FEED_ROW_SELECT =
-  "id,headline,subheadline,byline,location,category,body,pull_quote,image_prompt,fetched_at,source_published_at,expires_at,tags,sentiment,emotions,locale,reading_time_secs,quality_score,used_count,tagged,moderation_status,moderation_reason,moderation_confidence,moderation_labels,moderated_at,moderated_by_user_id,fingerprint,source_urls,source,content_kind,author_user_id,submission_id,creator_explicit_tags,recipe_servings,recipe_ingredients,recipe_instructions,recipe_prep_time_minutes,recipe_cook_time_minutes,recipe_images";
+  "id,headline,subheadline,byline,location,category,body,pull_quote,image_prompt,original_headline,original_subheadline,original_body,translated_at,translation_provider,source_language,fetched_at,source_published_at,expires_at,tags,sentiment,emotions,locale,reading_time_secs,quality_score,used_count,tagged,moderation_status,moderation_reason,moderation_confidence,moderation_labels,moderated_at,moderated_by_user_id,fingerprint,source_urls,source,content_kind,author_user_id,submission_id,creator_explicit_tags,recipe_servings,recipe_ingredients,recipe_instructions,recipe_prep_time_minutes,recipe_cook_time_minutes,recipe_images";
 
 function isLikelyTestFixtureRow(row: ArticleRow): boolean {
   const headline = (row.headline ?? "").toLowerCase();
@@ -279,6 +285,12 @@ export function rowToArticle(row: ArticleRow): StoredArticle {
     moderationLabels: row.moderation_labels ?? {},
     moderatedAt: row.moderated_at ?? null,
     moderatedByUserId: row.moderated_by_user_id ?? null,
+    originalHeadline: row.original_headline ?? null,
+    originalSubheadline: row.original_subheadline ?? null,
+    originalBody: row.original_body ?? null,
+    translatedAt: row.translated_at ?? null,
+    translationProvider: row.translation_provider ?? null,
+    sourceLanguage: row.source_language ?? null,
     sourceUrls: row.source_urls ?? [],
     source: row.source === "creator" ? "creator" : "ingest",
     contentKind,

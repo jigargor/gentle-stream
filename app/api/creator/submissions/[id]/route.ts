@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId } from "@/lib/api/sessionUser";
 import { CATEGORIES, RECIPE_CATEGORY, type Category } from "@/lib/constants";
 import type { SubmissionContentKind } from "@/lib/types";
-import { getOrCreateUserProfile } from "@/lib/db/users";
-import { updateSubmissionForAuthor } from "@/lib/db/creator";
+import { getSubmissionByIdForAuthor, updateSubmissionForAuthor } from "@/lib/db/creator";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
+import { hasTrustedOrigin } from "@/lib/security/origin";
+import { isCreatorAccessDenied, requireCreatorAccess } from "@/lib/auth/creator-security";
+import { isBuiltInArticleType } from "@/lib/creator/article-types";
 
 function isCategory(value: string): value is Category {
   return CATEGORIES.includes(value as Category);
@@ -29,6 +30,8 @@ const updateSubmissionBodySchema = z.object({
   pullQuote: z.string().optional(),
   category: z.string().optional(),
   contentKind: z.string().optional(),
+  articleType: z.string().optional(),
+  articleTypeCustom: z.string().optional(),
   locale: z.string().optional(),
   explicitHashtags: z.array(z.string()).optional(),
   withdraw: z.boolean().optional(),
@@ -40,30 +43,44 @@ const updateSubmissionBodySchema = z.object({
   recipeImages: z.array(z.string()).optional(),
 });
 
-export async function PATCH(
+export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const params = await context.params;
-  const userId = await getSessionUserId();
-  if (!userId) {
+  const access = await requireCreatorAccess(request, { requireMfa: true });
+  if (isCreatorAccessDenied(access)) return access;
+  const match = await getSubmissionByIdForAuthor({
+    id: params.id,
+    authorUserId: access.userId,
+  });
+  if (!match) {
     return apiErrorResponse({
       request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
+      status: 404,
+      code: API_ERROR_CODES.NOT_FOUND,
+      message: "Submission not found.",
     });
   }
+  return NextResponse.json({ submission: match });
+}
 
-  const profile = await getOrCreateUserProfile(userId);
-  if (profile.userRole !== "creator") {
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  if (!hasTrustedOrigin(request)) {
     return apiErrorResponse({
       request,
       status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Creator access required",
+      code: API_ERROR_CODES.FORBIDDEN_ORIGIN,
+      message: "Invalid request origin.",
     });
   }
+  const params = await context.params;
+  const access = await requireCreatorAccess(request, { requireMfa: true });
+  if (isCreatorAccessDenied(access)) return access;
+  const userId = access.userId;
 
   const parsedBody = await parseJsonBody({
     request,
@@ -93,6 +110,8 @@ export async function PATCH(
   const locale = toSafeText(body.locale, 64);
   const categoryRaw = toSafeText(body.category, 80);
   const contentKindRaw = toSafeText(body.contentKind, 40);
+  const articleTypeRaw = toSafeText(body.articleType, 120);
+  const articleTypeCustom = toSafeText(body.articleTypeCustom, 160);
 
   const parseNumberOrNull = (v: unknown): number | null => {
     if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
@@ -172,6 +191,12 @@ export async function PATCH(
       });
     }
     updates.contentKind = contentKindRaw;
+  }
+  if (articleTypeRaw !== undefined) {
+    updates.articleType = articleTypeRaw && isBuiltInArticleType(articleTypeRaw) ? articleTypeRaw : null;
+  }
+  if (articleTypeCustom !== undefined) {
+    updates.articleTypeCustom = articleTypeCustom || null;
   }
 
   if (isRecipeUpdate) {

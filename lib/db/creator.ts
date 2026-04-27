@@ -37,6 +37,8 @@ interface ArticleSubmissionRow {
   content_kind: string | null;
   locale: string;
   explicit_hashtags: string[];
+  article_type?: string | null;
+  article_type_custom?: string | null;
   status: string;
   admin_note: string | null;
   rejection_reason: string | null;
@@ -115,6 +117,8 @@ function rowToSubmission(row: ArticleSubmissionRow): ArticleSubmission {
     contentKind: toSubmissionContentKind(row.content_kind),
     locale: row.locale ?? "global",
     explicitHashtags: row.explicit_hashtags ?? [],
+    articleType: row.article_type ?? null,
+    articleTypeCustom: row.article_type_custom ?? null,
     status: toSubmissionStatus(row.status),
     adminNote: row.admin_note,
     rejectionReason: row.rejection_reason,
@@ -254,6 +258,8 @@ export async function createSubmission(input: {
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
   recipeServings?: number | null;
   recipeIngredients?: string[];
   recipeInstructions?: string[];
@@ -271,6 +277,8 @@ export async function createSubmission(input: {
     content_kind: input.contentKind,
     locale: input.locale,
     explicit_hashtags: normaliseHashtags(input.explicitHashtags),
+    article_type: input.articleType ?? null,
+    article_type_custom: input.articleTypeCustom ?? null,
     status: "pending",
 
     recipe_servings:
@@ -295,15 +303,144 @@ export async function createSubmission(input: {
   return rowToSubmission(data as ArticleSubmissionRow);
 }
 
-export async function listSubmissionsByAuthor(authorUserId: string): Promise<ArticleSubmission[]> {
+export async function listSubmissionsByAuthor(input: {
+  authorUserId: string;
+  limit?: number;
+  cursorCreatedAt?: string | null;
+  includeBody?: boolean;
+}): Promise<{ submissions: ArticleSubmission[]; nextCursor: string | null }> {
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 12)));
+  const includeBody = input.includeBody === true;
+  const baseColumns = [
+    "id",
+    "author_user_id",
+    "headline",
+    "subheadline",
+    "pull_quote",
+    "category",
+    "content_kind",
+    "locale",
+    "explicit_hashtags",
+    "article_type",
+    "article_type_custom",
+    "status",
+    "admin_note",
+    "rejection_reason",
+    "reviewed_by_user_id",
+    "reviewed_at",
+    "published_article_id",
+    "created_at",
+    "updated_at",
+    "deleted_at",
+    "deleted_by_user_id",
+    "delete_reason",
+    "recipe_servings",
+    "recipe_ingredients",
+    "recipe_instructions",
+    "recipe_prep_time_minutes",
+    "recipe_cook_time_minutes",
+    "recipe_images",
+  ];
+  const columns = includeBody ? ["body", ...baseColumns] : baseColumns;
+
+  let query = db
+    .from("article_submissions")
+    .select(columns.join(","))
+    .eq("author_user_id", input.authorUserId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (input.cursorCreatedAt) query = query.lt("created_at", input.cursorCreatedAt);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`listSubmissionsByAuthor: ${error.message}`);
+  const parsedRows = (data ?? []) as unknown as ArticleSubmissionRow[];
+  const rows = parsedRows.slice(0, limit);
+  const submissions = rows.map((row) =>
+    rowToSubmission({
+      ...row,
+      body: includeBody ? row.body ?? "" : "",
+    } as ArticleSubmissionRow)
+  );
+  const hasMore = parsedRows.length > limit;
+  const nextCursor = hasMore ? rows[rows.length - 1]?.created_at ?? null : null;
+  return { submissions, nextCursor };
+}
+
+const SUBMISSION_SUMMARY_COLUMNS = [
+  "id",
+  "author_user_id",
+  "headline",
+  "subheadline",
+  "pull_quote",
+  "category",
+  "content_kind",
+  "locale",
+  "explicit_hashtags",
+  "article_type",
+  "article_type_custom",
+  "status",
+  "admin_note",
+  "rejection_reason",
+  "reviewed_by_user_id",
+  "reviewed_at",
+  "published_article_id",
+  "created_at",
+  "updated_at",
+];
+
+/**
+ * Paginated submission list without body or recipe blobs (for dashboards and bootstrap).
+ */
+export async function listCreatorSubmissionSummaries(input: {
+  authorUserId: string;
+  limit?: number;
+  cursorCreatedAt?: string | null;
+}): Promise<{ submissions: ArticleSubmission[]; nextCursor: string | null }> {
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 12)));
+  let query = db
+    .from("article_submissions")
+    .select(SUBMISSION_SUMMARY_COLUMNS.join(","))
+    .eq("author_user_id", input.authorUserId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (input.cursorCreatedAt) query = query.lt("created_at", input.cursorCreatedAt);
+  const { data, error } = await query;
+  if (error) throw new Error(`listCreatorSubmissionSummaries: ${error.message}`);
+  const parsedRows = (data ?? []) as unknown as ArticleSubmissionRow[];
+  const rows = parsedRows.slice(0, limit);
+  const submissions = rows.map((row) =>
+    rowToSubmission({
+      ...row,
+      body: "",
+      recipe_servings: null,
+      recipe_ingredients: [],
+      recipe_instructions: [],
+      recipe_prep_time_minutes: null,
+      recipe_cook_time_minutes: null,
+      recipe_images: [],
+    } as ArticleSubmissionRow)
+  );
+  const hasMore = parsedRows.length > limit;
+  const nextCursor = hasMore ? rows[rows.length - 1]?.created_at ?? null : null;
+  return { submissions, nextCursor };
+}
+
+export async function getSubmissionByIdForAuthor(input: {
+  id: string;
+  authorUserId: string;
+}): Promise<ArticleSubmission | null> {
   const { data, error } = await db
     .from("article_submissions")
     .select("*")
-    .eq("author_user_id", authorUserId)
+    .eq("id", input.id)
+    .eq("author_user_id", input.authorUserId)
     .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(`listSubmissionsByAuthor: ${error.message}`);
-  return (data as ArticleSubmissionRow[]).map(rowToSubmission);
+    .maybeSingle();
+  if (error) throw new Error(`getSubmissionByIdForAuthor: ${error.message}`);
+  if (!data) return null;
+  return rowToSubmission(data as ArticleSubmissionRow);
 }
 
 export async function updateSubmissionForAuthor(input: {
@@ -317,6 +454,8 @@ export async function updateSubmissionForAuthor(input: {
   contentKind?: SubmissionContentKind;
   locale?: string;
   explicitHashtags?: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
   withdraw?: boolean;
 
   recipeServings?: number | null;
@@ -350,6 +489,8 @@ export async function updateSubmissionForAuthor(input: {
   if (input.explicitHashtags !== undefined) {
     updates.explicit_hashtags = normaliseHashtags(input.explicitHashtags);
   }
+  if (input.articleType !== undefined) updates.article_type = input.articleType;
+  if (input.articleTypeCustom !== undefined) updates.article_type_custom = input.articleTypeCustom;
 
   if (input.recipeServings !== undefined) {
     updates.recipe_servings = input.recipeServings;
@@ -559,6 +700,8 @@ export async function reviewSubmission(input: {
       author_user_id: submission.author_user_id,
       submission_id: submission.id,
       creator_explicit_tags: explicitTags,
+      article_type: submission.article_type ?? null,
+      article_type_custom: submission.article_type_custom ?? null,
       deleted_at: null,
       deleted_by_user_id: null,
       delete_reason: null,
@@ -639,6 +782,8 @@ export async function reviewSubmission(input: {
       authorUserId: submission.author_user_id,
       submissionId: submission.id,
       creatorExplicitTags: explicitTags,
+      articleType: submission.article_type ?? null,
+      articleTypeCustom: submission.article_type_custom ?? null,
       recipeServings:
         submission.content_kind === "recipe"
           ? submission.recipe_servings ?? null

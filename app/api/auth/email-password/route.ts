@@ -260,18 +260,6 @@ export async function POST(request: NextRequest) {
         message: "Creator login requires a verified email address.",
       });
     }
-    const phoneConfirmedAt =
-      (user as { phone_confirmed_at?: string | null }).phone_confirmed_at ?? null;
-    if (!user.phone || !phoneConfirmedAt) {
-      await supabase.auth.signOut();
-      return apiErrorResponse({
-        request,
-        status: 403,
-        code: API_ERROR_CODES.FORBIDDEN,
-        message: "Creator login requires a verified phone number.",
-      });
-    }
-
     const profile = await getOrCreateUserProfile(user.id);
     if (profile.userRole !== "creator") {
       await supabase.auth.signOut();

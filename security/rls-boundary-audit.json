@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-04-26T18:31:27.723Z",
+  "generatedAt": "2026-04-27T01:54:26.391Z",
   "summary": {
-    "totalTables": 28,
-    "tablesWithRlsEnabled": 28,
-    "tablesWithPolicies": 13,
-    "serviceRoleRouteCount": 14
+    "totalTables": 37,
+    "tablesWithRlsEnabled": 37,
+    "tablesWithPolicies": 22,
+    "serviceRoleRouteCount": 15
   },
   "tableRlsStatus": [
     {
@@ -28,7 +28,52 @@
       "policyCount": 1
     },
     {
+      "table": "creator_audit_events",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_draft_versions",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_drafts",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_feature_flags",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_memory_sessions",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_memory_summaries",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_mfa_recovery_codes",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
       "table": "creator_profiles",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_provider_keys",
+      "rlsEnabled": true,
+      "policyCount": 1
+    },
+    {
+      "table": "creator_settings",
       "rlsEnabled": true,
       "policyCount": 1
     },
@@ -159,6 +204,12 @@
       "route": "/api/articles/search",
       "authSignals": [
         "session_user"
+      ]
+    },
+    {
+      "route": "/api/creator/data-portability",
+      "authSignals": [
+        "none_detected"
       ]
     },
     {

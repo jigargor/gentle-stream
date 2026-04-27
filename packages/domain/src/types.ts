@@ -33,6 +33,8 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   authorUsername?: string | null;
   submissionId?: string | null;
   creatorExplicitTags?: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
 
   // Written by tagger agent
   tags: string[]; // ["ocean", "coral", "australia"]
@@ -51,6 +53,12 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   moderationLabels?: Record<string, unknown> | null;
   moderatedAt?: string | null;
   moderatedByUserId?: string | null;
+  originalHeadline?: string | null;
+  originalSubheadline?: string | null;
+  originalBody?: string | null;
+  translatedAt?: string | null;
+  translationProvider?: string | null;
+  sourceLanguage?: string | null;
 
   // Recipe-specific fields (contentKind='recipe')
   recipeServings?: number | null;
@@ -130,6 +138,8 @@ export interface ArticleSubmission {
   contentKind: SubmissionContentKind;
   locale: string;
   explicitHashtags: string[];
+  articleType?: string | null;
+  articleTypeCustom?: string | null;
   status: ArticleSubmissionStatus;
   adminNote: string | null;
   rejectionReason: string | null;
@@ -146,6 +156,75 @@ export interface ArticleSubmission {
   recipePrepTimeMinutes?: number | null;
   recipeCookTimeMinutes?: number | null;
   recipeImages?: string[];
+}
+
+export type CreatorDraftVersionReason =
+  | "autosave"
+  | "manual_checkpoint"
+  | "restore"
+  | "publish";
+
+export interface CreatorDraft {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  contentKind: SubmissionContentKind;
+  articleType: string | null;
+  articleTypeCustom: string | null;
+  category: ArticleStorageCategory;
+  locale: string;
+  explicitHashtags: string[];
+  pullQuote: string;
+  privateNotes: string | null;
+  contentHash: string;
+  wordCount: number;
+  revision: number;
+  lastOpenedAt: string;
+  neverSendToAi: boolean;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** List projection without body, private notes, or content hash (for fast bootstrap lists). */
+export interface CreatorDraftSummary {
+  id: string;
+  userId: string;
+  title: string;
+  contentKind: SubmissionContentKind;
+  articleType: string | null;
+  articleTypeCustom: string | null;
+  category: ArticleStorageCategory;
+  locale: string;
+  explicitHashtags: string[];
+  pullQuote: string;
+  wordCount: number;
+  revision: number;
+  lastOpenedAt: string;
+  neverSendToAi: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatorDraftVersion {
+  id: string;
+  draftId: string;
+  userId: string;
+  revision: number;
+  title: string;
+  body: string;
+  contentKind: SubmissionContentKind;
+  articleType: string | null;
+  articleTypeCustom: string | null;
+  category: ArticleStorageCategory;
+  locale: string;
+  explicitHashtags: string[];
+  pullQuote: string;
+  contentHash: string;
+  wordCount: number;
+  versionReason: CreatorDraftVersionReason;
+  createdAt: string;
 }
 
 /** Row from `article_saves` for library UI */

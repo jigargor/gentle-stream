@@ -134,6 +134,30 @@ describe("/api/articles/translate", () => {
     });
   });
 
+  it("marks translated when DeepL text changes despite English source labels", async () => {
+    translateTextsWithDeepLMock.mockResolvedValue({
+      texts: [
+        "English rewritten headline",
+        "English rewritten subheadline",
+        "English rewritten body with clearer language.",
+        "A rewritten pull quote.",
+        "Sunrise over city skyline",
+      ],
+      detectedSourceLanguage: "EN",
+      detectedSourceLanguages: ["EN", "EN", "EN", "EN", "EN"],
+    });
+
+    const response = await runTranslateRequest();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      available: true,
+      translated: true,
+      detectedSourceLanguage: "EN",
+      headline: "English rewritten headline",
+      body: "English rewritten body with clearer language.",
+    });
+  });
+
   it("does not negative-cache unavailable DeepL responses", async () => {
     translateTextsWithDeepLMock.mockResolvedValue(null);
 

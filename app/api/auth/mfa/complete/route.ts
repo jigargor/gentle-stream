@@ -10,6 +10,7 @@ import {
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
+import { createCreatorAuditEvent } from "@/lib/db/creatorStudio";
 
 const completeBodySchema = z
   .object({
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
   }
 
   const rate = await consumeRateLimit({
-    policy: { id: "auth-mfa-complete", windowMs: 10 * 60 * 1000, max: 60 },
+    policy: { id: "auth-mfa-complete", windowMs: 10 * 60 * 1000, max: 15 },
     key: buildRateLimitKey({
       request,
       userId: user.id,
@@ -86,9 +87,22 @@ export async function POST(request: NextRequest) {
 
     const { error: refreshError } = await supabase.auth.refreshSession();
     if (refreshError) throw refreshError;
-
+    void createCreatorAuditEvent({
+      userId: user.id,
+      actorUserId: user.id,
+      eventType: "mfa_challenge_completed",
+      route: "/api/auth/mfa/complete",
+      targetId: factorId,
+    }).catch(() => undefined);
     return applyTraceIdHeader(request, response);
   } catch (e) {
+    void createCreatorAuditEvent({
+      userId: user.id,
+      actorUserId: user.id,
+      eventType: "mfa_challenge_complete_failed",
+      route: "/api/auth/mfa/complete",
+      metadata: { message: e instanceof Error ? e.message.slice(0, 120) : "unknown" },
+    }).catch(() => undefined);
     return mfaFailureResponse(request, e);
   }
 }

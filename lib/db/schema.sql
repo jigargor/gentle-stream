@@ -20,6 +20,12 @@ CREATE TABLE IF NOT EXISTS articles (
   body            TEXT NOT NULL,
   pull_quote      TEXT NOT NULL DEFAULT '',
   image_prompt    TEXT NOT NULL DEFAULT '',
+  original_headline TEXT,
+  original_subheadline TEXT,
+  original_body   TEXT,
+  translated_at   TIMESTAMPTZ,
+  translation_provider TEXT,
+  source_language TEXT,
 
   -- Timestamps
   fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -84,6 +90,13 @@ CREATE INDEX IF NOT EXISTS idx_articles_moderation_status
 
 CREATE INDEX IF NOT EXISTS idx_articles_feed_visibility
   ON articles (category, moderation_status, tagged, deleted_at);
+
+CREATE INDEX IF NOT EXISTS idx_articles_translation_pending
+  ON articles (fetched_at DESC)
+  WHERE source = 'ingest'
+    AND content_kind = 'news'
+    AND deleted_at IS NULL
+    AND translated_at IS NULL;
 
 -- ─── User profiles ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_profiles (

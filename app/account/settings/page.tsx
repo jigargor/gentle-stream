@@ -36,7 +36,29 @@ const legalLinks: { href: string; label: string; description: string }[] = [
   },
 ];
 
-export default function AccountSettingsPage() {
+function accountSettingsBannerCopy(reason: string | undefined): string | null {
+  switch (reason) {
+    case "creator_mfa_enrollment_required":
+      return "Set up multi-factor authentication (MFA) below before saving provider API keys or other sensitive Creator settings. After MFA is active, return to Creator settings.";
+    case "creator_mfa_required":
+      return "Verify with your MFA factor (step-up) using the options below, then open Creator Studio or Creator settings again.";
+    case "creator_email_verification_required":
+      return "Confirm your email address before using Creator Studio. Check your inbox or resend verification from your auth provider.";
+    default:
+      return null;
+  }
+}
+
+export default async function AccountSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const resolved = await searchParams;
+  const reasonRaw = resolved.reason;
+  const reason = typeof reasonRaw === "string" ? reasonRaw : undefined;
+  const banner = accountSettingsBannerCopy(reason);
+
   return (
     <LegalDocumentShell
       title="Account settings"
@@ -62,6 +84,23 @@ export default function AccountSettingsPage() {
           Back
         </Link>
       </div>
+
+      {banner ? (
+        <aside
+          role="status"
+          style={{
+            border: "1px solid #c4a574",
+            background: "#fdf8ee",
+            color: "#4a3720",
+            padding: "0.75rem 0.85rem",
+            marginBottom: "1rem",
+            lineHeight: 1.55,
+            fontSize: "0.9rem",
+          }}
+        >
+          {banner}
+        </aside>
+      ) : null}
 
       <MfaSettings />
 

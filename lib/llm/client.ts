@@ -1,11 +1,19 @@
 import { getEnv } from "@/lib/env";
 import { logLlmProviderCall } from "@/lib/db/llmProviderCalls";
+import { captureLangfuseGeneration } from "@/lib/observability/langfuse";
+import { redactSecrets } from "@/lib/security/redaction";
 
 export type LlmProvider = "anthropic" | "openai" | "gemini";
 
 export interface LlmGenerateTextInput {
   provider?: LlmProvider;
   model?: string;
+  workflowId?: string;
+  userId?: string;
+  timeoutMs?: number;
+  retryCount?: number;
+  fallbackReason?: string;
+  providerApiKeys?: Partial<Record<LlmProvider, string>>;
   callKind: string;
   route: string;
   agent?: string;
@@ -77,11 +85,31 @@ function warnMissingAllLlmKeysOnce(): void {
 /** Primary → fallback order for `generateLlmText` when `provider` is omitted. */
 const PROVIDER_FALLBACK_CHAIN: LlmProvider[] = ["anthropic", "openai", "gemini"];
 
-function hasProviderApiKey(provider: LlmProvider): boolean {
+function resolveProviderApiKey(input: LlmGenerateTextInput, provider: LlmProvider): string | null {
+  const fromUserSettings = input.providerApiKeys?.[provider]?.trim();
+  if (fromUserSettings) return fromUserSettings;
   const env = getEnv();
-  if (provider === "anthropic") return Boolean(env.ANTHROPIC_API_KEY?.trim());
-  if (provider === "openai") return Boolean(env.OPENAI_API_KEY?.trim());
-  return Boolean(env.GEMINI_API_KEY?.trim());
+  if (provider === "anthropic") return env.ANTHROPIC_API_KEY?.trim() ?? null;
+  if (provider === "openai") return env.OPENAI_API_KEY?.trim() ?? null;
+  return env.GEMINI_API_KEY?.trim() ?? null;
+}
+
+function estimateCallCostUsd(provider: LlmProvider, usage: { inputTokens: number; outputTokens: number }): number {
+  // Approximate public pricing model (USD/token); keep conservative and provider-agnostic.
+  const pricingByProvider = {
+    anthropic: { input: 3 / 1_000_000, output: 15 / 1_000_000 },
+    openai: { input: 0.15 / 1_000_000, output: 0.6 / 1_000_000 },
+    gemini: { input: 0.1 / 1_000_000, output: 0.4 / 1_000_000 },
+  } as const;
+  const p = pricingByProvider[provider];
+  return Number((usage.inputTokens * p.input + usage.outputTokens * p.output).toFixed(6));
+}
+
+export function estimateProviderCallCostUsd(
+  provider: LlmProvider,
+  usage: { inputTokens: number; outputTokens: number }
+): number {
+  return estimateCallCostUsd(provider, usage);
 }
 
 function resolveModel(provider: LlmProvider, override?: string): string {
@@ -103,6 +131,8 @@ async function logFailure(
   await logLlmProviderCall({
     provider,
     callKind: input.callKind,
+    userId: input.userId ?? null,
+    workflowId: input.workflowId ?? null,
     route: input.route,
     agent: input.agent ?? null,
     category: input.category ?? null,
@@ -110,10 +140,23 @@ async function logFailure(
     durationMs: Date.now() - startedAt,
     httpStatus: status,
     success: false,
+    status: "error",
+    retryCount: input.retryCount ?? 0,
+    fallbackReason: input.fallbackReason ?? null,
     errorCode: status != null ? `http_${status}` : "request_failed",
-    errorMessage: responseBody.slice(0, 500),
+    errorMessage: redactSecrets(responseBody).slice(0, 500),
     correlationId: input.correlationId ?? null,
     ingestRunId: input.ingestRunId ?? null,
+  });
+  await captureLangfuseGeneration({
+    userId: input.userId ?? null,
+    workflowId: input.workflowId ?? null,
+    provider,
+    model,
+    status: "error",
+    latencyMs: Date.now() - startedAt,
+    prompt: null,
+    completion: null,
   });
 }
 
@@ -128,22 +171,39 @@ async function logSuccess(
   await logLlmProviderCall({
     provider,
     callKind: input.callKind,
+    userId: input.userId ?? null,
+    workflowId: input.workflowId ?? null,
     route: input.route,
     agent: input.agent ?? null,
     category: input.category ?? null,
     model,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
+    estimatedCostUsd: estimateCallCostUsd(provider, usage),
     durationMs: Date.now() - startedAt,
     httpStatus: status,
     success: true,
+    status: "success",
+    retryCount: input.retryCount ?? 0,
+    fallbackReason: input.fallbackReason ?? null,
     correlationId: input.correlationId ?? null,
     ingestRunId: input.ingestRunId ?? null,
+  });
+  await captureLangfuseGeneration({
+    userId: input.userId ?? null,
+    workflowId: input.workflowId ?? null,
+    provider,
+    model,
+    status: "success",
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    latencyMs: Date.now() - startedAt,
+    prompt: input.prompt,
   });
 }
 
 async function runAnthropic(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
-  const apiKey = getEnv().ANTHROPIC_API_KEY?.trim();
+  const apiKey = resolveProviderApiKey(input, "anthropic");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
   const model = resolveModel("anthropic", input.model);
   const startedAt = Date.now();
@@ -193,7 +253,7 @@ async function runAnthropic(input: LlmGenerateTextInput): Promise<LlmGenerateTex
 }
 
 async function runOpenAi(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
-  const apiKey = getEnv().OPENAI_API_KEY?.trim();
+  const apiKey = resolveProviderApiKey(input, "openai");
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
   const model = resolveModel("openai", input.model);
   const startedAt = Date.now();
@@ -244,7 +304,7 @@ async function runOpenAi(input: LlmGenerateTextInput): Promise<LlmGenerateTextRe
 }
 
 async function runGemini(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
-  const apiKey = getEnv().GEMINI_API_KEY?.trim();
+  const apiKey = resolveProviderApiKey(input, "gemini");
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
   const model = resolveModel("gemini", input.model);
   const startedAt = Date.now();
@@ -316,21 +376,37 @@ async function runProvider(
 }
 
 export async function generateLlmText(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult> {
+  const timeoutMs = Math.max(2_000, Math.trunc(input.timeoutMs ?? 25_000));
+  async function withTimeout<T>(work: Promise<T>): Promise<T> {
+    return await Promise.race<T>([
+      work,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`LLM timeout after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
+  }
+
   if (input.provider) {
-    if (!hasProviderApiKey(input.provider)) {
+    if (!resolveProviderApiKey(input, input.provider)) {
       warnMissingAllLlmKeysOnce();
       throw new Error(`${input.provider} was requested but its API key is not set`);
     }
-    return runProvider(input, input.provider);
+    return withTimeout(runProvider(input, input.provider));
   }
 
   warnMissingAllLlmKeysOnce();
 
   const errors: LlmProviderError[] = [];
   for (const provider of PROVIDER_FALLBACK_CHAIN) {
-    if (!hasProviderApiKey(provider)) continue;
+    if (!resolveProviderApiKey(input, provider)) continue;
     try {
-      return await runProvider(input, provider);
+      return await withTimeout(
+        runProvider({
+          ...input,
+          fallbackReason:
+            provider === PROVIDER_FALLBACK_CHAIN[0] ? undefined : "provider_fallback",
+        }, provider)
+      );
     } catch (error) {
       if (error instanceof LlmProviderError) {
         errors.push(error);

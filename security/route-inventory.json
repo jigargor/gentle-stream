@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-04-26T18:31:26.916Z",
-  "totalRoutes": 62,
+  "generatedAt": "2026-04-27T01:54:24.927Z",
+  "totalRoutes": 76,
   "items": [
     {
       "route": "/api/admin/articles/moderation/[id]/approve",
@@ -191,11 +191,105 @@
       "p0Flags": []
     },
     {
+      "route": "/api/auth/mfa/recovery-codes",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/auth/session/revoke",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
       "route": "/api/creator/assist",
       "methods": [
         "POST"
       ],
-      "authModel": "session_user",
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": [
+        "raw-error-message-exposed"
+      ]
+    },
+    {
+      "route": "/api/creator/autocomplete",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/data-portability",
+      "methods": [
+        "GET",
+        "DELETE"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": true,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/drafts/[id]",
+      "methods": [
+        "GET",
+        "PATCH",
+        "DELETE"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/drafts/[id]/versions",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/drafts",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/feature-flags",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/memory",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH",
+        "DELETE"
+      ],
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },
@@ -214,16 +308,55 @@
       "methods": [
         "POST"
       ],
-      "authModel": "session_user",
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/settings/provider-health",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/settings/provider-keys",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/settings/provider-keys/test",
+      "methods": [
+        "POST"
+      ],
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/settings",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },
     {
       "route": "/api/creator/submissions/[id]",
       "methods": [
+        "GET",
         "PATCH"
       ],
-      "authModel": "session_user",
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": [
         "raw-error-message-exposed"
@@ -235,7 +368,16 @@
         "GET",
         "POST"
       ],
-      "authModel": "session_user",
+      "authModel": "public",
+      "usesServiceRoleDbClient": false,
+      "p0Flags": []
+    },
+    {
+      "route": "/api/creator/usage",
+      "methods": [
+        "GET"
+      ],
+      "authModel": "public",
       "usesServiceRoleDbClient": false,
       "p0Flags": []
     },

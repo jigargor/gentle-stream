@@ -10,6 +10,7 @@ export const API_ERROR_CODES = {
   MISSING_FIELD: "ERR_MISSING_FIELD",
   NOT_FOUND: "ERR_NOT_FOUND",
   RATE_LIMITED: "ERR_RATE_LIMITED",
+  SERVICE_UNAVAILABLE: "ERR_SERVICE_UNAVAILABLE",
   UNAUTHORIZED: "ERR_UNAUTHORIZED",
   VALIDATION: "ERR_VALIDATION",
 } as const;
@@ -77,8 +78,47 @@ export interface InternalErrorInput {
   headers?: Record<string, string>;
 }
 
+function hasCreatorStudioTableMessage(message: string): boolean {
+  const normalizedMessage = message.toLowerCase();
+  const mentionsCreatorTable =
+    normalizedMessage.includes("creator_settings") ||
+    normalizedMessage.includes("creator_provider_keys") ||
+    normalizedMessage.includes("creator_memory_sessions") ||
+    normalizedMessage.includes("creator_memory_summaries") ||
+    normalizedMessage.includes("creator_audit_events") ||
+    normalizedMessage.includes("creator_mfa_recovery_codes");
+  if (!mentionsCreatorTable) return false;
+  return (
+    normalizedMessage.includes("schema cache") ||
+    normalizedMessage.includes("could not find the table") ||
+    normalizedMessage.includes("does not exist")
+  );
+}
+
+function isCreatorStudioSchemaUnavailableErrorLocal(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "CreatorStudioSchemaUnavailableError" ||
+    hasCreatorStudioTableMessage(error.message)
+  );
+}
+
 export function internalErrorResponse(input: InternalErrorInput): NextResponse<ApiErrorBody> {
   if (input.error !== undefined) {
+    if (isCreatorStudioSchemaUnavailableErrorLocal(input.error)) {
+      console.warn("[api] Creator Studio schema unavailable", input.error);
+      const message =
+        input.error instanceof Error && input.error.name === "CreatorStudioSchemaUnavailableError"
+          ? input.error.message
+          : "Creator Studio tables are not available yet. Run lib/db/migrations/060_creator_studio_foundation.sql in the Supabase SQL editor, then reload the API schema cache (Project Settings → API → Reload schema).";
+      return apiErrorResponse({
+        request: input.request,
+        status: 503,
+        code: API_ERROR_CODES.SERVICE_UNAVAILABLE,
+        message,
+        headers: input.headers,
+      });
+    }
     console.error("[api] Internal error", input.error);
   }
   return apiErrorResponse({

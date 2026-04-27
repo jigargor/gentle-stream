@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId } from "@/lib/api/sessionUser";
-import { getOrCreateUserProfile } from "@/lib/db/users";
 import { importRecipeFromUrl } from "@/lib/recipes/importer";
 import { parseJsonBody } from "@/lib/validation/http";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
+import {
+  assertCreatorMutationOrigin,
+  isCreatorAccessDenied,
+  requireCreatorAccess,
+} from "@/lib/auth/creator-security";
 
 export const runtime = "nodejs";
 
@@ -21,25 +24,10 @@ const recipeImportBodySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiErrorResponse({
-      request,
-      status: 401,
-      code: API_ERROR_CODES.UNAUTHORIZED,
-      message: "Unauthorized",
-    });
-  }
-
-  const profile = await getOrCreateUserProfile(userId);
-  if (profile.userRole !== "creator") {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Creator access required",
-    });
-  }
+  const originError = assertCreatorMutationOrigin(request);
+  if (originError) return originError;
+  const access = await requireCreatorAccess(request, { requireMfa: true });
+  if (isCreatorAccessDenied(access)) return access;
 
   const allowlist = parseAllowlist();
   if (allowlist.length === 0) {

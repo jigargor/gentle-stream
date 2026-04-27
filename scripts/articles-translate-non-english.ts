@@ -89,7 +89,9 @@ async function main() {
     });
 
     if (!out) {
-      console.error("DeepL unavailable (set DEEPL_API_KEY). Stopping.");
+      console.error(
+        "DeepL returned no translation (missing DEEPL_API_KEY, HTTP error, or empty response). Stopping."
+      );
       process.exit(1);
     }
 

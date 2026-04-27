@@ -10,6 +10,7 @@ import {
 } from "@/lib/security/rateLimit";
 import { hasTrustedOrigin } from "@/lib/security/origin";
 import { parseJsonBody } from "@/lib/validation/http";
+import { createCreatorAuditEvent } from "@/lib/db/creatorStudio";
 
 const challengeBodySchema = z
   .object({
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
   }
 
   const rate = await consumeRateLimit({
-    policy: { id: "auth-mfa-challenge", windowMs: 10 * 60 * 1000, max: 40 },
+    policy: { id: "auth-mfa-challenge", windowMs: 10 * 60 * 1000, max: 20 },
     key: buildRateLimitKey({
       request,
       userId: user.id,
@@ -70,8 +71,22 @@ export async function POST(request: NextRequest) {
     for (const line of setCookies) {
       out.headers.append("Set-Cookie", line);
     }
+    void createCreatorAuditEvent({
+      userId: user.id,
+      actorUserId: user.id,
+      eventType: "mfa_challenge_started",
+      route: "/api/auth/mfa/challenge",
+      targetId: parsedBody.data.factorId,
+    }).catch(() => undefined);
     return applyTraceIdHeader(request, out);
   } catch (e) {
+    void createCreatorAuditEvent({
+      userId: user.id,
+      actorUserId: user.id,
+      eventType: "mfa_challenge_failed",
+      route: "/api/auth/mfa/challenge",
+      metadata: { message: e instanceof Error ? e.message.slice(0, 120) : "unknown" },
+    }).catch(() => undefined);
     return mfaFailureResponse(request, e);
   }
 }

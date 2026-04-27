@@ -53,6 +53,9 @@ interface ProviderKeyMeta {
 
 const PROVIDERS: Array<ProviderKeyMeta["provider"]> = ["anthropic", "openai", "gemini"];
 
+const CREATOR_DB_UNAVAILABLE_NOTICE =
+  "Creator Studio tables are not visible to the API yet. Run lib/db/migrations/060_creator_studio_foundation.sql in the Supabase SQL editor, then reload the schema cache under Project Settings → API. The form shows defaults; saves and keys will not persist until then.";
+
 const DEFAULT_SETTINGS: CreatorSettingsResponse = {
   modelMode: "manual",
   defaultProvider: null,
@@ -76,31 +79,45 @@ export function CreatorSettingsConsole() {
   const [message, setMessage] = useState<string | null>(null);
   const [schemaNotice, setSchemaNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [keysLoading, setKeysLoading] = useState(true);
 
-  async function loadState() {
-    const [settingsRes, keysRes] = await Promise.all([
-      fetch("/api/creator/settings"),
-      fetch("/api/creator/settings/provider-keys"),
-    ]);
-    const dbUnavailable =
-      settingsRes.headers.get("X-Gentle-Stream-Creator-Db") === "unavailable" ||
-      keysRes.headers.get("X-Gentle-Stream-Creator-Db") === "unavailable";
+  async function loadSettingsOnly() {
+    const started = Date.now();
+    const settingsRes = await fetch("/api/creator/settings");
+    if (Date.now() - started > 30) console.info(`[creator-settings] settings GET ${Date.now() - started}ms`);
+    if (settingsRes.headers.get("X-Gentle-Stream-Creator-Db") === "unavailable") {
+      setSchemaNotice(CREATOR_DB_UNAVAILABLE_NOTICE);
+    }
     if (settingsRes.ok) {
       setSettings((await settingsRes.json()) as CreatorSettingsResponse);
     }
-    if (keysRes.ok) {
-      const payload = (await keysRes.json()) as { keys?: ProviderKeyMeta[] };
-      setKeys(payload.keys ?? []);
+  }
+
+  async function loadProviderKeysOnly() {
+    setKeysLoading(true);
+    const started = Date.now();
+    try {
+      const keysRes = await fetch("/api/creator/settings/provider-keys");
+      if (Date.now() - started > 30) console.info(`[creator-settings] provider-keys GET ${Date.now() - started}ms`);
+      if (keysRes.headers.get("X-Gentle-Stream-Creator-Db") === "unavailable") {
+        setSchemaNotice(CREATOR_DB_UNAVAILABLE_NOTICE);
+      }
+      if (keysRes.ok) {
+        const payload = (await keysRes.json()) as { keys?: ProviderKeyMeta[] };
+        setKeys(payload.keys ?? []);
+      }
+    } finally {
+      setKeysLoading(false);
     }
-    setSchemaNotice(
-      dbUnavailable
-        ? "Creator Studio tables are not visible to the API yet. Run lib/db/migrations/060_creator_studio_foundation.sql in the Supabase SQL editor, then reload the schema cache under Project Settings → API. The form shows defaults; saves and keys will not persist until then."
-        : null
-    );
+  }
+
+  async function loadState() {
+    await Promise.all([loadSettingsOnly(), loadProviderKeysOnly()]);
   }
 
   useEffect(() => {
-    void loadState();
+    void loadSettingsOnly();
+    void loadProviderKeysOnly();
   }, []);
 
   async function saveSettings() {
@@ -197,7 +214,7 @@ export function CreatorSettingsConsole() {
           <p style={{ margin: "0.4rem 0 0", color: "#666" }}>
             Bring-your-own-key model controls, budgets, autocomplete, and memory policy.
           </p>
-          <div style={{ marginTop: "0.65rem" }}>
+          <div style={{ marginTop: "0.65rem", display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
             <Link
               href="/creator"
               style={{
@@ -210,6 +227,19 @@ export function CreatorSettingsConsole() {
               }}
             >
               Back to Writing
+            </Link>
+            <Link
+              href="/creator/usage"
+              style={{
+                display: "inline-flex",
+                padding: "0.35rem 0.65rem",
+                border: "1px solid #1a472a",
+                color: "#1a472a",
+                textDecoration: "none",
+                fontSize: "0.82rem",
+              }}
+            >
+              Usage
             </Link>
           </div>
         </section>
@@ -387,6 +417,9 @@ export function CreatorSettingsConsole() {
 
         <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem", display: "grid", gap: "0.65rem" }}>
           <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Provider Keys (BYOK)</h2>
+          {keysLoading ? (
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>Loading provider key status…</p>
+          ) : null}
           {PROVIDERS.map((provider) => {
             const existing = keys.find((entry) => entry.provider === provider);
             return (
@@ -407,16 +440,16 @@ export function CreatorSettingsConsole() {
                   style={{ width: "100%" }}
                 />
                 <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.45rem", flexWrap: "wrap" }}>
-                  <button type="button" onClick={() => void upsertKey(provider)} disabled={busy}>
+                  <button type="button" onClick={() => void upsertKey(provider)} disabled={busy || keysLoading}>
                     Save / Rotate
                   </button>
-                  <button type="button" onClick={() => void testKey(provider)} disabled={busy || !existing}>
+                  <button type="button" onClick={() => void testKey(provider)} disabled={busy || keysLoading || !existing}>
                     Test
                   </button>
-                  <button type="button" onClick={() => void keyAction(provider, "revoke")} disabled={busy || !existing}>
+                  <button type="button" onClick={() => void keyAction(provider, "revoke")} disabled={busy || keysLoading || !existing}>
                     Revoke
                   </button>
-                  <button type="button" onClick={() => void keyAction(provider, "delete")} disabled={busy || !existing}>
+                  <button type="button" onClick={() => void keyAction(provider, "delete")} disabled={busy || keysLoading || !existing}>
                     Delete
                   </button>
                 </div>

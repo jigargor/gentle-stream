@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getOrCreateUserProfile } from "@/lib/db/users";
-import { getCreatorProfile, listSubmissionsByAuthor } from "@/lib/db/creator";
+import { getCreatorProfile } from "@/lib/db/creator";
 import { CreatorDashboard } from "@/components/creator/CreatorDashboard";
-import { getCreatorSettings } from "@/lib/db/creatorStudio";
+import { getCreatorEditorBootstrap } from "@/lib/db/creatorBootstrap";
 
 export const dynamic = "force-dynamic";
 
@@ -33,22 +33,19 @@ export default async function CreatorPage() {
     redirect("/creator/onboarding");
   }
 
-  const [{ submissions, nextCursor }, settingsResult] = await Promise.all([
-    listSubmissionsByAuthor({
-      authorUserId: user.id,
-      limit: 12,
-      includeBody: false,
-      cursorCreatedAt: null,
-    }),
-    getCreatorSettings(user.id),
-  ]);
+  const bootstrapStarted = Date.now();
+  const bootstrap = await getCreatorEditorBootstrap(user.id);
+  console.info(`[creator-page] editor bootstrap ${Date.now() - bootstrapStarted}ms`);
 
   return (
     <CreatorDashboard
       publicProfileHref={`/creator/${user.id}`}
-      initialSubmissions={submissions}
-      initialNextCursor={nextCursor}
-      initialAutocompleteEnabled={settingsResult.settings.autocompleteEnabled}
+      initialSubmissions={bootstrap.submissions}
+      initialNextCursor={bootstrap.submissionsNextCursor}
+      initialDraftSummaries={bootstrap.draftSummaries}
+      initialDraftSummariesNextCursor={bootstrap.draftsNextCursor}
+      initialAutocompleteEnabled={bootstrap.autocompleteEnabled}
+      serverListBootstrap
     />
   );
 }

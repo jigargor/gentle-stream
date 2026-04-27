@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/constants";
-import type { ArticleSubmission, CreatorDraft, CreatorDraftVersion } from "@/lib/types";
+import type {
+  ArticleSubmission,
+  CreatorDraft,
+  CreatorDraftSummary,
+  CreatorDraftVersion,
+} from "@/lib/types";
 import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 import { BUILT_IN_ARTICLE_TYPES, articleTypeLabel } from "@/lib/creator/article-types";
 import {
@@ -16,7 +21,12 @@ interface CreatorDashboardProps {
   publicProfileHref?: string;
   initialSubmissions?: ArticleSubmission[];
   initialNextCursor?: string | null;
+  /** Slim draft rows from server bootstrap (no body). */
+  initialDraftSummaries?: CreatorDraftSummary[];
+  initialDraftSummariesNextCursor?: string | null;
   initialAutocompleteEnabled?: boolean;
+  /** When true, submissions list came from the server page; skip duplicate list fetch on mount. */
+  serverListBootstrap?: boolean;
 }
 
 interface FormState {
@@ -107,11 +117,14 @@ export function CreatorDashboard({
   publicProfileHref,
   initialSubmissions = [],
   initialNextCursor = null,
+  initialDraftSummaries = [],
+  initialDraftSummariesNextCursor: _initialDraftSummariesNextCursor = null,
   initialAutocompleteEnabled = false,
+  serverListBootstrap = false,
 }: CreatorDashboardProps = {}) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [submissions, setSubmissions] = useState<ArticleSubmission[]>(initialSubmissions);
-  const [loading, setLoading] = useState(initialSubmissions.length === 0);
+  const [loading, setLoading] = useState(() => !serverListBootstrap);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [busy, setBusy] = useState(false);
@@ -146,6 +159,9 @@ export function CreatorDashboard({
   const [autosaveError, setAutosaveError] = useState<string | null>(null);
   const [autosaveConflict, setAutosaveConflict] = useState(false);
   const [draftVersions, setDraftVersions] = useState<CreatorDraftVersion[]>([]);
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const revisionsOpenRef = useRef(false);
+  const [draftContentLoading, setDraftContentLoading] = useState(false);
   const [analystEnabled, setAnalystEnabled] = useState(true);
   const [analystQuietMode, setAnalystQuietMode] = useState(true);
   const [analystCheckpoints, setAnalystCheckpoints] = useState<AnalystCheckpoint[]>([]);
@@ -303,31 +319,7 @@ export function CreatorDashboard({
     return JSON.stringify(payload);
   }
 
-  async function loadLatestDraft() {
-    let latest: CreatorDraft | undefined;
-    try {
-      const savedId = localStorage.getItem("gentle_stream_active_draft_id");
-      if (savedId) {
-        const singleRes = await fetch(`/api/creator/drafts/${savedId}`, {
-          credentials: "include",
-        });
-        if (singleRes.ok) {
-          const singlePayload = (await singleRes.json()) as { draft?: CreatorDraft };
-          latest = singlePayload.draft;
-        }
-      }
-    } catch {
-      // ignore localStorage/fetch failures
-    }
-    if (!latest) {
-      const response = await fetch("/api/creator/drafts?limit=1", {
-        credentials: "include",
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as { drafts?: CreatorDraft[] };
-      latest = payload.drafts?.[0];
-    }
-    if (!latest) return;
+  function applyFullDraftToForm(latest: CreatorDraft) {
     setActiveDraftId(latest.id);
     setActiveDraftRevision(latest.revision);
     setForm((prev) => ({
@@ -357,6 +349,54 @@ export function CreatorDashboard({
     });
     lastSavedAtRef.current = Date.now();
     setAutosaveStatus("saved");
+  }
+
+  /** Deferred after first paint: prefer localStorage id, then bootstrap/API summary, then fetch full row. */
+  async function hydrateActiveDraft() {
+    let savedId: string | null = null;
+    try {
+      savedId = localStorage.getItem("gentle_stream_active_draft_id");
+    } catch {
+      savedId = null;
+    }
+
+    async function tryLoadFullDraft(id: string): Promise<boolean> {
+      setDraftContentLoading(true);
+      try {
+        const singleRes = await fetch(`/api/creator/drafts/${id}`, { credentials: "include" });
+        if (!singleRes.ok) return false;
+        const singlePayload = (await singleRes.json()) as { draft?: CreatorDraft };
+        const latest = singlePayload.draft;
+        if (!latest) return false;
+        applyFullDraftToForm(latest);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setDraftContentLoading(false);
+      }
+    }
+
+    if (savedId && (await tryLoadFullDraft(savedId))) return;
+
+    let target: CreatorDraftSummary | null =
+      (savedId ? initialDraftSummaries.find((s) => s.id === savedId) : null) ??
+      initialDraftSummaries[0] ??
+      null;
+
+    if (!target) {
+      const response = await fetch("/api/creator/drafts?limit=1&summary=1", {
+        credentials: "include",
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { draftSummaries?: CreatorDraftSummary[] };
+      target = payload.draftSummaries?.[0] ?? null;
+    }
+
+    if (!target) return;
+    setActiveDraftId(target.id);
+    setActiveDraftRevision(target.revision);
+    await tryLoadFullDraft(target.id);
   }
 
   async function loadDraftVersions(draftId: string) {
@@ -437,8 +477,11 @@ export function CreatorDashboard({
     try {
       const params = new URLSearchParams();
       params.set("limit", "12");
+      params.set("summary", "1");
       if (!reset && nextCursor) params.set("cursor", nextCursor);
-      const response = await fetch(`/api/creator/submissions?${params.toString()}`);
+      const response = await fetch(`/api/creator/submissions?${params.toString()}`, {
+        credentials: "include",
+      });
       if (!response.ok) {
         const apiError = await parseApiClientError(response);
         setMessage(formatApiClientError(apiError));
@@ -462,14 +505,20 @@ export function CreatorDashboard({
   }
 
   useEffect(() => {
-    if (initialSubmissions.length > 0) return;
+    if (serverListBootstrap) return;
     void loadSubmissions({ reset: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once; initial bootstrap carries first payload
-  }, []);
+  }, [serverListBootstrap]);
 
   useEffect(() => {
-    void loadLatestDraft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- draft bootstrap only once
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const raf = requestAnimationFrame(() => {
+      timeoutId = setTimeout(() => void hydrateActiveDraft(), 0);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once; bootstrap summaries from server
   }, []);
 
   useEffect(() => {
@@ -545,13 +594,12 @@ export function CreatorDashboard({
   }, []);
 
   useEffect(() => {
-    if (!activeDraftId) {
-      setDraftVersions([]);
-      return;
-    }
-    void loadDraftVersions(activeDraftId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load on draft selection change
+    if (!activeDraftId) setDraftVersions([]);
   }, [activeDraftId]);
+
+  useEffect(() => {
+    revisionsOpenRef.current = revisionsOpen;
+  }, [revisionsOpen]);
 
   useEffect(() => {
     try {
@@ -1008,7 +1056,7 @@ export function CreatorDashboard({
       setMessage(formatApiClientError(apiError));
       return;
     }
-    await loadDraftVersions(activeDraftId);
+    if (revisionsOpenRef.current) await loadDraftVersions(activeDraftId);
     setMessage("Checkpoint saved.");
   }
 
@@ -1051,7 +1099,7 @@ export function CreatorDashboard({
       neverSendToAi: payload.draft?.neverSendToAi ?? prev.neverSendToAi,
     }));
     setMessage("Version restored.");
-    await loadDraftVersions(activeDraftId);
+    if (revisionsOpenRef.current) await loadDraftVersions(activeDraftId);
   }
 
   const assistTitles = assistActionTitles({
@@ -1105,6 +1153,20 @@ export function CreatorDashboard({
                 }}
               >
                 Creator settings
+              </Link>
+              <Link
+                href="/creator/usage"
+                style={{
+                  padding: "0.36rem 0.62rem",
+                  border: "1px solid #1a472a",
+                  background: "#fff",
+                  color: "#1a472a",
+                  textDecoration: "none",
+                  fontSize: "0.82rem",
+                  fontFamily: "'IM Fell English', Georgia, serif",
+                }}
+              >
+                Usage
               </Link>
               <Link
                 href="/"
@@ -1925,6 +1987,9 @@ export function CreatorDashboard({
                 Last save {new Date(lastSavedAtRef.current).toLocaleTimeString()}
               </span>
             ) : null}
+            {draftContentLoading ? (
+              <span style={{ fontSize: "0.75rem", color: "#666" }}>Loading draft content…</span>
+            ) : null}
           </div>
 
           {autosaveConflict ? (
@@ -1990,23 +2055,54 @@ export function CreatorDashboard({
               </button>
             ) : null}
           </div>
-          {draftVersions.length > 0 ? (
+          {activeDraftId && activeDraftRevision != null ? (
             <div style={{ marginTop: "0.65rem", display: "grid", gap: "0.35rem" }}>
-              <p style={{ margin: 0, fontSize: "0.78rem", color: "#666" }}>
-                Revision history
-              </p>
-              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                {draftVersions.slice(0, 5).map((version) => (
-                  <button
-                    key={version.id}
-                    type="button"
-                    onClick={() => void restoreDraftVersion(version.id)}
-                    style={{ padding: "0.25rem 0.45rem", border: "1px solid #999", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
-                  >
-                    {version.versionReason} · {new Date(version.createdAt).toLocaleTimeString()}
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRevisionsOpen((prev) => {
+                    const next = !prev;
+                    if (next && activeDraftId) void loadDraftVersions(activeDraftId);
+                    return next;
+                  });
+                }}
+                style={{
+                  padding: "0.28rem 0.5rem",
+                  border: "1px solid #999",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: "0.78rem",
+                  width: "fit-content",
+                }}
+              >
+                {revisionsOpen ? "Hide revision history" : "Show revision history"}
+              </button>
+              {revisionsOpen ? (
+                draftVersions.length > 0 ? (
+                  <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                    {draftVersions.slice(0, 5).map((version) => (
+                      <button
+                        key={version.id}
+                        type="button"
+                        onClick={() => void restoreDraftVersion(version.id)}
+                        style={{
+                          padding: "0.25rem 0.45rem",
+                          border: "1px solid #999",
+                          background: "#fff",
+                          cursor: "pointer",
+                          fontSize: "0.75rem",
+                        }}
+                      >
+                        {version.versionReason} · {new Date(version.createdAt).toLocaleTimeString()}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: "0.76rem", color: "#777" }}>
+                    No checkpoints yet. Save a checkpoint to see history here.
+                  </p>
+                )
+              ) : null}
             </div>
           ) : null}
         </div>

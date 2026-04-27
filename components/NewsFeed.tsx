@@ -1446,7 +1446,7 @@ export default function NewsFeed({
     return () => {
       cancelled = true;
     };
-  }, [userId, mfaPassed]);
+  }, [userId, mfaPassed, isGuestUser]);
 
   useEffect(() => {
     if (firstSectionTelemetryLoggedRef.current) return;

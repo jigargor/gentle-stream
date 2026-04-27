@@ -33,9 +33,7 @@ export default async function CreatorPage() {
     redirect("/creator/onboarding");
   }
 
-  const bootstrapStarted = Date.now();
   const bootstrap = await getCreatorEditorBootstrap(user.id);
-  console.info(`[creator-page] editor bootstrap ${Date.now() - bootstrapStarted}ms`);
 
   return (
     <CreatorDashboard

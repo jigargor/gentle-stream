@@ -18,6 +18,7 @@ export interface CreatorEditorBootstrap {
  * Draft bodies and versions are loaded lazily on the client.
  */
 export async function getCreatorEditorBootstrap(userId: string): Promise<CreatorEditorBootstrap> {
+  const startedMs = Date.now();
   const settingsResult = await withDbTiming("creator.bootstrap.settings", () => getCreatorSettings(userId));
 
   const [subResult, draftResult] = await Promise.all([
@@ -39,7 +40,7 @@ export async function getCreatorEditorBootstrap(userId: string): Promise<Creator
       : Promise.resolve({ summaries: [] as CreatorDraftSummary[], nextCursor: null as string | null }),
   ]);
 
-  return {
+  const payload = {
     submissions: subResult.submissions,
     submissionsNextCursor: subResult.nextCursor,
     draftSummaries: draftResult.summaries,
@@ -47,4 +48,6 @@ export async function getCreatorEditorBootstrap(userId: string): Promise<Creator
     autocompleteEnabled: settingsResult.settings.autocompleteEnabled,
     creatorSchemaAvailable: settingsResult.schemaAvailable,
   };
+  console.info(`[creator-page] editor bootstrap ${Date.now() - startedMs}ms`);
+  return payload;
 }

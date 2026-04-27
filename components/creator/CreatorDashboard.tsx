@@ -650,6 +650,7 @@ export function CreatorDashboard({
   useEffect(() => {
     if (serverListBootstrap) return;
     void loadSubmissions({ reset: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/bootstrap only: loadSubmissions identity changes with nextCursor and must not refetch the full list
   }, [serverListBootstrap]);
 
   useEffect(() => {
@@ -740,7 +741,6 @@ export function CreatorDashboard({
     return () => {
       clearLlmCompletionTimer();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup ref timer on unmount
   }, []);
 
   useEffect(() => {

@@ -36,6 +36,7 @@ import type { Category } from "@/lib/constants";
 import { API_ERROR_CODES, apiErrorResponse, internalErrorResponse } from "@/lib/api/errors";
 import { captureException, captureMessage, flushOnShutdown, startSpan } from "@/lib/observability";
 import { logError, logInfo, logWarning } from "@/lib/observability/logger";
+import { runArticleTranslationNormalization } from "@/lib/translation/articleNormalization";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -145,6 +146,7 @@ export async function GET(request: NextRequest) {
   let totalPolicyRejected = 0;
   let totalBatchFallbacks = 0;
   let totalAnthropicExhausted = 0;
+  let totalTranslatedPostIngest = 0;
   const discoveryRunsByProvider: Record<string, number> = {};
   const insertedByProvider: Record<string, number> = {};
   let categoriesChecked = 0;
@@ -312,6 +314,15 @@ export async function GET(request: NextRequest) {
         insertedByProvider[result.discoveryProvider] =
           (insertedByProvider[result.discoveryProvider] ?? 0) + insertedCount;
         remainingExpansionBudget = Math.max(0, remainingExpansionBudget - result.expansionCount);
+        if (result.inserted.length > 0) {
+          const normalized = await runArticleTranslationNormalization({
+            articleIds: result.inserted.map((article) => article.id),
+            maxRows: result.inserted.length,
+            apply: true,
+            reason: "cron_scheduler_post_ingest",
+          });
+          totalTranslatedPostIngest += normalized.translated;
+        }
 
         if (result.errorSummary) {
           errorSummaryParts.push(`${cat}: ${result.errorSummary}`);
@@ -452,6 +463,7 @@ export async function GET(request: NextRequest) {
         totalPolicyRejected,
         totalBatchFallbacks,
         totalAnthropicExhausted,
+        totalTranslatedPostIngest,
         discoveryRunsByProvider:
           Object.keys(discoveryRunsByProvider).length > 0
             ? JSON.stringify(discoveryRunsByProvider)
@@ -490,6 +502,7 @@ export async function GET(request: NextRequest) {
       policyRejected: totalPolicyRejected,
       batchFallbacks: totalBatchFallbacks,
       anthropicExhaustedRuns: totalAnthropicExhausted,
+      translatedPostIngest: totalTranslatedPostIngest,
       discoveryRunsByProvider,
       insertedByProvider,
       expansions: totalExpansions,

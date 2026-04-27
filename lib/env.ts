@@ -69,6 +69,7 @@ const envSchema = z.object({
   INGEST_DISCOVERY_PROVIDER: optionalTrimmedString,
   /** Rewrite discovered stories with LLM expansion. Defaults false when unset. */
   INGEST_REWRITE_ENABLED: optionalBooleanString,
+  INGEST_TRANSLATION_GUARD_ENABLED: optionalBooleanString,
   INGEST_STALENESS_HOURS: optionalNumberString,
   INGEST_STALENESS_REFILL_COUNT: optionalNumberString,
   RSS_FEED_AUTO_DISABLE_FAILURES: optionalNumberString,
@@ -103,6 +104,8 @@ const envSchema = z.object({
   NEXT_PUBLIC_SPOTIFY_MODULE_ENABLED: optionalBooleanString,
   SPOTIFY_MODULE_MARKET: optionalTrimmedString,
   SPOTIFY_MODULE_DEFAULT_MOODS: optionalTrimmedString,
+  TRANSLATION_NORMALIZATION_MAX_ROWS: optionalNumberString,
+  TRANSLATION_NORMALIZATION_SCAN_LIMIT: optionalNumberString,
   RECIPE_IMPORT_ALLOWLIST: optionalTrimmedString,
   RECIPE_IMPORT_ENABLE_CLAUDE_FALLBACK: optionalBooleanString,
   CRON_GAMES_LLM_ENABLED: optionalBooleanString,

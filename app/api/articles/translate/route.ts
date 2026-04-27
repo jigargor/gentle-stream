@@ -69,6 +69,10 @@ function hasLikelyTranslationChange(inputs: string[], outputs: string[]): boolea
   return false;
 }
 
+function hasAnyNonEmptyText(values: string[]): boolean {
+  return values.some((value) => value.trim().length > 0);
+}
+
 export async function POST(request: NextRequest) {
   let payload: TranslateArticleRequestBody;
   try {
@@ -120,7 +124,12 @@ export async function POST(request: NextRequest) {
       captureMessage({
         level: "warning",
         message: "article.translate.unavailable",
-        context: { route: "/api/articles/translate", articleId },
+        context: {
+          route: "/api/articles/translate",
+          articleId,
+          available: false,
+          translated: false,
+        },
       });
       return NextResponse.json({
         available: false,
@@ -153,7 +162,9 @@ export async function POST(request: NextRequest) {
       translatedImagePrompt,
     ];
     const hasTextChanged = hasLikelyTranslationChange(sourceTexts, translatedTexts);
-    const translated = hasNonEnglishSignal || (!hasEnglishOnlySignal && hasTextChanged);
+    const hasUsableOutput = hasAnyNonEmptyText(translatedTexts);
+    const translated =
+      hasUsableOutput && (hasNonEnglishSignal || hasTextChanged || (!hasEnglishOnlySignal && hasTextChanged));
 
     if (!translated && hasTextChanged) {
       captureMessage({
@@ -166,6 +177,8 @@ export async function POST(request: NextRequest) {
           perFieldLanguages: perFieldLanguages.join(","),
           hasAnyLanguageSignal,
           hasEnglishOnlySignal,
+          available: true,
+          translated: false,
         },
       });
     }
@@ -185,8 +198,31 @@ export async function POST(request: NextRequest) {
       const oldest = translationCache.keys().next().value as string | undefined;
       if (oldest) translationCache.delete(oldest);
     }
+    captureMessage({
+      level: "info",
+      message: "article.translate.result",
+      context: {
+        route: "/api/articles/translate",
+        articleId,
+        available: true,
+        translated,
+        sourceLanguage,
+        perFieldLanguages: perFieldLanguages.join(","),
+      },
+    });
     return NextResponse.json(out);
   } catch (error: unknown) {
+    captureMessage({
+      level: "warning",
+      message: "article.translate.failed",
+      context: {
+        route: "/api/articles/translate",
+        articleId,
+        available: false,
+        translated: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
     const message = error instanceof Error ? error.message : "Could not translate article.";
     return apiErrorResponse({
       request,

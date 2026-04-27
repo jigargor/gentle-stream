@@ -1,7 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getOrCreateUserProfile } from "@/lib/db/users";
-import { getCreatorProfile } from "@/lib/db/creator";
 import { CreatorDashboard } from "@/components/creator/CreatorDashboard";
 import { getCreatorEditorBootstrap } from "@/lib/db/creatorBootstrap";
 
@@ -21,16 +19,6 @@ export default async function CreatorPage() {
     (aalData?.currentLevel ?? null) !== "aal2";
   if (requiresStepUp) {
     redirect("/account/settings?reason=creator_mfa_required");
-  }
-
-  const userProfile = await getOrCreateUserProfile(user.id);
-  if (userProfile.userRole !== "creator") {
-    redirect("/creator/onboarding");
-  }
-
-  const creatorProfile = await getCreatorProfile(user.id);
-  if (!creatorProfile?.onboardingCompletedAt) {
-    redirect("/creator/onboarding");
   }
 
   const bootstrap = await getCreatorEditorBootstrap(user.id);

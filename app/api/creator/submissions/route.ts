@@ -5,7 +5,6 @@ import type { SubmissionContentKind } from "@/lib/types";
 import {
   countSubmissionsSince,
   createSubmission,
-  getCreatorProfile,
   listCreatorSubmissionSummaries,
   listSubmissionsByAuthor,
 } from "@/lib/db/creator";
@@ -107,16 +106,6 @@ export async function POST(request: NextRequest) {
     }),
   });
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit, request);
-
-  const creatorProfile = await getCreatorProfile(userId);
-  if (!creatorProfile?.onboardingCompletedAt) {
-    return apiErrorResponse({
-      request,
-      status: 400,
-      code: API_ERROR_CODES.INVALID_REQUEST,
-      message: "Complete creator onboarding before submitting articles.",
-    });
-  }
 
   const now = new Date();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));

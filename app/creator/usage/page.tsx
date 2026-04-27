@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getOrCreateUserProfile } from "@/lib/db/users";
 import { CreatorUsageConsole } from "@/components/creator/CreatorUsageConsole";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +18,5 @@ export default async function CreatorUsagePage() {
     (aalData?.currentLevel ?? null) !== "aal2";
   if (needsMfa) redirect("/account/settings?reason=creator_mfa_required");
 
-  const profile = await getOrCreateUserProfile(user.id);
-  if (profile.userRole !== "creator") redirect("/creator/onboarding");
   return <CreatorUsageConsole />;
 }

@@ -132,14 +132,18 @@ export async function POST(request: NextRequest) {
       privateNotes: body.privateNotes ?? undefined,
       neverSendToAi: body.neverSendToAi,
     });
-    await createCreatorAuditEvent({
-      userId: access.userId,
-      actorUserId: access.userId,
-      eventType: "creator_draft_created",
-      route: "/api/creator/drafts",
-      targetId: draft.id,
-      metadata: { contentKind: draft.contentKind },
-    });
+    try {
+      await createCreatorAuditEvent({
+        userId: access.userId,
+        actorUserId: access.userId,
+        eventType: "creator_draft_created",
+        route: "/api/creator/drafts",
+        targetId: draft.id,
+        metadata: { contentKind: draft.contentKind },
+      });
+    } catch (error) {
+      console.warn("[creator-drafts] audit event skipped", error);
+    }
     return NextResponse.json({ draft }, { status: 201 });
   } catch (error: unknown) {
     return internalErrorResponse({ request, error });

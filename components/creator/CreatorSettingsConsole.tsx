@@ -23,6 +23,12 @@ interface CreatorSettingsResponse {
   perRequestBudgetCents: number;
 }
 
+async function readCreatorApiErrorMessage(res: Response, fallback: string): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  const message = body?.error?.trim();
+  return message && message.length > 0 ? message : fallback;
+}
+
 function buildSettingsPatchBody(state: CreatorSettingsResponse): Record<string, unknown> {
   return {
     modelMode: state.modelMode,
@@ -130,8 +136,7 @@ export function CreatorSettingsConsole() {
         body: JSON.stringify(buildSettingsPatchBody(settings)),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setMessage(body?.error ?? "Could not save settings.");
+        setMessage(await readCreatorApiErrorMessage(res, "Could not save settings."));
         return;
       }
       setMessage("Settings saved.");
@@ -156,7 +161,7 @@ export function CreatorSettingsConsole() {
         body: JSON.stringify({ provider, action: "upsert", apiKey }),
       });
       if (!res.ok) {
-        setMessage(`Could not save ${provider} key.`);
+        setMessage(await readCreatorApiErrorMessage(res, `Could not save ${provider} key.`));
         return;
       }
       setDraftKeys((prev) => ({ ...prev, [provider]: "" }));
@@ -177,7 +182,7 @@ export function CreatorSettingsConsole() {
         body: JSON.stringify({ provider, action }),
       });
       if (!res.ok) {
-        setMessage(`Could not ${action} ${provider} key.`);
+        setMessage(await readCreatorApiErrorMessage(res, `Could not ${action} ${provider} key.`));
         return;
       }
       setMessage(`${provider} key ${action}d.`);
@@ -197,7 +202,7 @@ export function CreatorSettingsConsole() {
         body: JSON.stringify({ provider }),
       });
       if (!res.ok) {
-        setMessage(`${provider} test failed.`);
+        setMessage(await readCreatorApiErrorMessage(res, `${provider} test failed.`));
         return;
       }
       setMessage(`${provider} key is healthy.`);
@@ -251,6 +256,13 @@ export function CreatorSettingsConsole() {
 
           <section className="creator-panel">
             <div className="creator-panel__heading"><div><p className="creator-eyebrow">BYOK</p><h2>Provider Keys</h2></div></div>
+            <p className="creator-note creator-note--warning" role="note">
+              Saving, testing, or removing provider API keys requires multi-factor authentication (MFA). Enable MFA under{" "}
+              <Link className="creator-action-link" href="/account/settings">
+                Account settings
+              </Link>{" "}
+              (Security), complete setup, then sign in with MFA before managing keys here.
+            </p>
             {keysLoading ? <p className="creator-muted">Loading provider key status...</p> : null}
             <div className="creator-settings-grid">
               {PROVIDERS.map((provider) => {

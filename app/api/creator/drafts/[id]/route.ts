@@ -14,7 +14,7 @@ import {
   softDeleteCreatorDraft,
   updateCreatorDraft,
 } from "@/lib/db/creatorDrafts";
-import { createSubmission, getCreatorProfile } from "@/lib/db/creator";
+import { createSubmission } from "@/lib/db/creator";
 import { createCreatorAuditEvent } from "@/lib/db/creatorStudio";
 import {
   buildRateLimitKey,
@@ -141,15 +141,6 @@ export async function PATCH(
     }
 
     if (body.action === "publish") {
-      const profile = await getCreatorProfile(access.userId);
-      if (!profile?.onboardingCompletedAt) {
-        return apiErrorResponse({
-          request,
-          status: 400,
-          code: API_ERROR_CODES.INVALID_REQUEST,
-          message: "Complete creator onboarding before submitting.",
-        });
-      }
       const draft = await getCreatorDraftById({
         userId: access.userId,
         draftId: params.id,

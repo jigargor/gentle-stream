@@ -1,4 +1,5 @@
 import { db } from "@/lib/db/client";
+import { getOrCreateUserProfile } from "@/lib/db/users";
 import { createHash, randomBytes } from "node:crypto";
 import { decryptProviderKey, encryptProviderKey } from "@/lib/security/key-vault";
 import { redactSecrets } from "@/lib/security/redaction";
@@ -245,8 +246,13 @@ export async function upsertCreatorSettings(
   userId: string,
   partial: Partial<Omit<CreatorSettings, "userId" | "createdAt" | "updatedAt">>
 ): Promise<CreatorSettings> {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) {
+    throw new Error("upsertCreatorSettings: userId is required");
+  }
+  await getOrCreateUserProfile(normalizedUserId);
   const row = {
-    user_id: userId,
+    user_id: normalizedUserId,
     ...(partial.modelMode !== undefined ? { model_mode: partial.modelMode } : {}),
     ...(partial.defaultProvider !== undefined ? { default_provider: partial.defaultProvider } : {}),
     ...(partial.defaultModel !== undefined ? { default_model: partial.defaultModel } : {}),
@@ -335,9 +341,14 @@ export async function upsertCreatorProviderKey(input: {
   provider: CreatorProvider;
   apiKey: string;
 }): Promise<CreatorProviderKeyMetadata> {
+  const normalizedUserId = typeof input.userId === "string" ? input.userId.trim() : "";
+  if (!normalizedUserId) {
+    throw new Error("upsertCreatorProviderKey: userId is required");
+  }
+  await getOrCreateUserProfile(normalizedUserId);
   const encrypted = encryptProviderKey(input.apiKey);
   const row = {
-    user_id: input.userId,
+    user_id: normalizedUserId,
     provider: input.provider,
     key_ciphertext: encrypted.keyCiphertext,
     key_iv: encrypted.keyIv,

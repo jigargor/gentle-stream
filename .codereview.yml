@@ -1,63 +1,77 @@
-# Code review modes are consumed by Cursor / local tooling — not production routing.
-# `challenger_validation` runs extra models as a gated second opinion; it is not adaptive switching.
-
-version: 1
-
-defaults:
-  mode: standard
-  artifactDir: .cursor/code-review
-  contextPolicy: strict
-
-modes:
-  standard:
-    reviewers:
-      - provider: anthropic
-        model: claude-sonnet-4-20250514
-    adjudicator:
-      provider: anthropic
-      model: claude-sonnet-4-20250514
-
-  challenger_validation:
-    reviewers:
-      - provider: anthropic
-        model: claude-sonnet-4-20250514
-      - provider: openai
-        model: gpt-4o-mini
-      - provider: gemini
-        model: gemini-2.5-flash
-    adjudicator:
-      provider: anthropic
-      model: claude-sonnet-4-20250514
-
-audit:
+confidence_threshold: 70
+severity_threshold: medium
+categories:
+- correctness
+- security
+- performance
+- maintainability
+ignore_paths:
+- '*.test.ts'
+- '*.test.tsx'
+- '*.spec.ts'
+- '*.spec.tsx'
+- __tests__/**
+- '**/__mocks__/**'
+- coverage/**
+- .next/**
+- out/**
+- build/**
+- dist/**
+- node_modules/**
+- public/**
+- '*.config.js'
+- '*.config.ts'
+review_drafts: true
+max_findings_per_pr: 25
+prompt_additions: null
+model:
+  provider: anthropic
+  name: claude-sonnet-4-5
+  input_per_1m_usd: 3.0
+  output_per_1m_usd: 15.0
+max_mode:
+  enabled: false
+  challenger_provider: openai
+  challenger_model: gpt-5.5
+  tie_break_provider: gemini
+  tie_break_model: gemini-2.5-pro
+  conflict_threshold: 35
+  high_risk_severity: high
+budgets:
+  system_prompt: 3000
+  repo_profile: 1500
+  repo_additions: 1000
+  diff_hunks: 40000
+  surrounding_context: 15000
+  fetched_files_headroom: 20000
+  output: 8000
+  total_cap: 120000
+packaging:
+  layered_context_enabled: true
+  partial_review_mode_enabled: true
+  summarization_enabled: true
+  partial_review_changed_lines_threshold: 500
+  max_summary_calls_per_review: 3
+  generated_paths:
+  - .next/**
+  - out/**
+  - build/**
+  - dist/**
+  - '*.generated.*'
+  - supabase/migrations/**
+  vendor_paths:
+  - node_modules/**
+  - vendor/**
+chunking:
   enabled: true
-  jsonlPath: .cursor/code-review/review-runs.jsonl
-  includePromptTemplateId: true
-  includeContextPackageHash: true
-  includeModelVersions: true
-  includeTokenUsage: true
-  includeLatencyMs: true
-  includeEstimatedCost: true
-  includeFindingLifecycle: true
-
-contextPackaging:
-  allowlist:
-    - AGENTS.md
-    - API.md
-    - .cursor/rules/
-    - docs/
-  denylist:
-    - .env*
-    - secrets*
-    - "**/*.pem"
-  trustZones:
-    trusted:
-      - maintainer_docs
-      - rules
-      - verified_architecture_notes
-    untrusted:
-      - pr_diff
-      - commit_messages
-      - issue_comments
-      - user_snippets
-  sanitizeUntrustedInstructions: true
+  proactive_threshold_tokens: 35000
+  target_chunk_tokens: 18000
+  max_chunks: 8
+  min_files_per_chunk: 1
+  include_file_classes:
+  - reviewable
+  - config_only
+  - test_only
+  max_total_prompt_tokens: 120000
+  max_latency_seconds: 240
+  output_headroom_tokens: 4096

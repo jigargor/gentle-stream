@@ -1,9 +1,8 @@
-import type { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { type ApiErrorBody, API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
-import { getOrCreateUserProfile } from "@/lib/db/users";
 import { hasTrustedOrigin } from "@/lib/security/origin";
-import { type NextResponse } from "next/server";
+import { getEnv } from "@/lib/env";
 
 export interface CreatorAccessResult {
   ok: true;
@@ -31,6 +30,12 @@ export async function requireCreatorAccess(
   request: NextRequest,
   options: CreatorAccessOptions = {}
 ): Promise<CreatorAccessResponse> {
+  const env = getEnv();
+  if (env.AUTH_DISABLED) {
+    const devUserId = (process.env.DEV_USER_ID ?? "dev-local").trim() || "dev-local";
+    return { ok: true, userId: devUserId };
+  }
+
   const supabase = createClient();
   const {
     data: { user },
@@ -45,22 +50,22 @@ export async function requireCreatorAccess(
     });
   }
 
+  const userId = typeof user.id === "string" ? user.id.trim() : "";
+  if (!userId) {
+    return apiErrorResponse({
+      request,
+      status: 401,
+      code: API_ERROR_CODES.UNAUTHORIZED,
+      message: "Invalid session (missing user id).",
+    });
+  }
+
   if (!user.email_confirmed_at) {
     return apiErrorResponse({
       request,
       status: 403,
       code: API_ERROR_CODES.FORBIDDEN,
       message: "Creator Studio requires verified email.",
-    });
-  }
-
-  const profile = await getOrCreateUserProfile(user.id);
-  if (profile.userRole !== "creator") {
-    return apiErrorResponse({
-      request,
-      status: 403,
-      code: API_ERROR_CODES.FORBIDDEN,
-      message: "Creator access required.",
     });
   }
 
@@ -85,9 +90,10 @@ export async function requireCreatorAccess(
     }
   }
 
-  return { ok: true, userId: user.id };
+  return { ok: true, userId };
 }
 
 export function isCreatorAccessDenied(result: CreatorAccessResponse): result is NextResponse<ApiErrorBody> {
-  return !("ok" in result);
+  // Do not use `"ok" in result"`: NextResponse inherits `ok` from Response, so errors would look "successful".
+  return result instanceof NextResponse;
 }

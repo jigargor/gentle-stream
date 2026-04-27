@@ -108,6 +108,13 @@ interface RecipeAssistPayload {
   nextAction: string;
 }
 
+interface ProviderHealthEntry {
+  provider: "anthropic" | "openai" | "gemini";
+  status: "active" | "revoked" | "invalid" | "missing";
+  configured: boolean;
+  lastUsedAt: string | null;
+}
+
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
@@ -305,6 +312,8 @@ export function CreatorDashboard({
   const [assistCostEstimate, setAssistCostEstimate] = useState<number | null>(null);
   const [assistEscalation, setAssistEscalation] = useState(false);
   const [assistRecipePayload, setAssistRecipePayload] = useState<RecipeAssistPayload | null>(null);
+  const [providerHealthReady, setProviderHealthReady] = useState<boolean | null>(null);
+  const [providerHealthMessage, setProviderHealthMessage] = useState<string | null>(null);
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const [helpContext, setHelpContext] = useState("");
   const [idlePromptVisible, setIdlePromptVisible] = useState(false);
@@ -745,8 +754,64 @@ export function CreatorDashboard({
   }, [form.body, form.contentKind]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/creator/settings/provider-health", {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          if (!cancelled) {
+            setProviderHealthReady(false);
+            setProviderHealthMessage(
+              "AI assist is unavailable. Add and test a provider API key in Creator Settings."
+            );
+          }
+          return;
+        }
+        const payload = (await response.json()) as { providers?: ProviderHealthEntry[] };
+        const providers = payload.providers ?? [];
+        const hasActive = providers.some((entry) => entry.status === "active");
+        if (!cancelled) {
+          setProviderHealthReady(hasActive);
+          if (hasActive) {
+            setProviderHealthMessage(null);
+          } else {
+            const hasConfigured = providers.some((entry) => entry.configured);
+            const hasInvalid = providers.some((entry) => entry.status === "invalid");
+            if (!hasConfigured) {
+              setProviderHealthMessage(
+                "Add at least one provider API key in Creator Settings to use AI assist."
+              );
+            } else if (hasInvalid) {
+              setProviderHealthMessage(
+                "Your provider key failed verification. Update/test your API key in Creator Settings."
+              );
+            } else {
+              setProviderHealthMessage(
+                "No active provider key is available. Enable an active key in Creator Settings."
+              );
+            }
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setProviderHealthReady(false);
+          setProviderHealthMessage(
+            "AI assist is unavailable right now. Add or verify your provider key in Creator Settings."
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (
       !autocompleteEnabled ||
+      providerHealthReady !== true ||
       form.contentKind !== "user_article" ||
       form.neverSendToAi ||
       assistBusy
@@ -795,6 +860,7 @@ export function CreatorDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- debounced request tracks form fields directly
   }, [
     autocompleteEnabled,
+    providerHealthReady,
     assistBusy,
     form.articleType,
     form.articleTypeCustom,
@@ -1223,6 +1289,13 @@ export function CreatorDashboard({
       context?: string;
     }
   ) {
+    if (providerHealthReady !== true) {
+      setAssistError(
+        providerHealthMessage ??
+          "Add and verify an API key in Creator Settings before using AI assist."
+      );
+      return;
+    }
     setAssistBusy(true);
     markLlmActivity({ kind: "assist", stage: "sending", label: "Sending to AI" });
     setAssistError(null);
@@ -1294,7 +1367,18 @@ export function CreatorDashboard({
       });
       if (!response.ok) {
         const apiError = await parseApiClientError(response);
-        setAssistError(formatApiClientError(apiError));
+        const formatted = formatApiClientError(apiError);
+        setAssistError(formatted);
+        if (
+          formatted.includes("No provider API keys configured") ||
+          formatted.includes("provider key") ||
+          formatted.includes("BAD_GATEWAY")
+        ) {
+          setProviderHealthReady(false);
+          setProviderHealthMessage(
+            "AI assist is unavailable until a valid provider API key is configured."
+          );
+        }
         setLlmActivity(null);
         return;
       }
@@ -1487,7 +1571,7 @@ export function CreatorDashboard({
         ? "creator-status-pill--success"
         : "creator-status-pill--neutral";
   const lastSavedClock = formatLocalClock(lastSavedAtRef.current);
-  const assistDisabled = assistBusy || form.neverSendToAi;
+  const assistDisabled = assistBusy || form.neverSendToAi || providerHealthReady !== true;
   const bodyLimitTone = isBodyTooLong ? "creator-status-pill--warning" : "creator-status-pill--neutral";
 
   return (
@@ -1884,6 +1968,14 @@ export function CreatorDashboard({
                 />
                 Never send this draft to AI
               </label>
+              {providerHealthReady !== true ? (
+                <p className="creator-note creator-note--warning" aria-live="polite">
+                  {providerHealthMessage ?? "AI assist needs a valid provider key."}{" "}
+                  <Link href="/creator/settings" className="creator-action-link">
+                    Open Creator Settings
+                  </Link>
+                </p>
+              ) : null}
 
               {(idlePromptVisible || helpMenuOpen) ? (
                 <div className="creator-assist-prompt">

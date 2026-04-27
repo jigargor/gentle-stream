@@ -29,6 +29,7 @@ import { ArticleBodyMarkdown } from "@/components/articles/ArticleBodyMarkdown";
 import { GuestAuthPromptModal } from "@/components/auth/GuestAuthPromptModal";
 import { ArticleReaderModal } from "@/components/articles/ArticleReaderModal";
 import { ShareMenu } from "@/components/articles/ShareMenu";
+import { captureException } from "@/lib/observability/client";
 import {
   buildRssFeedExcerpt,
   isRssNarrativeArticle,
@@ -45,6 +46,11 @@ interface ArticleTranslationPayload {
   body: string;
   pullQuote: string;
   imagePrompt: string;
+}
+
+function shouldSampleTranslationLog(): boolean {
+  if (process.env.NODE_ENV !== "production") return true;
+  return Math.random() < 0.03;
 }
 
 const HERO_IMG_W = 800;
@@ -459,12 +465,46 @@ export default function ArticleCard({
           }),
           signal: controller.signal,
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (shouldSampleTranslationLog()) {
+            captureException(
+              new Error("article.translate.client_http_failure"),
+              {
+                route: "components/ArticleCard",
+                articleId: translationArticleId,
+                status: response.status,
+                skipReason: "http_error",
+              }
+            );
+          }
+          return;
+        }
         const payload = (await response.json()) as ArticleTranslationPayload;
-        if (!payload.available || !payload.translated) return;
+        if (!payload.available || !payload.translated) {
+          if (shouldSampleTranslationLog()) {
+            captureException(
+              new Error("article.translate.client_skipped"),
+              {
+                route: "components/ArticleCard",
+                articleId: translationArticleId,
+                available: payload.available,
+                translated: payload.translated,
+                sourceLanguage: payload.detectedSourceLanguage,
+                skipReason: payload.available ? "translated_false" : "unavailable",
+              }
+            );
+          }
+          return;
+        }
         setTranslatedArticle(payload);
-      } catch {
-        /* best-effort translation only */
+      } catch (error) {
+        if (shouldSampleTranslationLog()) {
+          captureException(error, {
+            route: "components/ArticleCard",
+            articleId: translationArticleId,
+            skipReason: "request_exception",
+          });
+        }
       }
     })();
 

@@ -53,6 +53,12 @@ export interface StoredArticle extends Omit<RawArticle, "category"> {
   moderationLabels?: Record<string, unknown> | null;
   moderatedAt?: string | null;
   moderatedByUserId?: string | null;
+  originalHeadline?: string | null;
+  originalSubheadline?: string | null;
+  originalBody?: string | null;
+  translatedAt?: string | null;
+  translationProvider?: string | null;
+  sourceLanguage?: string | null;
 
   // Recipe-specific fields (contentKind='recipe')
   recipeServings?: number | null;

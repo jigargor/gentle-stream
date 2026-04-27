@@ -22,6 +22,43 @@ interface DeepLResponseShape {
   }>;
 }
 
+let hasWarnedDeepLEndpointMismatch = false;
+
+function resolveDeepLApiHostname(endpointBase: string): string | null {
+  const trimmed = endpointBase.trim();
+  if (!trimmed) return null;
+  try {
+    const withScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    return new URL(withScheme).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function maybeWarnDeepLEndpointMismatch(apiKey: string, endpointBase: string): void {
+  if (hasWarnedDeepLEndpointMismatch) return;
+  const isFreeStyleKey = apiKey.endsWith(":fx");
+  const host = resolveDeepLApiHostname(endpointBase);
+  if (!host) return;
+  const endpointLooksFree = host === "api-free.deepl.com";
+  const endpointLooksPro = host === "api.deepl.com";
+  const mismatch =
+    (isFreeStyleKey && endpointLooksPro) || (!isFreeStyleKey && endpointLooksFree);
+  if (!mismatch) return;
+
+  hasWarnedDeepLEndpointMismatch = true;
+  captureMessage({
+    level: "warning",
+    message: "deepl.translate.endpoint_key_tier_mismatch",
+    context: {
+      keyTier: isFreeStyleKey ? "free" : "pro_or_unknown",
+      endpointBase,
+    },
+  });
+}
+
 export async function translateTextsWithDeepL(
   input: DeepLTranslationInput
 ): Promise<DeepLTranslationOutput | null> {
@@ -34,7 +71,9 @@ export async function translateTextsWithDeepL(
     return null;
   }
 
-  const endpoint = `${(env.DEEPL_API_URL || DEFAULT_DEEPL_URL).replace(/\/+$/, "")}/v2/translate`;
+  const endpointBase = (env.DEEPL_API_URL || DEFAULT_DEEPL_URL).replace(/\/+$/, "");
+  maybeWarnDeepLEndpointMismatch(apiKey, endpointBase);
+  const endpoint = `${endpointBase}/v2/translate`;
   const params = new URLSearchParams();
   params.set("target_lang", (input.targetLang || "EN").toUpperCase());
   params.set("preserve_formatting", "1");

@@ -33,6 +33,11 @@ import {
 } from "@/lib/agents/ingestDiscoveryProvider";
 import { parseJsonPayload, stripCodeFences } from "@/lib/agents/ingest/parsing";
 import { stripInlineHtmlToPlainText } from "@gentle-stream/feed-engine";
+import { runArticleTranslationNormalization } from "@/lib/translation/articleNormalization";
+import {
+  detectLikelyNonEnglishText,
+  isLikelyEnglishLocale,
+} from "@/lib/translation/languageHeuristics";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const RSS_FEED_BODY_SKIP_SOURCE_FETCH_CHARS = 2500;
@@ -377,6 +382,11 @@ async function runOverhaulIngest(
         allInserted.push(inserted[0]);
         seenHeadlines.push(expanded.article.headline);
         seenUrls.push(...expanded.article.sourceUrls);
+        await maybeNormalizeInsertedArticle({
+          insertedArticleId: inserted[0].id,
+          rawArticle: expanded.article,
+          targetLocale,
+        });
       } else {
         skippedCount += 1;
       }
@@ -424,6 +434,11 @@ async function runOverhaulIngest(
           allInserted.push(inserted[0]);
           seenHeadlines.push(rssArticle.headline);
           seenUrls.push(...rssArticle.sourceUrls);
+          await maybeNormalizeInsertedArticle({
+            insertedArticleId: inserted[0].id,
+            rawArticle: rssArticle,
+            targetLocale,
+          });
         } else {
           skippedCount += 1;
         }
@@ -744,6 +759,11 @@ async function runLegacyIngest(
         allInserted.push(inserted[0]);
         seenHeadlines.push(article.headline);
         seenUrls.push(...article.sourceUrls);
+        await maybeNormalizeInsertedArticle({
+          insertedArticleId: inserted[0].id,
+          rawArticle: article,
+          targetLocale,
+        });
       } else skippedCount += 1;
     } catch (error) {
       failedCount += 1;
@@ -1071,6 +1091,46 @@ function buildIngestInsertArticle(
         }
       : {},
   };
+}
+
+async function maybeNormalizeInsertedArticle(input: {
+  insertedArticleId: string;
+  rawArticle: RawArticle;
+  targetLocale: string;
+}): Promise<void> {
+  const guardEnabled =
+    env.INGEST_TRANSLATION_GUARD_ENABLED == null
+      ? false
+      : env.INGEST_TRANSLATION_GUARD_ENABLED;
+  if (!guardEnabled) return;
+  if (!isLikelyEnglishLocale(input.targetLocale)) return;
+
+  const heuristic = detectLikelyNonEnglishText(
+    [input.rawArticle.headline, input.rawArticle.subheadline, input.rawArticle.body]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 3000)
+  );
+  if (!heuristic.likelyNonEnglish) return;
+
+  captureMessage({
+    level: "warning",
+    message: "agent.ingest.translation_guard_triggered",
+    context: {
+      articleId: input.insertedArticleId,
+      targetLocale: input.targetLocale,
+      guessedSourceLanguage: heuristic.guessedSourceLanguage,
+      heuristicScore: heuristic.score,
+    },
+  });
+
+  await runArticleTranslationNormalization({
+    articleIds: [input.insertedArticleId],
+    maxRows: 1,
+    apply: true,
+    forceOnArticleIds: true,
+    reason: "ingest_guardrail",
+  });
 }
 
 function resolveTargetLocale(inputLocale?: string): string {

@@ -17,6 +17,10 @@
       "schedule": "*/3 * * * *"
     },
     {
+      "path": "/api/cron/translate",
+      "schedule": "*/4 * * * *"
+    },
+    {
       "path": "/api/cron/cleanup",
       "schedule": "0 3 * * *"
     },

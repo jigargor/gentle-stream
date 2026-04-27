@@ -6,6 +6,7 @@ import {
   countSubmissionsSince,
   createSubmission,
   getCreatorProfile,
+  listCreatorSubmissionSummaries,
   listSubmissionsByAuthor,
 } from "@/lib/db/creator";
 import {
@@ -63,12 +64,23 @@ export async function GET(request: NextRequest) {
   const limit = Number.isFinite(limitRaw) ? limitRaw : 12;
   const cursor = search.get("cursor");
   const includeBody = search.get("includeBody") === "1";
-  const { submissions, nextCursor } = await listSubmissionsByAuthor({
-    authorUserId: userId,
-    limit,
-    cursorCreatedAt: cursor,
-    includeBody,
-  });
+  const summaryOnly = search.get("summary") === "1";
+  const listStarted = Date.now();
+  const { submissions, nextCursor } = summaryOnly
+    ? await listCreatorSubmissionSummaries({
+        authorUserId: userId,
+        limit,
+        cursorCreatedAt: cursor,
+      })
+    : await listSubmissionsByAuthor({
+        authorUserId: userId,
+        limit,
+        cursorCreatedAt: cursor,
+        includeBody,
+      });
+  if (Date.now() - listStarted > 25) {
+    console.info(`[api-timing] GET /api/creator/submissions ${Date.now() - listStarted}ms`);
+  }
   return NextResponse.json({ submissions, nextCursor });
 }
 

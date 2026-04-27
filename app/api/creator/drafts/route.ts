@@ -8,6 +8,7 @@ import { isCreatorAccessDenied, requireCreatorAccess } from "@/lib/auth/creator-
 import {
   countActiveDrafts,
   createCreatorDraft,
+  listCreatorDraftSummaries,
   listCreatorDrafts,
 } from "@/lib/db/creatorDrafts";
 import { createCreatorAuditEvent } from "@/lib/db/creatorStudio";
@@ -40,12 +41,31 @@ export async function GET(request: NextRequest) {
     const search = request.nextUrl.searchParams;
     const limitRaw = Number.parseInt(search.get("limit") ?? "12", 10);
     const includeDeleted = search.get("includeDeleted") === "1";
+    const summaryOnly = search.get("summary") === "1";
+    const limit = Number.isFinite(limitRaw) ? limitRaw : 12;
+    const cursor = search.get("cursor");
+    const listStarted = Date.now();
+    if (summaryOnly) {
+      const { summaries, nextCursor } = await listCreatorDraftSummaries({
+        userId: access.userId,
+        limit,
+        cursorUpdatedAt: cursor,
+        includeDeleted,
+      });
+      if (Date.now() - listStarted > 25) {
+        console.info(`[api-timing] GET /api/creator/drafts?summary=1 ${Date.now() - listStarted}ms`);
+      }
+      return NextResponse.json({ draftSummaries: summaries, nextCursor });
+    }
     const { drafts, nextCursor } = await listCreatorDrafts({
       userId: access.userId,
-      limit: Number.isFinite(limitRaw) ? limitRaw : 12,
-      cursorUpdatedAt: search.get("cursor"),
+      limit,
+      cursorUpdatedAt: cursor,
       includeDeleted,
     });
+    if (Date.now() - listStarted > 25) {
+      console.info(`[api-timing] GET /api/creator/drafts ${Date.now() - listStarted}ms`);
+    }
     return NextResponse.json({ drafts, nextCursor });
   } catch (error: unknown) {
     return internalErrorResponse({ request, error });

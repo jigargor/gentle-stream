@@ -10,6 +10,7 @@ import {
   createCreatorMemorySession,
   CreatorStudioSchemaUnavailableError,
   getCreatorSettings,
+  listCreatorMemory,
 } from "@/lib/db/creatorStudio";
 import { generateCreatorText } from "@/lib/creator/model-router";
 import {
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
     const originError = assertCreatorMutationOrigin(request);
     if (originError) return originError;
 
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
 
     const rate = await consumeRateLimit({
@@ -68,13 +69,27 @@ export async function POST(request: NextRequest) {
       });
     }
     const body = parsed.data;
-    const context = (body.context ?? "").slice(-1_200);
+    const context = (body.context ?? "").slice(-2_000);
+
+    // Fetch last 3 accepted autocomplete completions for per-user style tailoring
+    const recentMemory = await listCreatorMemory({
+      userId: access.userId,
+      workflowId: "autocomplete",
+      limit: 6,
+    });
+    const styleExamples = recentMemory
+      .filter((m) => m.role === "assistant" && m.content.trim().length > 0)
+      .slice(0, 3)
+      .map((m) => `"${m.content.trim().slice(0, 120)}"`)
+      .join("\n");
+
     const prompt = [
-      "Complete the user's draft with at most 20 words.",
+      "Complete the user's draft with at most 25 words.",
       "Keep the same tone and avoid introducing new facts.",
       settings.autocompletePrompt ? `Policy: ${settings.autocompletePrompt}` : "",
       body.articleType ? `Article type: ${body.articleType}` : "",
       body.headline ? `Headline: ${body.headline}` : "",
+      styleExamples ? `Writing style examples from this author:\n${styleExamples}` : "",
       `Draft tail:\n${context}`,
       "Return only the completion text.",
     ]

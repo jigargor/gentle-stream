@@ -48,7 +48,7 @@ const deleteBodySchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const workflowId = request.nextUrl.searchParams.get("workflowId")?.trim() || undefined;
     const [sessions, summaries] = await Promise.all([
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   try {
     const originError = assertCreatorMutationOrigin(request);
     if (originError) return originError;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const parsed = createMemoryBodySchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -107,7 +107,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const originError = assertCreatorMutationOrigin(request);
     if (originError) return originError;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const parsed = summaryBodySchema.safeParse(await request.json());
     if (!parsed.success) {

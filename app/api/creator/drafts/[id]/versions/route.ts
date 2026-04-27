@@ -27,7 +27,7 @@ export async function GET(
 ) {
   try {
     const params = await context.params;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const rate = await consumeRateLimit({
       policy: { id: "creator-drafts-checkpoint", windowMs: 60_000, max: 20 },
@@ -63,7 +63,7 @@ export async function POST(
       });
     }
     const params = await context.params;
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const parsed = checkpointSchema.safeParse(await request.json());
     if (!parsed.success) {

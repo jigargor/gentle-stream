@@ -48,7 +48,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const params = await context.params;
-  const access = await requireCreatorAccess(request, { requireMfa: true });
+  const access = await requireCreatorAccess(request);
   if (isCreatorAccessDenied(access)) return access;
   const match = await getSubmissionByIdForAuthor({
     id: params.id,
@@ -78,7 +78,7 @@ export async function PATCH(
     });
   }
   const params = await context.params;
-  const access = await requireCreatorAccess(request, { requireMfa: true });
+  const access = await requireCreatorAccess(request);
   if (isCreatorAccessDenied(access)) return access;
   const userId = access.userId;
 

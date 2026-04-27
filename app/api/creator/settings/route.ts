@@ -28,7 +28,7 @@ const settingsPatchSchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const { settings, schemaAvailable } = await getCreatorSettings(access.userId);
     const res = NextResponse.json(settings);
@@ -46,7 +46,7 @@ export async function PATCH(request: NextRequest) {
     const originError = assertCreatorMutationOrigin(request);
     if (originError) return originError;
 
-    const rawAccess = await requireCreatorAccess(request, { requireMfa: true });
+    const rawAccess = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(rawAccess)) return rawAccess;
 
     const parsed = settingsPatchSchema.safeParse(await request.json());

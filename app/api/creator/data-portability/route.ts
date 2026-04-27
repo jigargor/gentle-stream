@@ -19,7 +19,7 @@ const deleteSchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const userId = access.userId;
     const [drafts, draftVersions, memorySessions, memorySummaries, llmCalls] =

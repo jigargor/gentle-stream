@@ -26,7 +26,7 @@ const recipeImportBodySchema = z.object({
 export async function POST(request: NextRequest) {
   const originError = assertCreatorMutationOrigin(request);
   if (originError) return originError;
-  const access = await requireCreatorAccess(request, { requireMfa: true });
+  const access = await requireCreatorAccess(request);
   if (isCreatorAccessDenied(access)) return access;
 
   const allowlist = parseAllowlist();

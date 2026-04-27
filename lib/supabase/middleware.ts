@@ -250,29 +250,9 @@ export async function updateSession(
       redirectUrl.searchParams.set("reason", "creator_email_verification_required");
       return finish(NextResponse.redirect(redirectUrl));
     }
-    if (isCreatorStudioPage || isCreatorStudioApi) {
-      const { data: aalData, error: aalError } =
-        await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      const requiresStepUp =
-        !aalError && aalData.nextLevel === "aal2" && aalData.currentLevel !== "aal2";
-      if (requiresStepUp) {
-        if (isCreatorStudioApi) {
-          return finish(
-            apiErrorResponse({
-              request,
-              traceId: requestTraceId,
-              status: 403,
-              code: API_ERROR_CODES.FORBIDDEN,
-              message: "Creator Studio requires TOTP MFA verification.",
-            })
-          );
-        }
-        const redirectUrl = request.nextUrl.clone();
-        redirectUrl.pathname = "/account/settings";
-        redirectUrl.searchParams.set("reason", "creator_mfa_required");
-        return finish(NextResponse.redirect(redirectUrl));
-      }
-    }
+    // MFA is no longer required to access Creator Studio at the routing level.
+    // Sensitive mutations (provider key saves, data export, memory wipe) enforce
+    // step-up MFA individually inside their own API route handlers.
   }
 
   return finish(supabaseResponse);

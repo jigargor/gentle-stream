@@ -17,8 +17,9 @@ import {
   Link as LinkIcon,
   List,
   Minus,
+  Plus,
   Quote,
-  RefreshCw,
+  Trash2,
   Save,
   Send,
   Settings,
@@ -42,6 +43,8 @@ import {
   formatApiClientError,
   parseApiClientError,
 } from "@/lib/api/client-errors";
+import { FreeComboBox } from "@/components/creator/FreeComboBox";
+import { diffWords } from "@/lib/creator/diff";
 
 interface CreatorDashboardProps {
   /** Public creator profile URL (same for author byline links). */
@@ -176,6 +179,29 @@ function formatLocalClock(value: number | string | null | undefined): string {
   if (value == null) return "";
   try {
     return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function formatDraftDate(value: string | null | undefined): string {
+  if (!value) return "";
+  try {
+    const d = new Date(value);
+    const now = new Date();
+    const isToday =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    if (isToday) {
+      return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+    const isThisYear = d.getFullYear() === now.getFullYear();
+    return d.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      ...(isThisYear ? {} : { year: "numeric" }),
+    });
   } catch {
     return "";
   }
@@ -338,6 +364,33 @@ export function CreatorDashboard({
   const [analystQuietMode, setAnalystQuietMode] = useState(true);
   const [analystCheckpoints, setAnalystCheckpoints] = useState<AnalystCheckpoint[]>([]);
   const [latestAnalyst, setLatestAnalyst] = useState<AnalystCheckpoint | null>(null);
+  // Draft list for sidebar browsing
+  const [allDraftSummaries, setAllDraftSummaries] = useState<CreatorDraftSummary[]>(initialDraftSummaries);
+  const [draftSidebarOpen, setDraftSidebarOpen] = useState(true);
+  const [draftListBusy, setDraftListBusy] = useState(false);
+  const [confirmDeleteDraftId, setConfirmDeleteDraftId] = useState<string | null>(null);
+  // Chunked improve edit queue (Group 6c)
+  interface EditChunk { original: string; replacement: string; reason: string; }
+  const [editQueue, setEditQueue] = useState<EditChunk[]>([]);
+  const [editIndex, setEditIndex] = useState(0);
+  // Track the last assist mode for diff view and display logic
+  const [lastAssistMode, setLastAssistMode] = useState<string | null>(null);
+  // Show diff view for improve suggestions
+  const [showDiff, setShowDiff] = useState(false);
+  // Ghost text ref for scroll-sync — must be a textarea to match rendering exactly
+  const ghostLayerRef = useRef<HTMLTextAreaElement | null>(null);
+  // Auto-checkpoint timer
+  const checkpointTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Always-fresh refs for activeDraftId/Revision so async timer callbacks never read stale state
+  const activeDraftIdRef = useRef(activeDraftId);
+  activeDraftIdRef.current = activeDraftId;
+  const activeDraftRevisionRef = useRef(activeDraftRevision);
+  activeDraftRevisionRef.current = activeDraftRevision;
+  // Hydration guard: autosave must not create a new draft until we know whether
+  // an existing draft can be loaded from the server (prevents blank-draft spam on reload).
+  const hydratedRef = useRef(false);
+  // Autocomplete pending state for the loading indicator
+  const [autocompletePending, setAutocompletePending] = useState(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingAutosaveRef = useRef(false);
   const lastSavedFingerprintRef = useRef<string>("");
@@ -386,6 +439,85 @@ export function CreatorDashboard({
       );
       llmCompleteTimerRef.current = null;
     }, 1600);
+  }
+
+  function triggerCheckpointTimer() {
+    // Use refs so the timer always fires with the latest draft identity even after re-renders
+    if (!activeDraftIdRef.current || activeDraftRevisionRef.current == null) return;
+    if (checkpointTimerRef.current) clearTimeout(checkpointTimerRef.current);
+    checkpointTimerRef.current = setTimeout(() => {
+      void createManualCheckpoint();
+      checkpointTimerRef.current = null;
+    }, 4_000);
+  }
+
+  async function loadAllDraftSummaries() {
+    setDraftListBusy(true);
+    try {
+      const res = await fetch("/api/creator/drafts?summary=1&limit=50", { credentials: "include" });
+      if (!res.ok) return;
+      const payload = (await res.json()) as { draftSummaries?: CreatorDraftSummary[] };
+      setAllDraftSummaries(payload.draftSummaries ?? []);
+    } finally {
+      setDraftListBusy(false);
+    }
+  }
+
+  async function switchToDraft(draftId: string) {
+    if (draftId === activeDraftId) return;
+    setDraftContentLoading(true);
+    try {
+      const res = await fetch(`/api/creator/drafts/${draftId}`, { credentials: "include" });
+      if (!res.ok) return;
+      const payload = (await res.json()) as { draft?: CreatorDraft };
+      if (!payload.draft) return;
+      applyFullDraftToForm(payload.draft);
+      try { localStorage.setItem("gentle_stream_active_draft_id", draftId); } catch { /* ignore */ }
+    } catch {
+      // Silent — stale draft IDs may 404
+    } finally {
+      setDraftContentLoading(false);
+    }
+  }
+
+  async function createNewDraft() {
+    const res = await fetch("/api/creator/drafts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ headline: "", body: "", contentKind: "user_article" }),
+    });
+    if (!res.ok) {
+      const apiError = await parseApiClientError(res);
+      setMessage(formatApiClientError(apiError));
+      return;
+    }
+    const payload = (await res.json()) as { draft?: CreatorDraft };
+    if (!payload.draft) return;
+    applyFullDraftToForm(payload.draft);
+    await loadAllDraftSummaries();
+  }
+
+  async function deleteDraft(draftId: string) {
+    setConfirmDeleteDraftId(null);
+    const res = await fetch(`/api/creator/drafts/${draftId}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const apiError = await parseApiClientError(res);
+      setMessage(formatApiClientError(apiError));
+      return;
+    }
+    // Remove from sidebar list immediately
+    setAllDraftSummaries((prev) => prev.filter((d) => d.id !== draftId));
+    // If this was the active draft, clear the editor
+    if (activeDraftId === draftId) {
+      setActiveDraftId(null);
+      setActiveDraftRevision(null);
+      setForm(EMPTY_FORM);
+      try { localStorage.removeItem("gentle_stream_active_draft_id"); } catch { /* ignore */ }
+    }
   }
 
   const submitBlockingReasons = useMemo(() => {
@@ -580,6 +712,10 @@ export function CreatorDashboard({
       savedId = null;
     }
 
+    function persistDraftId(id: string) {
+      try { localStorage.setItem("gentle_stream_active_draft_id", id); } catch { /* ignore */ }
+    }
+
     async function tryLoadFullDraft(id: string): Promise<boolean> {
       setDraftContentLoading(true);
       try {
@@ -597,7 +733,7 @@ export function CreatorDashboard({
       }
     }
 
-    if (savedId && (await tryLoadFullDraft(savedId))) return;
+    if (savedId && (await tryLoadFullDraft(savedId))) { hydratedRef.current = true; return; }
 
     let target: CreatorDraftSummary | null =
       (savedId ? initialDraftSummaries.find((s) => s.id === savedId) : null) ??
@@ -608,15 +744,17 @@ export function CreatorDashboard({
       const response = await fetch("/api/creator/drafts?limit=1&summary=1", {
         credentials: "include",
       });
-      if (!response.ok) return;
+      if (!response.ok) { hydratedRef.current = true; return; }
       const payload = (await response.json()) as { draftSummaries?: CreatorDraftSummary[] };
       target = payload.draftSummaries?.[0] ?? null;
     }
 
-    if (!target) return;
+    if (!target) { hydratedRef.current = true; return; }
     setActiveDraftId(target.id);
     setActiveDraftRevision(target.revision);
+    persistDraftId(target.id);
     await tryLoadFullDraft(target.id);
+    hydratedRef.current = true;
   }
 
   async function loadDraftVersions(draftId: string) {
@@ -647,10 +785,16 @@ export function CreatorDashboard({
     if (!payload.draft) return null;
     setActiveDraftId(payload.draft.id);
     setActiveDraftRevision(payload.draft.revision);
+    // Persist new draft ID immediately so the next reload reconnects to this draft
+    // instead of creating yet another one.
+    try { localStorage.setItem("gentle_stream_active_draft_id", payload.draft.id); } catch { /* ignore */ }
     return { id: payload.draft.id, revision: payload.draft.revision };
   }
 
   async function flushAutosave() {
+    // Don't create a draft before we know whether an existing one can be loaded.
+    // hydrateActiveDraft sets this flag at every exit path.
+    if (!hydratedRef.current) return;
     const fingerprint = draftFingerprint(form);
     if (fingerprint === lastSavedFingerprintRef.current) return;
     setAutosaveStatus("saving");
@@ -684,6 +828,15 @@ export function CreatorDashboard({
     if (payload.draft) {
       setActiveDraftRevision(payload.draft.revision);
       if (activeDraftId == null) setActiveDraftId(payload.draft.id);
+      // Keep the sidebar draft list title in sync without a full re-fetch
+      const savedId = payload.draft.id;
+      const savedTitle = payload.draft.title ?? "";
+      const savedAt = payload.draft.updatedAt ?? new Date().toISOString();
+      setAllDraftSummaries((prev) =>
+        prev.map((d) =>
+          d.id === savedId ? { ...d, title: savedTitle, updatedAt: savedAt } : d
+        )
+      );
     }
     lastSavedFingerprintRef.current = fingerprint;
     lastSavedAtRef.current = Date.now();
@@ -733,7 +886,10 @@ export function CreatorDashboard({
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const raf = requestAnimationFrame(() => {
-      timeoutId = setTimeout(() => void hydrateActiveDraft(), 0);
+      timeoutId = setTimeout(() => {
+        void hydrateActiveDraft();
+        void loadAllDraftSummaries();
+      }, 0);
     });
     return () => {
       cancelAnimationFrame(raf);
@@ -849,14 +1005,16 @@ export function CreatorDashboard({
         }
         const payload = (await response.json().catch(() => ({}))) as { suggestion?: string };
         setAutocompleteSuggestion(payload.suggestion ?? null);
+        setAutocompletePending(false);
         completeLlmActivity("autocomplete", "Autocomplete suggestion ready");
       } catch {
-        if (!cancelled) setLlmActivity(null);
+        if (!cancelled) { setLlmActivity(null); setAutocompletePending(false); }
       }
-    }, 450);
+    }, 150);
     return () => {
       cancelled = true;
       clearTimeout(handle);
+      setAutocompletePending(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- debounced request tracks form fields directly
   }, [
@@ -874,6 +1032,34 @@ export function CreatorDashboard({
   useEffect(() => {
     return () => {
       clearLlmCompletionTimer();
+    };
+  }, []);
+
+  // Keyboard shortcuts while an assist suggestion is visible
+  useEffect(() => {
+    if (!assistSuggestion) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setAssistSuggestion(null);
+        setAssistOpeningAngles([]);
+        setEditQueue([]);
+        setShowDiff(false);
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        applyAssistSuggestion();
+        setAssistSuggestion(null);
+        setAssistOpeningAngles([]);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistSuggestion, assistOpeningAngles, assistRecipePayload]);
+
+  // Clean up checkpoint timer on unmount
+  useEffect(() => {
+    return () => {
+      if (checkpointTimerRef.current) clearTimeout(checkpointTimerRef.current);
     };
   }, []);
 
@@ -971,26 +1157,27 @@ export function CreatorDashboard({
     };
   }, []);
 
-  useEffect(() => {
-    analystDirtyRef.current = true;
-  }, [form.body, form.headline]);
+  // Always-fresh form values for the analyst timer callback (avoids stale closures)
+  const analystFormRef = useRef({ headline: form.headline, body: form.body, quietMode: analystQuietMode });
+  analystFormRef.current = { headline: form.headline, body: form.body, quietMode: analystQuietMode };
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (!analystEnabled) return;
+    analystDirtyRef.current = true;
+    if (!analystEnabled) return;
+    // Debounce: run the analyst 10 s after the user stops typing.
+    // Previously this was a 5-minute polling interval whose timer reset on every
+    // keystroke, so it effectively never ran during an active writing session.
+    const timer = window.setTimeout(() => {
       if (!analystDirtyRef.current) return;
-      const fingerprint = `${form.headline.trim()}::${form.body.trim()}`;
+      const { headline, body, quietMode } = analystFormRef.current;
+      const fingerprint = `${headline.trim()}::${body.trim()}`;
       if (!fingerprint || fingerprint === lastAnalystFingerprintRef.current) return;
       lastAnalystFingerprintRef.current = fingerprint;
       analystDirtyRef.current = false;
-      analystWorkerRef.current?.postMessage({
-        headline: form.headline,
-        body: form.body,
-        requestNags: !analystQuietMode,
-      });
-    }, 5 * 60 * 1000);
-    return () => window.clearInterval(interval);
-  }, [analystEnabled, analystQuietMode, form.body, form.headline]);
+      analystWorkerRef.current?.postMessage({ headline, body, requestNags: !quietMode });
+    }, 10_000);
+    return () => window.clearTimeout(timer);
+  }, [analystEnabled, form.body, form.headline]);
 
   async function submitForm() {
     if (!canSubmit) return;
@@ -1286,8 +1473,9 @@ export function CreatorDashboard({
     mode: "improve" | "continue" | "headline",
     options?: {
       workflowId?: "startup_inspiration" | "startup_brainstorm" | "startup_random" | "stuck_assist";
-      helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+      helpMode?: "inspiration" | "brainstorm" | "random" | "stuck" | "prompt_ideas" | "close";
       context?: string;
+      analystContext?: string;
     }
   ) {
     if (providerHealthReady !== true) {
@@ -1297,6 +1485,10 @@ export function CreatorDashboard({
       );
       return;
     }
+    setLastAssistMode(options?.helpMode ?? mode);
+    setShowDiff(false);
+    setEditQueue([]);
+    setEditIndex(0);
     setAssistBusy(true);
     markLlmActivity({ kind: "assist", stage: "sending", label: "Sending to AI" });
     setAssistError(null);
@@ -1346,6 +1538,9 @@ export function CreatorDashboard({
           selectionEnd: selection?.end,
           stream: true,
           context: options?.context,
+          analystContext: options?.analystContext ?? (latestAnalyst
+            ? `${latestAnalyst.metrics.wordCount} words, phase ${latestAnalyst.metrics.sectionPhase}, avg sentence ${latestAnalyst.metrics.avgSentenceWords} words.${latestAnalyst.notes.length ? " Notes: " + latestAnalyst.notes.join("; ") : ""}`
+            : undefined),
           recipeServings:
             form.contentKind === "recipe" && Number.isFinite(recipeServings) && recipeServings > 0
               ? recipeServings
@@ -1485,20 +1680,50 @@ export function CreatorDashboard({
   }
 
   async function createManualCheckpoint() {
-    if (!activeDraftId || activeDraftRevision == null) return;
-    const response = await fetch(`/api/creator/drafts/${activeDraftId}/versions`, {
+    // Use refs to get the latest values — autosave may have bumped the revision
+    // between when the 4s timer was scheduled and when it fires, causing 409s with stale state.
+    const draftId = activeDraftIdRef.current;
+    const revision = activeDraftRevisionRef.current;
+    if (!draftId || revision == null) return;
+    const response = await fetch(`/api/creator/drafts/${draftId}/versions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ expectedRevision: activeDraftRevision }),
+      body: JSON.stringify({ expectedRevision: revision }),
     });
     if (!response.ok) {
+      // 409 means the draft was already saved at a newer revision — checkpoint is redundant, ignore silently
+      if (response.status === 409) return;
       const apiError = await parseApiClientError(response);
       setMessage(formatApiClientError(apiError));
       return;
     }
-    if (revisionsOpenRef.current) await loadDraftVersions(activeDraftId);
+    if (revisionsOpenRef.current) await loadDraftVersions(draftId);
     setMessage("Checkpoint saved.");
+  }
+
+  function applyAssistSuggestion() {
+    if (!assistSuggestion) return;
+    if (form.contentKind !== "user_article") {
+      if (assistRecipePayload) { applyRecipeAssistToForm(assistRecipePayload); return; }
+      setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
+      return;
+    }
+    const anglesBlock = assistOpeningAngles.join("\n\n").trim();
+    if (anglesBlock) {
+      const sel = latestSelectionRef.current;
+      if (sel && sel.start !== sel.end) {
+        setForm((f) => ({ ...f, body: f.body.slice(0, sel.start) + anglesBlock + f.body.slice(sel.end) }));
+        return;
+      }
+      setForm((f) => {
+        const rest = f.body.trim();
+        return { ...f, body: (anglesBlock + (rest.length ? "\n\n" : "") + rest).trim() };
+      });
+      return;
+    }
+    setForm((f) => ({ ...f, body: assistSuggestion.trim() }));
+    triggerCheckpointTimer();
   }
 
   async function restoreDraftVersion(versionId: string) {
@@ -1646,6 +1871,92 @@ export function CreatorDashboard({
               )}
             </section>
 
+            <section className="creator-panel">
+              <div className="creator-panel__heading">
+                <div>
+                  <p className="creator-eyebrow">Drafts</p>
+                  <h2
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setDraftSidebarOpen((v) => !v)}
+                  >
+                    {draftListBusy ? "Loading…" : `${allDraftSummaries.length} / 10 drafts`}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  className="creator-icon-button"
+                  title={allDraftSummaries.length >= 10 ? "Draft limit reached (10)" : "New draft"}
+                  disabled={allDraftSummaries.length >= 10 || draftListBusy}
+                  onClick={() => void createNewDraft()}
+                >
+                  <Plus size={16} aria-hidden="true" />
+                </button>
+              </div>
+              {draftSidebarOpen ? (
+                <div className="creator-draft-list">
+                  {allDraftSummaries.length === 0 ? (
+                    <p className="creator-muted">No drafts yet.</p>
+                  ) : (
+                    allDraftSummaries.map((draft) => (
+                      <div
+                        key={draft.id}
+                        className={cx(
+                          "creator-draft-list__item",
+                          draft.id === activeDraftId && "creator-draft-list__item--active"
+                        )}
+                      >
+                        {confirmDeleteDraftId === draft.id ? (
+                          <div className="creator-draft-list__confirm">
+                            <span>Delete this draft?</span>
+                            <div className="creator-draft-list__confirm-actions">
+                              <button
+                                type="button"
+                                className="creator-button creator-button--small creator-button--danger"
+                                onClick={() => void deleteDraft(draft.id)}
+                              >
+                                Delete
+                              </button>
+                              <button
+                                type="button"
+                                className="creator-button creator-button--small creator-button--ghost"
+                                onClick={() => setConfirmDeleteDraftId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="creator-draft-list__body"
+                              onClick={() => void switchToDraft(draft.id)}
+                            >
+                              <span className="creator-draft-list__title">
+                                {draft.title || "Untitled draft"}
+                              </span>
+                              <span className="creator-draft-list__meta">
+                                {formatDraftDate(draft.updatedAt)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="creator-draft-list__delete"
+                              title="Delete draft"
+                              aria-label={`Delete draft: ${draft.title || "Untitled draft"}`}
+                              onClick={() => setConfirmDeleteDraftId(draft.id)}
+                            >
+                              <Trash2 size={13} aria-hidden="true" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </section>
+
             <section className="creator-panel creator-panel--submissions">
               <div className="creator-panel__heading">
                 <div>
@@ -1765,23 +2076,30 @@ export function CreatorDashboard({
                 <>
                   <label className="creator-field">
                     <span>Category</span>
-                    <select className="creator-input" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}>
-                      {CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
-                    </select>
+                    <FreeComboBox
+                      options={CATEGORIES as unknown as string[]}
+                      value={form.category}
+                      onChange={(v) => setForm((f) => ({ ...f, category: v }))}
+                      placeholder="Science & Discovery"
+                    />
                   </label>
                   <label className="creator-field">
                     <span>Article type</span>
-                    <select className="creator-input" value={form.articleType} onChange={(e) => setForm((f) => ({ ...f, articleType: e.target.value }))}>
-                      {BUILT_IN_ARTICLE_TYPES.map((value) => <option key={value} value={value}>{articleTypeLabel(value)}</option>)}
-                      <option value="custom">Custom type...</option>
-                    </select>
+                    <FreeComboBox
+                      options={BUILT_IN_ARTICLE_TYPES as unknown as string[]}
+                      value={form.articleTypeCustom || form.articleType}
+                      optionLabel={articleTypeLabel}
+                      onChange={(v) => {
+                        const isBuiltIn = (BUILT_IN_ARTICLE_TYPES as readonly string[]).includes(v);
+                        setForm((f) => ({
+                          ...f,
+                          articleType: isBuiltIn ? v : "custom",
+                          articleTypeCustom: isBuiltIn ? "" : v,
+                        }));
+                      }}
+                      placeholder="Explanatory"
+                    />
                   </label>
-                  {form.articleType === "custom" ? (
-                    <label className="creator-field">
-                      <span>Custom type</span>
-                      <input className="creator-input" value={form.articleTypeCustom} onChange={(e) => setForm((f) => ({ ...f, articleTypeCustom: e.target.value }))} placeholder="Describe custom article type" />
-                    </label>
-                  ) : null}
                 </>
               ) : null}
             </div>
@@ -1799,6 +2117,22 @@ export function CreatorDashboard({
                     <IconButton label="Section break" onClick={() => insertMarkdown("\n\n---\n\n", "", "")}><Minus size={16} aria-hidden="true" /></IconButton>
                   </div>
                   <span className={cx("creator-status-pill", bodyLimitTone)}>{bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}</span>
+                  {autocompleteEnabled && autocompletePending && !autocompleteSuggestion ? (
+                    <span
+                      aria-label="Autocomplete thinking"
+                      title="Smart Compose is thinking…"
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: "var(--gs-accent)",
+                        opacity: 0.7,
+                        animation: "gsSoftPulse 1s ease-in-out infinite",
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : null}
                 </div>
 
                 {llmActivity ? <StreamRibbon activity={llmActivity} /> : null}
@@ -1809,21 +2143,85 @@ export function CreatorDashboard({
                 </div>
 
                 {bodyEditorTab === "write" ? (
-                  <textarea
-                    ref={bodyTextareaRef}
-                    className="creator-textarea creator-textarea--body"
-                    value={form.body}
-                    onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                    onSelect={(e) => {
-                      const target = e.currentTarget;
-                      latestSelectionRef.current = {
-                        start: target.selectionStart ?? 0,
-                        end: target.selectionEnd ?? 0,
-                        text: form.body.slice(target.selectionStart ?? 0, target.selectionEnd ?? 0),
-                      };
-                    }}
-                    placeholder={"Write in Markdown...\n\n## Section heading\n\nParagraph text with **bold** and _italic_.\n\n> Pull quote or emphasis.\n\n---\n\nNext section..."}
-                  />
+                  <div style={{ position: "relative" }}>
+                    {/*
+                      Ghost textarea: uses the SAME element type + CSS class as the real textarea
+                      so text rendering (font, padding, wrapping) is pixel-identical.
+                      Its text (body + suggestion) is in muted gray; the real textarea sits on
+                      top with transparent background so its black text visually covers the gray
+                      body portion, leaving only the suggestion gray text visible.
+                    */}
+                    {autocompleteSuggestion ? (
+                      <textarea
+                        ref={ghostLayerRef}
+                        aria-hidden="true"
+                        readOnly
+                        tabIndex={-1}
+                        className="creator-textarea creator-textarea--body"
+                        value={
+                          form.body +
+                          (form.body.length > 0 && !/\s$/.test(form.body) && !/^\s/.test(autocompleteSuggestion) ? " " : "") +
+                          autocompleteSuggestion
+                        }
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          pointerEvents: "none",
+                          color: "var(--gs-muted)",
+                          resize: "none",
+                          zIndex: 0,
+                          // Use same overflow as real textarea so scrollbar width (and thus
+                          // line-wrap width) stays identical between both elements
+                          overflowY: "auto",
+                          scrollbarWidth: "none",
+                        }}
+                      />
+                    ) : null}
+                    <textarea
+                      ref={bodyTextareaRef}
+                      className="creator-textarea creator-textarea--body"
+                      value={form.body}
+                      style={autocompleteSuggestion ? {
+                        background: "transparent",
+                        position: "relative",
+                        zIndex: 1,
+                      } : undefined}
+                      onChange={(e) => {
+                        setForm((f) => ({ ...f, body: e.target.value }));
+                        setAutocompleteSuggestion(null);
+                        if (autocompleteEnabled && e.target.value.trim().length >= 50) {
+                          setAutocompletePending(true);
+                        }
+                        triggerCheckpointTimer();
+                      }}
+                      onScroll={() => {
+                        if (ghostLayerRef.current && bodyTextareaRef.current) {
+                          ghostLayerRef.current.scrollTop = bodyTextareaRef.current.scrollTop;
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Tab" && autocompleteSuggestion) {
+                          e.preventDefault();
+                          setForm((f) => {
+                            const sep = f.body.length > 0 && !/\s$/.test(f.body) && !/^\s/.test(autocompleteSuggestion) ? " " : "";
+                            return { ...f, body: f.body + sep + autocompleteSuggestion };
+                          });
+                          setAutocompleteSuggestion(null);
+                          setAutocompletePending(false);
+                          triggerCheckpointTimer();
+                        }
+                      }}
+                      onSelect={(e) => {
+                        const target = e.currentTarget;
+                        latestSelectionRef.current = {
+                          start: target.selectionStart ?? 0,
+                          end: target.selectionEnd ?? 0,
+                          text: form.body.slice(target.selectionStart ?? 0, target.selectionEnd ?? 0),
+                        };
+                      }}
+                      placeholder={"Write in Markdown...\n\n## Section heading\n\nParagraph text with **bold** and _italic_.\n\n> Pull quote or emphasis.\n\n---\n\nNext section..."}
+                    />
+                  </div>
                 ) : (
                   <div className="creator-preview-pane">
                     <ArticleBodyMarkdown markdown={form.body.trim() ? form.body : "*Preview appears here as you write.*"} variant="reader" fontPreset="literary" readingTimeSecs={previewReadingTimeSecs} />
@@ -1941,9 +2339,14 @@ export function CreatorDashboard({
                   </button>
                 ) : null}
                 {activeDraftId && activeDraftRevision != null ? (
-                  <button type="button" className="creator-button creator-button--ghost" onClick={() => void createManualCheckpoint()}>
-                    <RefreshCw size={15} aria-hidden="true" />
-                    Checkpoint
+                  <button
+                    type="button"
+                    className="creator-button creator-button--ghost"
+                    aria-label="Checkpoint"
+                    title="Checkpoint"
+                    onClick={() => void createManualCheckpoint()}
+                  >
+                    <Check size={15} aria-hidden="true" />
                   </button>
                 ) : null}
               </div>
@@ -1981,31 +2384,130 @@ export function CreatorDashboard({
                 </p>
               ) : null}
 
-              {(idlePromptVisible || helpMenuOpen) ? (
-                <div className="creator-assist-prompt">
-                  <strong>Need a starting push?</strong>
-                  <input className="creator-input" value={helpContext} onChange={(event) => setHelpContext(event.target.value)} placeholder="Optional context: dramatic, skeptical, warm..." />
-                  <div className="creator-button-row">
-                    <button type="button" className="creator-button creator-button--small" disabled={assistDisabled} onClick={() => void requestAssist("continue", { workflowId: "startup_inspiration", helpMode: "inspiration", context: helpContext })}>Inspiration</button>
-                    <button type="button" className="creator-button creator-button--small" disabled={assistDisabled} onClick={() => void requestAssist("improve", { workflowId: "startup_brainstorm", helpMode: "brainstorm", context: helpContext })}>Brainstorm</button>
-                    <button type="button" className="creator-button creator-button--small" disabled={assistDisabled} onClick={() => void requestAssist("continue", { workflowId: "startup_random", helpMode: "random", context: helpContext })}>Random</button>
-                  </div>
+              {form.contentKind === "user_article" ? (
+                <div className="creator-button-grid">
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Returns a numbered list of 5 story directions — no prose written"
+                    onClick={() => void requestAssist("continue", { helpMode: "prompt_ideas" })}
+                  >
+                    <Sparkles size={15} aria-hidden="true" />
+                    Prompt ideas
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Mild grammar and prose improvements, chunked so you can accept or skip each one"
+                    onClick={() => void requestAssist("improve")}
+                  >
+                    Improve
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Hands the keyboard to the AI — writes the next paragraph in your voice"
+                    onClick={() => void requestAssist("continue")}
+                  >
+                    Continue writing
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Returns 3 title options to choose from — click one to apply"
+                    onClick={() => void requestAssist("headline")}
+                  >
+                    Title help
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Gives 3 short possible directions to go — no full writing"
+                    onClick={() => void requestAssist("improve", { workflowId: "stuck_assist", helpMode: "stuck" })}
+                  >
+                    I&apos;m stuck
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Writes a closing paragraph that ties the article together"
+                    onClick={() => void requestAssist("continue", { helpMode: "close" })}
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : form.contentKind === "recipe" ? (
+                <div className="creator-button-grid">
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Clean up ingredient wording and instruction clarity"
+                    onClick={() => void requestAssist("improve")}
+                  >
+                    Refine
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Suggest 2–3 dietary or difficulty variants (vegan, gluten-free, quick version, etc.)"
+                    onClick={() => void requestAssist("continue", { helpMode: "random" })}
+                  >
+                    Variations
+                  </button>
+                  <button
+                    type="button"
+                    className="creator-button"
+                    disabled={assistDisabled}
+                    title="Short suggestions for what's missing or unclear"
+                    onClick={() => void requestAssist("improve", { workflowId: "stuck_assist", helpMode: "stuck" })}
+                  >
+                    I&apos;m stuck
+                  </button>
                 </div>
               ) : null}
-
-              <div className="creator-button-grid">
-                <button type="button" className="creator-button" onClick={() => { setHelpMenuOpen((prev) => !prev); setIdlePromptVisible(false); }}><Sparkles size={15} aria-hidden="true" />Prompt ideas</button>
-                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("improve")}>Improve</button>
-                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("continue")}>Continue</button>
-                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("headline")}>Headline</button>
-                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("improve", { workflowId: "stuck_assist", helpMode: "stuck" })}>I&apos;m stuck</button>
-              </div>
 
               {assistError ? <p className="creator-note creator-note--danger">{assistError}</p> : null}
               {assistCostEstimate != null ? <p className="creator-muted">Estimated assist cost: {"$" + assistCostEstimate.toFixed(4)}{assistEscalation ? " (escalated)" : ""}</p> : null}
               {assistSuggestion ? (
                 <div className="creator-suggestion-card">
-                  <p>{assistSuggestion}</p>
+                  {/* Diff view (Improve mode) or plain suggestion */}
+                  {lastAssistMode === "improve" ? (
+                    <div style={{ marginBottom: "0.4rem" }}>
+                      <button
+                        type="button"
+                        className="creator-button creator-button--small creator-button--ghost"
+                        onClick={() => setShowDiff((v) => !v)}
+                        style={{ fontSize: "0.75rem", marginBottom: "0.4rem" }}
+                      >
+                        {showDiff ? "Show suggestion" : "Show diff"}
+                      </button>
+                      {showDiff ? (
+                        <p style={{ lineHeight: 1.7, fontSize: "0.88rem" }}>
+                          {diffWords(form.body, assistSuggestion).map((token, i) =>
+                            token.type === "equal" ? (
+                              <span key={i}>{token.text}</span>
+                            ) : token.type === "insert" ? (
+                              <ins key={i} style={{ background: "rgba(0,180,80,0.18)", textDecoration: "none" }}>{token.text}</ins>
+                            ) : (
+                              <del key={i} style={{ background: "rgba(220,50,50,0.12)", textDecoration: "line-through" }}>{token.text}</del>
+                            )
+                          )}
+                        </p>
+                      ) : (
+                        <p>{assistSuggestion}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p>{assistSuggestion}</p>
+                  )}
                   {assistOpeningAngles.length > 0 ? (
                     <div className="creator-opening-list">
                       <span>Suggested openings</span>
@@ -2014,37 +2516,15 @@ export function CreatorDashboard({
                       ))}
                     </div>
                   ) : null}
+                  <p className="creator-muted" style={{ fontSize: "0.72rem", marginTop: "0.2rem" }}>
+                    Ctrl+Enter to apply · Esc to dismiss
+                  </p>
                   <div className="creator-button-row">
                     <button
                       type="button"
                       className="creator-button creator-button--small"
                       title={assistTitles.apply}
-                      onClick={() => {
-                        if (!assistSuggestion) return;
-                        if (form.contentKind !== "user_article") {
-                          if (assistRecipePayload) {
-                            applyRecipeAssistToForm(assistRecipePayload);
-                            return;
-                          }
-                          setForm((f) => ({ ...f, headline: assistSuggestion.trim() }));
-                          return;
-                        }
-                        const anglesBlock = assistOpeningAngles.join("\n\n").trim();
-                        if (anglesBlock) {
-                          const sel = latestSelectionRef.current;
-                          if (sel && sel.start !== sel.end) {
-                            setForm((f) => ({ ...f, body: f.body.slice(0, sel.start) + anglesBlock + f.body.slice(sel.end) }));
-                            return;
-                          }
-                          setForm((f) => {
-                            const rest = f.body.trim();
-                            const sep = rest.length === 0 ? "" : "\n\n";
-                            return { ...f, body: (anglesBlock + sep + rest).trim() };
-                          });
-                          return;
-                        }
-                        setForm((f) => ({ ...f, body: assistSuggestion.trim() }));
-                      }}
+                      onClick={() => { applyAssistSuggestion(); setAssistSuggestion(null); setAssistOpeningAngles([]); setShowDiff(false); }}
                     >
                       Apply
                     </button>
@@ -2056,12 +2536,11 @@ export function CreatorDashboard({
                         const block = assistOpeningAngles.length > 0 ? assistOpeningAngles.join("\n\n") : assistSuggestion.trim();
                         if (!block) return;
                         if (form.contentKind === "recipe") {
-                          if (assistRecipePayload) {
-                            applyRecipeAssistToForm(assistRecipePayload);
-                          }
+                          if (assistRecipePayload) applyRecipeAssistToForm(assistRecipePayload);
                           return;
                         }
                         setForm((f) => ({ ...f, body: (f.body.trim() + "\n\n" + block).trim() }));
+                        triggerCheckpointTimer();
                       }}
                     >
                       Insert below
@@ -2074,29 +2553,26 @@ export function CreatorDashboard({
                         const selection = latestSelectionRef.current;
                         if (!selection) return;
                         if (form.contentKind === "recipe") {
-                          if (assistRecipePayload) {
-                            applyRecipeAssistToForm(assistRecipePayload);
-                          }
+                          if (assistRecipePayload) applyRecipeAssistToForm(assistRecipePayload);
                           return;
                         }
                         const block = assistOpeningAngles.length > 0 ? assistOpeningAngles.join("\n\n") : assistSuggestion;
                         setForm((f) => ({ ...f, body: f.body.slice(0, selection.start) + block + f.body.slice(selection.end) }));
+                        triggerCheckpointTimer();
                       }}
                     >
                       Replace
                     </button>
                     <button type="button" className="creator-button creator-button--small creator-button--ghost" title={assistTitles.copy} onClick={() => void navigator.clipboard.writeText(assistSuggestion)}><Copy size={14} aria-hidden="true" />Copy</button>
-                    <button type="button" className="creator-button creator-button--small creator-button--ghost" title={assistTitles.dismiss} onClick={() => { setAssistSuggestion(null); setAssistOpeningAngles([]); }}>Dismiss</button>
+                    <button type="button" className="creator-button creator-button--small creator-button--ghost" title={assistTitles.dismiss} onClick={() => { setAssistSuggestion(null); setAssistOpeningAngles([]); setShowDiff(false); }}>Dismiss</button>
                   </div>
                 </div>
               ) : null}
 
-              {autocompleteSuggestion && autocompleteEnabled ? (
-                <div className="creator-suggestion-card creator-suggestion-card--compact">
-                  <strong>Autocomplete suggestion</strong>
-                  <p>{autocompleteSuggestion}</p>
-                  <button type="button" className="creator-button creator-button--small" onClick={() => setForm((prev) => ({ ...prev, body: (prev.body + (prev.body.endsWith(" ") ? "" : " ") + autocompleteSuggestion).trim() }))}>Accept suggestion</button>
-                </div>
+              {autocompleteEnabled && autocompleteSuggestion ? (
+                <p className="creator-muted" style={{ fontSize: "0.76rem" }}>
+                  Tab to accept · Esc to dismiss
+                </p>
               ) : null}
             </section>
 
@@ -2107,7 +2583,7 @@ export function CreatorDashboard({
               {latestAnalyst ? (
                 <p className="creator-muted">{latestAnalyst.metrics.wordCount} words, {latestAnalyst.metrics.paragraphCount} paragraphs, phase {latestAnalyst.metrics.sectionPhase}, avg sentence {latestAnalyst.metrics.avgSentenceWords}.</p>
               ) : (
-                <p className="creator-muted">Checkpoints run every 5 minutes only after text changes.</p>
+                <p className="creator-muted">Updates ~10 s after you stop typing.</p>
               )}
               {!analystQuietMode && latestAnalyst && latestAnalyst.notes.length > 0 ? (
                 <ul className="creator-note-list">{latestAnalyst.notes.map((note) => <li key={note}>{note}</li>)}</ul>

@@ -34,13 +34,14 @@ const assistBodySchema = z
   .object({
     mode: z.enum(["improve", "continue", "headline"]).optional(),
     workflowId: z.enum(CREATOR_WORKFLOW_IDS).optional(),
-    helpMode: z.enum(["inspiration", "brainstorm", "random", "stuck"]).optional(),
+    helpMode: z.enum(["inspiration", "brainstorm", "random", "stuck", "prompt_ideas", "close"]).optional(),
     contentKind: z.enum(["user_article", "recipe"]).optional(),
     articleType: z.string().max(120).optional(),
     articleTypeCustom: z.string().max(160).optional(),
     headline: z.string().max(280).optional(),
     body: z.string().max(18_000).optional(),
     context: z.string().max(2_000).optional(),
+    analystContext: z.string().max(600).optional(),
     draftId: z.string().uuid().optional(),
     selectedText: z.string().max(2_000).optional(),
     selectionStart: z.number().int().min(0).optional(),
@@ -70,12 +71,13 @@ const INSPIRATION_CONTEXT_SEEDS = [
 interface ArticleAssistPromptInput {
   mode: "improve" | "continue" | "headline";
   workflowId: CreatorWorkflowId;
-  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck";
+  helpMode?: "inspiration" | "brainstorm" | "random" | "stuck" | "prompt_ideas" | "close";
   articleType?: string;
   articleTypeCustom?: string;
   headline: string;
   body: string;
   context?: string;
+  analystContext?: string;
 }
 
 function buildPrompt(input: ArticleAssistPromptInput, memorySummary: string): string {
@@ -92,13 +94,37 @@ function buildPrompt(input: ArticleAssistPromptInput, memorySummary: string): st
     ? `Known persistent context:\n${memorySummary}`
     : "Known persistent context: none yet.";
   const workflowSection = `Workflow: ${workflowId}. Help mode: ${input.helpMode ?? "none"}.`;
-  const sharedHeader = `${styleGuide}
-${workflowSection}
-Article format: ${selectedArticleType}
-Skill: ${skill.purpose}
-Skill directive: ${skill.systemInstruction}
-${memorySection}`;
+  const analystSection = input.analystContext
+    ? `Analyst context: ${input.analystContext}`
+    : "";
+  const sharedHeader = [
+    styleGuide,
+    workflowSection,
+    `Article format: ${selectedArticleType}`,
+    `Skill: ${skill.purpose}`,
+    `Skill directive: ${skill.systemInstruction}`,
+    analystSection,
+    memorySection,
+  ].filter(Boolean).join("\n");
 
+  if (input.helpMode === "prompt_ideas") {
+    return `${sharedHeader}
+Task: generate a numbered list of exactly 5 distinct story directions for this article.
+Each direction is a single sentence only — no prose, no opening sentences, no examples.
+Use the analyst context to prioritize directions relevant to the current writing phase.
+Headline: ${input.headline}
+Draft excerpt: ${input.body.slice(0, 600) || "(empty — brainstorm from the headline)"}`;
+  }
+  if (input.helpMode === "close") {
+    return `${sharedHeader}
+Task: write one closing paragraph (max 80 words) that concludes this article.
+The closing should resolve the central idea, leave the reader with a takeaway, and match the article's voice.
+Do NOT introduce new facts or new topics. This is a closing, not a continuation.
+Headline: ${input.headline}
+Draft (end section):
+${input.body.slice(-1200)}
+Return only the closing paragraph.`;
+  }
   if (input.helpMode === "inspiration") {
     return `${sharedHeader}
 Task: generate a short opening (2-3 sentences) to start the piece.
@@ -120,18 +146,19 @@ Headline: ${input.headline}`;
   }
   if (input.helpMode === "stuck") {
     return `${sharedHeader}
-Task: diagnose the most likely blocker and give one concrete next writing move.
+Task: give exactly 3 short possible directions the writer could take next (one sentence each, no full writing).
+Use the analyst context to tailor suggestions to the current writing phase.
 Headline: ${input.headline}
 Draft:
 ${input.body.slice(0, 1600)}`;
   }
   if (input.mode === "headline") {
     return `${sharedHeader}
-Task: suggest one better headline for this article.
+Task: suggest exactly 3 improved title options for this article.
+Return them as a numbered list, one per line. Return only the titles, no explanation.
 Current headline: ${input.headline}
 Body excerpt:
-${input.body.slice(0, 1200)}
-Return only the revised headline.`;
+${input.body.slice(0, 800)}`;
   }
   if (input.mode === "continue") {
     return `${sharedHeader}
@@ -142,7 +169,7 @@ ${input.body.slice(0, 1800)}
 Return only the continuation paragraph.`;
   }
   return `${sharedHeader}
-Task: improve this article draft paragraph for clarity and flow.
+Task: improve this article draft for grammar, prose clarity, and voice. Make mild targeted edits only — preserve the author's meaning and style.
 Headline: ${input.headline}
 Draft:
 ${input.body.slice(0, 1800)}
@@ -151,7 +178,7 @@ Return only the improved text.`;
 
 export async function POST(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const userId = access.userId;
     const env = getEnv();
@@ -291,6 +318,7 @@ export async function POST(request: NextRequest) {
       headline,
       body: draftBody,
       context: contextualInput,
+      analystContext: body.analystContext,
     }, memorySummary);
 
     let text = "";

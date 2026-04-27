@@ -24,7 +24,7 @@ const providerKeyWriteSchema = z
 
 export async function GET(request: NextRequest) {
   try {
-    const access = await requireCreatorAccess(request, { requireMfa: true });
+    const access = await requireCreatorAccess(request);
     if (isCreatorAccessDenied(access)) return access;
     const { keys, schemaAvailable } = await listCreatorProviderKeys(access.userId);
     const res = NextResponse.json({ keys });

@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { CATEGORIES, RECIPE_CATEGORY, type ArticleStorageCategory, type Category } from "@/lib/constants";
-import type { CreatorDraft, CreatorDraftVersion, CreatorDraftVersionReason, SubmissionContentKind } from "@/lib/types";
+import type {
+  CreatorDraft,
+  CreatorDraftSummary,
+  CreatorDraftVersion,
+  CreatorDraftVersionReason,
+  SubmissionContentKind,
+} from "@/lib/types";
 import { decryptSensitiveText, encryptSensitiveText } from "@/lib/security/key-vault";
 
 interface CreatorDraftRow {
@@ -60,6 +66,28 @@ function safeCategory(value: string, kind: SubmissionContentKind): ArticleStorag
   if (kind === "recipe") return RECIPE_CATEGORY;
   if (CATEGORIES.includes(value as Category)) return value as Category;
   return CATEGORIES[0];
+}
+
+function rowToDraftSummary(row: CreatorDraftRow): CreatorDraftSummary {
+  const kind = row.content_kind ?? "user_article";
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title ?? "",
+    contentKind: kind,
+    articleType: row.article_type ?? null,
+    articleTypeCustom: row.article_type_custom ?? null,
+    category: safeCategory(row.category, kind),
+    locale: row.locale ?? "global",
+    explicitHashtags: row.explicit_hashtags ?? [],
+    pullQuote: row.pull_quote ?? "",
+    wordCount: row.word_count ?? 0,
+    revision: Math.max(1, Math.trunc(row.revision ?? 1)),
+    lastOpenedAt: row.last_opened_at,
+    neverSendToAi: row.never_send_to_ai === true,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function rowToDraft(row: CreatorDraftRow): CreatorDraft {
@@ -185,6 +213,63 @@ export async function listCreatorDrafts(input: {
   return {
     drafts: sliced,
     nextCursor: rows.length > limit ? sliced[sliced.length - 1]?.updatedAt ?? null : null,
+  };
+}
+
+/**
+ * Paginated draft list without body, private notes, or content hash payload (for dashboards and bootstrap).
+ */
+export async function listCreatorDraftSummaries(input: {
+  userId: string;
+  limit?: number;
+  cursorUpdatedAt?: string | null;
+  includeDeleted?: boolean;
+}): Promise<{ summaries: CreatorDraftSummary[]; nextCursor: string | null }> {
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 12)));
+  const columns = [
+    "id",
+    "user_id",
+    "title",
+    "content_kind",
+    "article_type",
+    "article_type_custom",
+    "category",
+    "locale",
+    "explicit_hashtags",
+    "pull_quote",
+    "word_count",
+    "revision",
+    "never_send_to_ai",
+    "last_opened_at",
+    "created_at",
+    "updated_at",
+  ].join(",");
+  let query = db
+    .from("creator_drafts")
+    .select(columns)
+    .eq("user_id", input.userId)
+    .order("updated_at", { ascending: false })
+    .limit(limit + 1);
+  if (!input.includeDeleted) query = query.is("deleted_at", null);
+  if (input.cursorUpdatedAt) query = query.lt("updated_at", input.cursorUpdatedAt);
+  const { data, error } = await query;
+  if (error) throw new Error(`listCreatorDraftSummaries: ${error.message}`);
+  const rows = (data ?? []) as unknown as CreatorDraftRow[];
+  const sliced = rows.slice(0, limit);
+  const summaries = sliced.map((r) =>
+    rowToDraftSummary({
+      ...r,
+      body: "",
+      private_notes_ciphertext: null,
+      private_notes_iv: null,
+      private_notes_auth_tag: null,
+      content_hash: "",
+      deleted_at: null,
+    } as CreatorDraftRow)
+  );
+  return {
+    summaries,
+    nextCursor: rows.length > limit ? summaries[summaries.length - 1]?.updatedAt ?? null : null,
   };
 }
 

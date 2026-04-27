@@ -181,6 +181,26 @@ export interface CreatorDraft {
   updatedAt: string;
 }
 
+/** List projection without body, private notes, or content hash (for fast bootstrap lists). */
+export interface CreatorDraftSummary {
+  id: string;
+  userId: string;
+  title: string;
+  contentKind: SubmissionContentKind;
+  articleType: string | null;
+  articleTypeCustom: string | null;
+  category: ArticleStorageCategory;
+  locale: string;
+  explicitHashtags: string[];
+  pullQuote: string;
+  wordCount: number;
+  revision: number;
+  lastOpenedAt: string;
+  neverSendToAi: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CreatorDraftVersion {
   id: string;
   draftId: string;

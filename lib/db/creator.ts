@@ -367,6 +367,66 @@ export async function listSubmissionsByAuthor(input: {
   return { submissions, nextCursor };
 }
 
+const SUBMISSION_SUMMARY_COLUMNS = [
+  "id",
+  "author_user_id",
+  "headline",
+  "subheadline",
+  "pull_quote",
+  "category",
+  "content_kind",
+  "locale",
+  "explicit_hashtags",
+  "article_type",
+  "article_type_custom",
+  "status",
+  "admin_note",
+  "rejection_reason",
+  "reviewed_by_user_id",
+  "reviewed_at",
+  "published_article_id",
+  "created_at",
+  "updated_at",
+];
+
+/**
+ * Paginated submission list without body or recipe blobs (for dashboards and bootstrap).
+ */
+export async function listCreatorSubmissionSummaries(input: {
+  authorUserId: string;
+  limit?: number;
+  cursorCreatedAt?: string | null;
+}): Promise<{ submissions: ArticleSubmission[]; nextCursor: string | null }> {
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 12)));
+  let query = db
+    .from("article_submissions")
+    .select(SUBMISSION_SUMMARY_COLUMNS.join(","))
+    .eq("author_user_id", input.authorUserId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (input.cursorCreatedAt) query = query.lt("created_at", input.cursorCreatedAt);
+  const { data, error } = await query;
+  if (error) throw new Error(`listCreatorSubmissionSummaries: ${error.message}`);
+  const parsedRows = (data ?? []) as unknown as ArticleSubmissionRow[];
+  const rows = parsedRows.slice(0, limit);
+  const submissions = rows.map((row) =>
+    rowToSubmission({
+      ...row,
+      body: "",
+      recipe_servings: null,
+      recipe_ingredients: [],
+      recipe_instructions: [],
+      recipe_prep_time_minutes: null,
+      recipe_cook_time_minutes: null,
+      recipe_images: [],
+    } as ArticleSubmissionRow)
+  );
+  const hasMore = parsedRows.length > limit;
+  const nextCursor = hasMore ? rows[rows.length - 1]?.created_at ?? null : null;
+  return { submissions, nextCursor };
+}
+
 export async function getSubmissionByIdForAuthor(input: {
   id: string;
   authorUserId: string;

@@ -1,29 +1,19 @@
 export default function CreatorLoading() {
   return (
-    <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
-      <div style={{ maxWidth: "980px", margin: "0 auto", display: "grid", gap: "1rem" }}>
-        <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
-            <div style={{ height: 26, width: 200, background: "#e5e0d6" }} />
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ height: 32, width: 88, background: "#ebe7de" }} />
-              <div style={{ height: 32, width: 88, background: "#ebe7de" }} />
-            </div>
-          </div>
-          <div style={{ marginTop: 10, height: 14, width: "72%", background: "#ebe7de" }} />
-        </section>
-        <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <div style={{ height: 18, width: 160, background: "#e5e0d6" }} />
-          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 280px", gap: 12 }}>
-            <div style={{ minHeight: 320, background: "#f1eee8" }} />
-            <div style={{ display: "grid", gap: 8 }}>
-              <div style={{ height: 56, background: "#ebe7de" }} />
-              <div style={{ height: 56, background: "#ebe7de" }} />
-              <div style={{ height: 56, background: "#ebe7de" }} />
-            </div>
+    <main className="creator-studio">
+      <div className="creator-studio__shell">
+        <section className="creator-commandbar">
+          <div className="creator-commandbar__copy">
+            <div className="creator-skeleton-line creator-skeleton-line--title" />
+            <div className="creator-skeleton-line" />
           </div>
         </section>
+        <div className="creator-studio__grid">
+          <section className="creator-panel"><div className="creator-skeleton-block" /></section>
+          <section className="creator-editor"><div className="creator-skeleton-block" /></section>
+          <section className="creator-panel"><div className="creator-skeleton-block" /></section>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -207,264 +207,77 @@ export function CreatorSettingsConsole() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
-      <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: "1rem" }}>
-        <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.4rem" }}>Creator Settings</h1>
-          <p style={{ margin: "0.4rem 0 0", color: "#666" }}>
-            Bring-your-own-key model controls, budgets, autocomplete, and memory policy.
-          </p>
-          <div style={{ marginTop: "0.65rem", display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            <Link
-              href="/creator"
-              style={{
-                display: "inline-flex",
-                padding: "0.35rem 0.65rem",
-                border: "1px solid #1a472a",
-                color: "#1a472a",
-                textDecoration: "none",
-                fontSize: "0.82rem",
-              }}
-            >
-              Back to Writing
-            </Link>
-            <Link
-              href="/creator/usage"
-              style={{
-                display: "inline-flex",
-                padding: "0.35rem 0.65rem",
-                border: "1px solid #1a472a",
-                color: "#1a472a",
-                textDecoration: "none",
-                fontSize: "0.82rem",
-              }}
-            >
-              Usage
-            </Link>
+    <main className="creator-studio">
+      <div className="creator-studio__shell">
+        <header className="creator-commandbar">
+          <div className="creator-commandbar__copy">
+            <p className="creator-eyebrow">Creator controls</p>
+            <h1>Creator Settings</h1>
+            <p>Bring-your-own-key model controls, budgets, autocomplete, and memory policy.</p>
           </div>
-        </section>
+          <nav className="creator-commandbar__actions" aria-label="Creator settings navigation">
+            <Link className="creator-action-link" href="/creator">Back to Writing</Link>
+            <Link className="creator-action-link" href="/creator/usage">Usage</Link>
+          </nav>
+        </header>
 
-        {schemaNotice ? (
-          <section
-            role="status"
-            style={{
-              background: "#fff8e6",
-              border: "1px solid #c9a227",
-              padding: "0.85rem 1rem",
-              color: "#3d3200",
-              fontSize: "0.9rem",
-              lineHeight: 1.45,
-            }}
-          >
-            {schemaNotice}
+        {schemaNotice ? <section className="creator-note creator-note--warning" role="status">{schemaNotice}</section> : null}
+
+        <div className="creator-settings-grid">
+          <section className="creator-panel">
+            <div className="creator-panel__heading"><div><p className="creator-eyebrow">Routing</p><h2>Model Router</h2></div></div>
+            <div className="creator-field-grid">
+              <label className="creator-field"><span>Mode</span><select className="creator-input" value={settings.modelMode} onChange={(event) => setSettings((prev) => ({ ...prev, modelMode: event.target.value as CreatorSettingsResponse["modelMode"] }))}><option value="manual">Manual</option><option value="auto">Auto</option><option value="max">Max</option></select></label>
+              <label className="creator-field"><span>Default provider</span><select className="creator-input" value={settings.defaultProvider ?? ""} onChange={(event) => setSettings((prev) => ({ ...prev, defaultProvider: (event.target.value || null) as CreatorSettingsResponse["defaultProvider"] }))}><option value="">None</option>{PROVIDERS.map((provider) => <option key={provider} value={provider}>{provider}</option>)}</select></label>
+              <label className="creator-field creator-field--wide"><span>Default model</span><input className="creator-input" value={settings.defaultModel ?? ""} onChange={(event) => setSettings((prev) => ({ ...prev, defaultModel: event.target.value }))} placeholder="e.g. claude-sonnet-4-20250514" /></label>
+              <label className="creator-check-row"><input type="checkbox" checked={settings.maxModeEnabled} onChange={(event) => setSettings((prev) => ({ ...prev, maxModeEnabled: event.target.checked }))} />Enable max mode</label>
+              <label className="creator-field"><span>Max budget (cents)</span><input className="creator-input" type="number" value={settings.maxModeBudgetCents} onChange={(event) => setSettings((prev) => ({ ...prev, maxModeBudgetCents: Number(event.target.value || 0) }))} /></label>
+              <label className="creator-field"><span>Per request budget</span><input className="creator-input" type="number" value={settings.perRequestBudgetCents} onChange={(event) => setSettings((prev) => ({ ...prev, perRequestBudgetCents: Number(event.target.value || 0) }))} /></label>
+              <label className="creator-field"><span>Daily budget</span><input className="creator-input" type="number" value={settings.dailyBudgetCents} onChange={(event) => setSettings((prev) => ({ ...prev, dailyBudgetCents: Number(event.target.value || 0) }))} /></label>
+              <label className="creator-field"><span>Monthly budget</span><input className="creator-input" type="number" value={settings.monthlyBudgetCents} onChange={(event) => setSettings((prev) => ({ ...prev, monthlyBudgetCents: Number(event.target.value || 0) }))} /></label>
+            </div>
           </section>
-        ) : null}
 
-        <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem", display: "grid", gap: "0.6rem" }}>
-          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Model Router</h2>
-          <label>
-            Mode
-            <select
-              value={settings.modelMode}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, modelMode: event.target.value as CreatorSettingsResponse["modelMode"] }))
-              }
-            >
-              <option value="manual">Manual</option>
-              <option value="auto">Auto</option>
-              <option value="max">Max</option>
-            </select>
-          </label>
-          <label>
-            Default provider
-            <select
-              value={settings.defaultProvider ?? ""}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  defaultProvider: (event.target.value || null) as CreatorSettingsResponse["defaultProvider"],
-                }))
-              }
-            >
-              <option value="">None</option>
-              {PROVIDERS.map((provider) => (
-                <option key={provider} value={provider}>
-                  {provider}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Default model
-            <input
-              value={settings.defaultModel ?? ""}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, defaultModel: event.target.value }))
-              }
-              placeholder="e.g. claude-sonnet-4-20250514"
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={settings.maxModeEnabled}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, maxModeEnabled: event.target.checked }))
-              }
-            />
-            Enable max mode (requires MFA step-up)
-          </label>
-          <label>
-            Max mode budget (cents)
-            <input
-              type="number"
-              value={settings.maxModeBudgetCents}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, maxModeBudgetCents: Number(event.target.value || 0) }))
-              }
-            />
-          </label>
-          <div style={{ display: "grid", gap: "0.35rem", gridTemplateColumns: "repeat(3, minmax(0,1fr))" }}>
-            <label>
-              Per request budget (cents)
-              <input
-                type="number"
-                value={settings.perRequestBudgetCents}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, perRequestBudgetCents: Number(event.target.value || 0) }))
-                }
-              />
-            </label>
-            <label>
-              Daily budget (cents)
-              <input
-                type="number"
-                value={settings.dailyBudgetCents}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, dailyBudgetCents: Number(event.target.value || 0) }))
-                }
-              />
-            </label>
-            <label>
-              Monthly budget (cents)
-              <input
-                type="number"
-                value={settings.monthlyBudgetCents}
-                onChange={(event) =>
-                  setSettings((prev) => ({ ...prev, monthlyBudgetCents: Number(event.target.value || 0) }))
-                }
-              />
-            </label>
+          <section className="creator-panel">
+            <div className="creator-panel__heading"><div><p className="creator-eyebrow">Assist</p><h2>Autocomplete and Memory</h2></div></div>
+            <div className="creator-settings-grid">
+              <label className="creator-check-row"><input type="checkbox" checked={settings.autocompleteEnabled} onChange={(event) => setSettings((prev) => ({ ...prev, autocompleteEnabled: event.target.checked }))} />Enable autocomplete</label>
+              <label className="creator-check-row"><input type="checkbox" checked={settings.autocompleteSensitiveDraftsBlocked} onChange={(event) => setSettings((prev) => ({ ...prev, autocompleteSensitiveDraftsBlocked: event.target.checked }))} />Never use autocomplete on sensitive drafts</label>
+              <label className="creator-field creator-field--wide"><span>Autocomplete policy</span><textarea className="creator-textarea" value={settings.autocompletePrompt} onChange={(event) => setSettings((prev) => ({ ...prev, autocompletePrompt: event.target.value }))} rows={3} /></label>
+              <label className="creator-check-row"><input type="checkbox" checked={settings.memoryEnabled} onChange={(event) => setSettings((prev) => ({ ...prev, memoryEnabled: event.target.checked }))} />Enable memory</label>
+              <label className="creator-field"><span>Memory retention days</span><input className="creator-input" type="number" value={settings.memoryRetentionDays} onChange={(event) => setSettings((prev) => ({ ...prev, memoryRetentionDays: Number(event.target.value || 90) }))} /></label>
+            </div>
+          </section>
+
+          <section className="creator-panel">
+            <div className="creator-panel__heading"><div><p className="creator-eyebrow">BYOK</p><h2>Provider Keys</h2></div></div>
+            {keysLoading ? <p className="creator-muted">Loading provider key status...</p> : null}
+            <div className="creator-settings-grid">
+              {PROVIDERS.map((provider) => {
+                const existing = keys.find((entry) => entry.provider === provider);
+                return (
+                  <div key={provider} className="creator-mini-card">
+                    <strong>{provider}</strong>
+                    <span>{existing ? "Stored key / ****" + existing.last4 + " / " + existing.status : "No key configured"}</span>
+                    <input className="creator-input" type="password" value={draftKeys[provider] ?? ""} onChange={(event) => setDraftKeys((prev) => ({ ...prev, [provider]: event.target.value }))} placeholder={"Enter " + provider + " API key"} />
+                    <div className="creator-button-row">
+                      <button className="creator-button creator-button--small" type="button" onClick={() => void upsertKey(provider)} disabled={busy || keysLoading}>Save / Rotate</button>
+                      <button className="creator-button creator-button--small" type="button" onClick={() => void testKey(provider)} disabled={busy || keysLoading || !existing}>Test</button>
+                      <button className="creator-button creator-button--small creator-button--ghost" type="button" onClick={() => void keyAction(provider, "revoke")} disabled={busy || keysLoading || !existing}>Revoke</button>
+                      <button className="creator-button creator-button--small creator-button--danger" type="button" onClick={() => void keyAction(provider, "delete")} disabled={busy || keysLoading || !existing}>Delete</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="creator-editor__footer">
+            <button className="creator-button creator-button--primary" type="button" onClick={() => void saveSettings()} disabled={busy}>{busy ? "Saving..." : "Save settings"}</button>
+            {message ? <span className="creator-status-pill creator-status-pill--neutral">{message}</span> : null}
           </div>
-        </section>
-
-        <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem", display: "grid", gap: "0.55rem" }}>
-          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Autocomplete and Memory</h2>
-          <label>
-            <input
-              type="checkbox"
-              checked={settings.autocompleteEnabled}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, autocompleteEnabled: event.target.checked }))
-              }
-            />
-            Enable autocomplete (off by default)
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={settings.autocompleteSensitiveDraftsBlocked}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  autocompleteSensitiveDraftsBlocked: event.target.checked,
-                }))
-              }
-            />
-            Never use autocomplete on sensitive drafts
-          </label>
-          <label>
-            Autocomplete policy
-            <textarea
-              value={settings.autocompletePrompt}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, autocompletePrompt: event.target.value }))
-              }
-              rows={3}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={settings.memoryEnabled}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, memoryEnabled: event.target.checked }))
-              }
-            />
-            Enable memory
-          </label>
-          <label>
-            Memory retention days
-            <input
-              type="number"
-              value={settings.memoryRetentionDays}
-              onChange={(event) =>
-                setSettings((prev) => ({ ...prev, memoryRetentionDays: Number(event.target.value || 90) }))
-              }
-            />
-          </label>
-        </section>
-
-        <section style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem", display: "grid", gap: "0.65rem" }}>
-          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Provider Keys (BYOK)</h2>
-          {keysLoading ? (
-            <p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>Loading provider key status…</p>
-          ) : null}
-          {PROVIDERS.map((provider) => {
-            const existing = keys.find((entry) => entry.provider === provider);
-            return (
-              <div key={provider} style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.65rem" }}>
-                <p style={{ margin: 0, fontWeight: 700 }}>{provider}</p>
-                <p style={{ margin: "0.25rem 0", fontSize: "0.84rem", color: "#666" }}>
-                  {existing
-                    ? `Stored key • ****${existing.last4} • ${existing.status}`
-                    : "No key configured"}
-                </p>
-                <input
-                  type="password"
-                  value={draftKeys[provider] ?? ""}
-                  onChange={(event) =>
-                    setDraftKeys((prev) => ({ ...prev, [provider]: event.target.value }))
-                  }
-                  placeholder={`Enter ${provider} API key`}
-                  style={{ width: "100%" }}
-                />
-                <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.45rem", flexWrap: "wrap" }}>
-                  <button type="button" onClick={() => void upsertKey(provider)} disabled={busy || keysLoading}>
-                    Save / Rotate
-                  </button>
-                  <button type="button" onClick={() => void testKey(provider)} disabled={busy || keysLoading || !existing}>
-                    Test
-                  </button>
-                  <button type="button" onClick={() => void keyAction(provider, "revoke")} disabled={busy || keysLoading || !existing}>
-                    Revoke
-                  </button>
-                  <button type="button" onClick={() => void keyAction(provider, "delete")} disabled={busy || keysLoading || !existing}>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <button type="button" onClick={() => void saveSettings()} disabled={busy}>
-            {busy ? "Saving..." : "Save settings"}
-          </button>
-          {message ? <span style={{ color: "#555" }}>{message}</span> : null}
         </div>
       </div>
-    </div>
+    </main>
   );
 }

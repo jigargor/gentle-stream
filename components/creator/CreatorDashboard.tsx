@@ -1,7 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  BarChart3,
+  Bold,
+  Check,
+  Clock,
+  Copy,
+  FileClock,
+  Heading2,
+  History,
+  Italic,
+  Link as LinkIcon,
+  List,
+  Minus,
+  Quote,
+  RefreshCw,
+  Save,
+  Send,
+  Settings,
+  Sparkles,
+  UserRound,
+  Wand2,
+  X,
+} from "lucide-react";
 import { CATEGORIES } from "@/lib/constants";
 import type {
   ArticleSubmission,
@@ -63,6 +88,95 @@ interface AnalystCheckpoint {
   notes: string[];
 }
 
+type LlmActivityStage = "sending" | "thinking" | "streaming" | "complete";
+type LlmActivityKind = "assist" | "autocomplete";
+
+interface LlmActivity {
+  kind: LlmActivityKind;
+  stage: LlmActivityStage;
+  label: string;
+  costEstimateUsd?: number;
+}
+
+function cx(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+function IconButton({
+  label,
+  children,
+  onClick,
+  disabled = false,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={cx("creator-icon-button", className)}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StreamRibbon({
+  activity,
+  idleLabel = "AI ready",
+}: {
+  activity: LlmActivity | null;
+  idleLabel?: string;
+}) {
+  return (
+    <div
+      className={cx(
+        "creator-stream-ribbon",
+        activity ? "creator-stream-ribbon--" + activity.stage : "creator-stream-ribbon--idle"
+      )}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="creator-stream-ribbon__flow" aria-hidden="true" />
+      <span className="creator-stream-ribbon__label">{activity?.label ?? idleLabel}</span>
+      {activity?.costEstimateUsd != null ? (
+        <span className="creator-stream-ribbon__cost">{"$" + activity.costEstimateUsd.toFixed(4)}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function formatLocalClock(value: number | string | null | undefined): string {
+  if (value == null) return "";
+  try {
+    return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function formatSubmissionMeta(submission: ArticleSubmission): string {
+  const created = new Date(submission.createdAt).toLocaleString();
+  if (submission.contentKind === "recipe") return "Recipe / " + created;
+  const kind = (submission.articleTypeCustom || submission.articleType || "article").replaceAll("_", " ");
+  return submission.category + " / " + kind + " / " + created;
+}
+
+function submissionStatusClass(status: ArticleSubmission["status"]): string {
+  if (status === "approved") return "creator-status-pill--success";
+  if (status === "rejected" || status === "withdrawn") return "creator-status-pill--danger";
+  if (status === "changes_requested") return "creator-status-pill--warning";
+  return "creator-status-pill--neutral";
+}
+
 const EMPTY_FORM: FormState = {
   headline: "",
   body: "",
@@ -91,7 +205,7 @@ function assistActionTitles(params: {
 }) {
   const { contentKind, hasOpeningAngles } = params;
   const applyArticle = hasOpeningAngles
-    ? "Uses only the suggested opening lines below—not the analysis paragraph above. If you highlighted text in the body, that selection is replaced with those lines. If nothing is highlighted, every opening line is inserted at the very start of your draft."
+    ? "Uses only the suggested opening lines below-not the analysis paragraph above. If you highlighted text in the body, that selection is replaced with those lines. If nothing is highlighted, every opening line is inserted at the very start of your draft."
     : "Replaces your entire article body with the suggestion text. This overwrites the draft; use Copy first if you want to keep a backup.";
   return {
     apply:
@@ -105,7 +219,7 @@ function assistActionTitles(params: {
       ? "First highlight text in the body, then click: your highlight is replaced by all suggested opening lines only (not the analysis)."
       : "First highlight text in the body, then click: your highlight is replaced by the full suggestion.",
     copy: hasOpeningAngles
-      ? "Copies the explanation paragraph above to the clipboard. To put a single hook in your draft, click that line under “Suggested openings” instead."
+      ? "Copies the explanation paragraph above to the clipboard. To put a single hook in your draft, click that line under suggested openings instead."
       : "Copies the suggestion text to the clipboard.",
     dismiss: "Closes this assist panel. Your draft is not changed.",
     openingLine:
@@ -151,6 +265,7 @@ export function CreatorDashboard({
     initialAutocompleteEnabled
   );
   const [autocompleteSuggestion, setAutocompleteSuggestion] = useState<string | null>(null);
+  const [llmActivity, setLlmActivity] = useState<LlmActivity | null>(null);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [activeDraftRevision, setActiveDraftRevision] = useState<number | null>(null);
   const [autosaveStatus, setAutosaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
@@ -176,6 +291,7 @@ export function CreatorDashboard({
   const analystDirtyRef = useRef(false);
   const lastAnalystFingerprintRef = useRef("");
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const llmCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyCharacterCount = form.body.length;
   /** ~200 wpm, aligned with typical reading-time estimates for multi-column heuristic. */
   const previewReadingTimeSecs = useMemo(
@@ -187,6 +303,33 @@ export function CreatorDashboard({
     [form.body]
   );
   const isBodyTooLong = bodyCharacterCount > MAX_SUBMISSION_BODY_CHARS;
+
+  function clearLlmCompletionTimer() {
+    if (llmCompleteTimerRef.current) {
+      clearTimeout(llmCompleteTimerRef.current);
+      llmCompleteTimerRef.current = null;
+    }
+  }
+
+  function markLlmActivity(activity: LlmActivity | null) {
+    clearLlmCompletionTimer();
+    setLlmActivity(activity);
+  }
+
+  function completeLlmActivity(
+    kind: LlmActivityKind,
+    label: string,
+    costEstimateUsd?: number
+  ) {
+    clearLlmCompletionTimer();
+    setLlmActivity({ kind, stage: "complete", label, costEstimateUsd });
+    llmCompleteTimerRef.current = setTimeout(() => {
+      setLlmActivity((prev) =>
+        prev?.kind === kind && prev.stage === "complete" ? null : prev
+      );
+      llmCompleteTimerRef.current = null;
+    }, 1600);
+  }
 
   const canSubmit = useMemo(() => {
     if (form.contentKind === "recipe") {
@@ -534,35 +677,71 @@ export function CreatorDashboard({
   }, [form.body, form.contentKind]);
 
   useEffect(() => {
-    if (!autocompleteEnabled || form.contentKind !== "user_article") return;
+    if (
+      !autocompleteEnabled ||
+      form.contentKind !== "user_article" ||
+      form.neverSendToAi ||
+      assistBusy
+    ) {
+      setAutocompleteSuggestion(null);
+      return;
+    }
     const trimmed = form.body.trim();
     if (trimmed.length < 50) {
       setAutocompleteSuggestion(null);
       return;
     }
+    let cancelled = false;
     const handle = setTimeout(async () => {
-      const response = await fetch("/api/creator/autocomplete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          headline: form.headline,
-          articleType: form.articleTypeCustom.trim() || form.articleType,
-          context: trimmed.slice(-800),
-        }),
+      markLlmActivity({
+        kind: "autocomplete",
+        stage: "sending",
+        label: "Autocomplete is checking the current",
       });
-      if (!response.ok) return;
-      const payload = (await response.json().catch(() => ({}))) as { suggestion?: string };
-      setAutocompleteSuggestion(payload.suggestion ?? null);
+      try {
+        const response = await fetch("/api/creator/autocomplete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            headline: form.headline,
+            articleType: form.articleTypeCustom.trim() || form.articleType,
+            context: trimmed.slice(-800),
+          }),
+        });
+        if (cancelled) return;
+        if (!response.ok) {
+          setLlmActivity(null);
+          return;
+        }
+        const payload = (await response.json().catch(() => ({}))) as { suggestion?: string };
+        setAutocompleteSuggestion(payload.suggestion ?? null);
+        completeLlmActivity("autocomplete", "Autocomplete suggestion ready");
+      } catch {
+        if (!cancelled) setLlmActivity(null);
+      }
     }, 450);
-    return () => clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounced request tracks form fields directly
   }, [
     autocompleteEnabled,
+    assistBusy,
     form.articleType,
     form.articleTypeCustom,
     form.body,
     form.contentKind,
     form.headline,
+    form.neverSendToAi,
   ]);
+
+  useEffect(() => {
+    return () => {
+      clearLlmCompletionTimer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup ref timer on unmount
+  }, []);
 
   useEffect(() => {
     const fingerprint = draftFingerprint(form);
@@ -932,6 +1111,7 @@ export function CreatorDashboard({
     }
   ) {
     setAssistBusy(true);
+    markLlmActivity({ kind: "assist", stage: "sending", label: "Sending to AI" });
     setAssistError(null);
     setAssistSuggestion(null);
     setAssistOpeningAngles([]);
@@ -972,8 +1152,10 @@ export function CreatorDashboard({
       if (!response.ok) {
         const apiError = await parseApiClientError(response);
         setAssistError(formatApiClientError(apiError));
+        setLlmActivity(null);
         return;
       }
+      markLlmActivity({ kind: "assist", stage: "thinking", label: "Thinking" });
       const contentType = response.headers.get("Content-Type") ?? "";
       if (contentType.includes("text/event-stream")) {
         const reader = response.body?.getReader();
@@ -1007,10 +1189,20 @@ export function CreatorDashboard({
                 };
             if (parsed.type === "delta") {
               aggregate += parsed.delta;
+              markLlmActivity({
+                kind: "assist",
+                stage: "streaming",
+                label: "Streaming suggestion",
+              });
               setAssistSuggestion(aggregate.trim());
             } else if (parsed.type === "done") {
               if (typeof parsed.costEstimateUsd === "number")
                 setAssistCostEstimate(parsed.costEstimateUsd);
+              completeLlmActivity(
+                "assist",
+                "Suggestion ready",
+                typeof parsed.costEstimateUsd === "number" ? parsed.costEstimateUsd : undefined
+              );
               setAssistEscalation(parsed.isEscalation === true);
               if (Array.isArray(parsed.openingAngles) && parsed.openingAngles.length > 0)
                 setAssistOpeningAngles(parsed.openingAngles.map((a) => String(a).trim()).filter(Boolean));
@@ -1019,6 +1211,7 @@ export function CreatorDashboard({
         }
         if (!aggregate.trim()) {
           setAssistError("AI assist returned no content.");
+          setLlmActivity(null);
         }
         return;
       }
@@ -1033,6 +1226,7 @@ export function CreatorDashboard({
         return;
       }
       setAssistSuggestion(payload.result);
+      completeLlmActivity("assist", "Suggestion ready", payload.costEstimateUsd);
       if (Array.isArray(payload.openingAngles) && payload.openingAngles.length > 0)
         setAssistOpeningAngles(payload.openingAngles.map((a) => String(a).trim()).filter(Boolean));
       if (typeof payload.costEstimateUsd === "number")
@@ -1106,394 +1300,424 @@ export function CreatorDashboard({
     contentKind: form.contentKind,
     hasOpeningAngles: assistOpeningAngles.length > 0,
   });
+  const activeDraftSummary = activeDraftId
+    ? initialDraftSummaries.find((draft) => draft.id === activeDraftId) ?? null
+    : initialDraftSummaries[0] ?? null;
+  const selectedArticleType =
+    form.contentKind === "recipe"
+      ? "Recipe"
+      : form.articleType === "custom"
+        ? form.articleTypeCustom.trim() || "Custom article"
+        : articleTypeLabel(form.articleType);
+  const editorTitle = form.headline.trim() || (editingId ? "Untitled revision" : "Untitled draft");
+  const autosaveLabel =
+    autosaveStatus === "saving"
+      ? "Saving draft"
+      : autosaveStatus === "saved"
+        ? "Draft saved"
+        : autosaveStatus === "error"
+          ? autosaveError ? "Autosave failed: " + autosaveError : "Autosave failed"
+          : "Autosave idle";
+  const autosaveTone =
+    autosaveStatus === "error"
+      ? "creator-status-pill--danger"
+      : autosaveStatus === "saved"
+        ? "creator-status-pill--success"
+        : "creator-status-pill--neutral";
+  const lastSavedClock = formatLocalClock(lastSavedAtRef.current);
+  const assistDisabled = assistBusy || form.neverSendToAi;
+  const bodyLimitTone = isBodyTooLong ? "creator-status-pill--warning" : "creator-status-pill--neutral";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#ede9e1", padding: "1rem" }}>
-      <div style={{ maxWidth: "980px", margin: "0 auto", display: "grid", gap: "1rem" }}>
-        <div style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "0.75rem",
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <h1 style={{ margin: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.5rem" }}>
-              Creator studio
-            </h1>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-              {publicProfileHref ? (
-                <Link
-                  href={publicProfileHref}
-                  style={{
-                    padding: "0.36rem 0.62rem",
-                    border: "1px solid #1a472a",
-                    background: "#fff",
-                    color: "#1a472a",
-                    textDecoration: "none",
-                    fontSize: "0.82rem",
-                    fontFamily: "'IM Fell English', Georgia, serif",
-                  }}
-                >
-                  Public profile
-                </Link>
-              ) : null}
-              <Link
-                href="/creator/settings"
-                style={{
-                  padding: "0.36rem 0.62rem",
-                  border: "1px solid #1a472a",
-                  background: "#fff",
-                  color: "#1a472a",
-                  textDecoration: "none",
-                  fontSize: "0.82rem",
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                Creator settings
-              </Link>
-              <Link
-                href="/creator/usage"
-                style={{
-                  padding: "0.36rem 0.62rem",
-                  border: "1px solid #1a472a",
-                  background: "#fff",
-                  color: "#1a472a",
-                  textDecoration: "none",
-                  fontSize: "0.82rem",
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                Usage
-              </Link>
-              <Link
-                href="/"
-                style={{
-                  padding: "0.36rem 0.62rem",
-                  border: "1px solid #888",
-                  background: "#fff",
-                  color: "#1a1a1a",
-                  textDecoration: "none",
-                  fontSize: "0.82rem",
-                  fontFamily: "'IM Fell English', Georgia, serif",
-                }}
-              >
-                Back to app
-              </Link>
-            </div>
+    <main className="creator-studio">
+      <div className="creator-studio__shell">
+        <header className="creator-commandbar">
+          <div className="creator-commandbar__copy">
+            <p className="creator-eyebrow">Gentle Stream</p>
+            <h1>Creator Studio</h1>
+            <p>Draft, revise, and submit work without leaving the writing flow.</p>
           </div>
-          <p style={{ margin: "0.35rem 0 0", color: "#666", fontFamily: "'IM Fell English', Georgia, serif" }}>
-            Draft and submit stories. Pending or revision-requested stories can still be edited or withdrawn.
-          </p>
-        </div>
+          <nav className="creator-commandbar__actions" aria-label="Creator Studio navigation">
+            {publicProfileHref ? (
+              <Link className="creator-action-link" href={publicProfileHref}>
+                <UserRound size={15} aria-hidden="true" />
+                Public profile
+              </Link>
+            ) : null}
+            <Link className="creator-action-link" href="/creator/settings">
+              <Settings size={15} aria-hidden="true" />
+              Settings
+            </Link>
+            <Link className="creator-action-link" href="/creator/usage">
+              <BarChart3 size={15} aria-hidden="true" />
+              Usage
+            </Link>
+            <Link className="creator-action-link creator-action-link--quiet" href="/">
+              <ArrowLeft size={15} aria-hidden="true" />
+              Back to app
+            </Link>
+          </nav>
+        </header>
 
-        <div style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <h2 style={{ marginTop: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.1rem" }}>
-            {editingId ? "Edit pending submission" : "New submission"}
-          </h2>
-          <div style={{ display: "grid", gap: "0.75rem" }}>
-            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem" }}>
-              <p
-                style={{
-                  margin: 0,
-                  marginBottom: "0.5rem",
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "0.9rem",
-                  color: "#222",
-                }}
-              >
-                Compose type
-              </p>
-              <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap" }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.42rem", cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="content-kind"
-                    checked={form.contentKind === "user_article"}
-                    onChange={() =>
-                      setForm((f) => ({ ...f, contentKind: "user_article" }))
-                    }
-                  />
-                  <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontSize: "0.9rem" }}>
-                    Article
-                  </span>
-                </label>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.42rem", cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="content-kind"
-                    checked={form.contentKind === "recipe"}
-                    onChange={() =>
-                      setForm((f) => ({ ...f, contentKind: "recipe" }))
-                    }
-                  />
-                  <span style={{ fontFamily: "'IM Fell English', Georgia, serif", fontSize: "0.9rem" }}>
-                    Recipe
-                  </span>
-                </label>
+        {llmActivity ? <StreamRibbon activity={llmActivity} /> : null}
+
+        <div className="creator-studio__grid">
+          <aside className="creator-studio__rail creator-studio__rail--left">
+            <section className="creator-panel">
+              <div className="creator-panel__heading">
+                <div>
+                  <p className="creator-eyebrow">Current draft</p>
+                  <h2>Writing state</h2>
+                </div>
+                <FileClock size={18} aria-hidden="true" />
+              </div>
+              <div className="creator-status-stack">
+                <span className={cx("creator-status-pill", autosaveTone)}>
+                  {autosaveStatus === "saved" ? <Check size={13} aria-hidden="true" /> : <Clock size={13} aria-hidden="true" />}
+                  {autosaveLabel}
+                </span>
+                {activeDraftRevision != null ? (
+                  <span className="creator-status-pill creator-status-pill--neutral">Revision #{activeDraftRevision}</span>
+                ) : null}
+                {lastSavedClock ? (
+                  <span className="creator-status-pill creator-status-pill--neutral">Saved {lastSavedClock}</span>
+                ) : null}
+                {draftContentLoading ? (
+                  <span className="creator-status-pill creator-status-pill--neutral">Loading draft</span>
+                ) : null}
+              </div>
+              {activeDraftSummary ? (
+                <div className="creator-mini-card">
+                  <strong>{activeDraftSummary.title || "Untitled draft"}</strong>
+                  <span>{activeDraftSummary.wordCount.toLocaleString()} words / {activeDraftSummary.locale}</span>
+                </div>
+              ) : (
+                <p className="creator-muted">No saved draft selected yet.</p>
+              )}
+            </section>
+
+            <section className="creator-panel creator-panel--submissions">
+              <div className="creator-panel__heading">
+                <div>
+                  <p className="creator-eyebrow">Queue</p>
+                  <h2>Submissions</h2>
+                </div>
+                <span className="creator-count-badge">{submissions.length}</span>
+              </div>
+              {loading ? (
+                <p className="creator-muted">Loading submissions...</p>
+              ) : submissions.length === 0 ? (
+                <div className="creator-empty-state">
+                  <Sparkles size={18} aria-hidden="true" />
+                  <p>No submissions yet.</p>
+                </div>
+              ) : (
+                <div className="creator-submission-list">
+                  {submissions.map((submission) => (
+                    <article key={submission.id} className="creator-submission-card">
+                      <div className="creator-submission-card__top">
+                        <strong>{submission.headline}</strong>
+                        <span className={cx("creator-status-pill", submissionStatusClass(submission.status))}>
+                          {submission.status.replaceAll("_", " ")}
+                        </span>
+                      </div>
+                      <p>{formatSubmissionMeta(submission)}</p>
+                      {submission.adminNote ? (
+                        <p className="creator-note creator-note--warning">Moderator note: {submission.adminNote}</p>
+                      ) : null}
+                      {submission.rejectionReason ? (
+                        <p className="creator-note creator-note--danger">Rejection reason: {submission.rejectionReason}</p>
+                      ) : null}
+                      {submission.status === "pending" || submission.status === "changes_requested" ? (
+                        <div className="creator-button-row">
+                          <button type="button" className="creator-button creator-button--small" onClick={() => void beginEdit(submission)}>
+                            {submission.status === "changes_requested" ? "Revise" : "Edit"}
+                          </button>
+                          <button type="button" className="creator-button creator-button--small creator-button--danger" onClick={() => void withdrawSubmission(submission.id)}>
+                            Withdraw
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                  {nextCursor ? (
+                    <button type="button" className="creator-button creator-button--ghost" disabled={loadingMore} onClick={() => void loadSubmissions({ reset: false })}>
+                      {loadingMore ? "Loading..." : "Load more"}
+                    </button>
+                  ) : null}
+                </div>
+              )}
+            </section>
+          </aside>
+
+          <section className="creator-editor" aria-label="Creator editor">
+            <div className="creator-editor__masthead">
+              <div>
+                <span className="creator-status-pill creator-status-pill--accent">
+                  {editingId ? "Editing pending submission" : "Draft workspace"}
+                </span>
+                <h2>{editorTitle}</h2>
+                <p>{selectedArticleType} / {form.category || "Uncategorized"}</p>
+              </div>
+              <div className="creator-segmented" role="group" aria-label="Compose type">
+                <button type="button" className={cx("creator-segmented__option", form.contentKind === "user_article" && "is-active")} onClick={() => setForm((f) => ({ ...f, contentKind: "user_article" }))}>
+                  Article
+                </button>
+                <button type="button" className={cx("creator-segmented__option", form.contentKind === "recipe" && "is-active")} onClick={() => setForm((f) => ({ ...f, contentKind: "recipe" }))}>
+                  Recipe
+                </button>
               </div>
             </div>
 
-            <div style={{ border: "1px solid #d8d2c7", background: "#fff", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
-              <input aria-label="Headline" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
+            <div className="creator-field-grid creator-field-grid--metadata">
+              <label className="creator-field creator-field--wide">
+                <span>Headline</span>
+                <input className="creator-input creator-input--headline" aria-label="Headline" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} placeholder="Headline" />
+              </label>
               {form.contentKind === "user_article" ? (
                 <>
-                  <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ padding: "0.45rem", border: "1px solid #bbb" }}>
-                    {CATEGORIES.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={form.articleType}
-                    onChange={(e) => setForm((f) => ({ ...f, articleType: e.target.value }))}
-                    style={{ padding: "0.45rem", border: "1px solid #bbb" }}
-                  >
-                    {BUILT_IN_ARTICLE_TYPES.map((value) => (
-                      <option key={value} value={value}>
-                        {articleTypeLabel(value)}
-                      </option>
-                    ))}
-                    <option value="custom">Custom type...</option>
-                  </select>
+                  <label className="creator-field">
+                    <span>Category</span>
+                    <select className="creator-input" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}>
+                      {CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
+                    </select>
+                  </label>
+                  <label className="creator-field">
+                    <span>Article type</span>
+                    <select className="creator-input" value={form.articleType} onChange={(e) => setForm((f) => ({ ...f, articleType: e.target.value }))}>
+                      {BUILT_IN_ARTICLE_TYPES.map((value) => <option key={value} value={value}>{articleTypeLabel(value)}</option>)}
+                      <option value="custom">Custom type...</option>
+                    </select>
+                  </label>
                   {form.articleType === "custom" ? (
-                    <input
-                      value={form.articleTypeCustom}
-                      onChange={(e) => setForm((f) => ({ ...f, articleTypeCustom: e.target.value }))}
-                      placeholder="Describe custom article type"
-                      style={{ padding: "0.45rem", border: "1px solid #bbb" }}
-                    />
+                    <label className="creator-field">
+                      <span>Custom type</span>
+                      <input className="creator-input" value={form.articleTypeCustom} onChange={(e) => setForm((f) => ({ ...f, articleTypeCustom: e.target.value }))} placeholder="Describe custom article type" />
+                    </label>
                   ) : null}
                 </>
               ) : null}
             </div>
+
             {form.contentKind === "user_article" ? (
-              <div
-                style={{
-                  border: "1px solid #d8d2c7",
-                  background: "#fff",
-                  padding: "0.6rem",
-                }}
-              >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>Article body (Markdown)</label>
-                <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setHelpMenuOpen((prev) => !prev);
-                      setIdlePromptVisible(false);
-                    }}
-                    style={{
-                      padding: "0.2rem 0.45rem",
-                      border: "1px solid #888",
-                      background: "#fff",
-                      fontSize: "0.75rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    AI Assist
-                  </button>
-                  <span style={{ fontSize: "0.78rem", color: isBodyTooLong ? "#8b4513" : "#666" }}>
-                    {bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}
-                  </span>
+              <div className="creator-writing-surface">
+                <div className="creator-writing-surface__toolbar">
+                  <div className="creator-toolbar-icons" aria-label="Markdown formatting toolbar">
+                    <IconButton label="Bold" onClick={() => insertMarkdown("**", "**", "bold")}><Bold size={16} aria-hidden="true" /></IconButton>
+                    <IconButton label="Italic" onClick={() => insertMarkdown("_", "_", "italic")}><Italic size={16} aria-hidden="true" /></IconButton>
+                    <IconButton label="Heading" onClick={() => insertMarkdown("## ", "", "Section title")}><Heading2 size={16} aria-hidden="true" /></IconButton>
+                    <IconButton label="Quote" onClick={() => insertMarkdown("> ", "", "Quote")}><Quote size={16} aria-hidden="true" /></IconButton>
+                    <IconButton label="Bullet list" onClick={() => insertMarkdown("- ", "", "List item")}><List size={16} aria-hidden="true" /></IconButton>
+                    <IconButton label="Link" onClick={() => insertMarkdown("[", "](https://example.com)", "Link text")}><LinkIcon size={16} aria-hidden="true" /></IconButton>
+                    <IconButton label="Section break" onClick={() => insertMarkdown("\n\n---\n\n", "", "")}><Minus size={16} aria-hidden="true" /></IconButton>
+                  </div>
+                  <span className={cx("creator-status-pill", bodyLimitTone)}>{bodyCharacterCount.toLocaleString()} / {MAX_SUBMISSION_BODY_CHARS.toLocaleString()}</span>
                 </div>
-              </div>
-              {(idlePromptVisible || helpMenuOpen) ? (
-                <div style={{ marginTop: "0.5rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem", display: "grid", gap: "0.45rem" }}>
-                  <strong style={{ fontSize: "0.82rem" }}>Need a starting push with AI Assist?</strong>
-                  <input
-                    value={helpContext}
-                    onChange={(event) => setHelpContext(event.target.value)}
-                    placeholder="Optional context (e.g. dramatic, intellectual, stern, cold)"
-                    style={{ padding: "0.42rem", border: "1px solid #bbb" }}
+
+                {llmActivity ? <StreamRibbon activity={llmActivity} /> : null}
+
+                <div className="creator-segmented creator-segmented--compact" role="group" aria-label="Editor mode">
+                  <button type="button" className={cx("creator-segmented__option", bodyEditorTab === "write" && "is-active")} onClick={() => setBodyEditorTab("write")}>Write</button>
+                  <button type="button" className={cx("creator-segmented__option", bodyEditorTab === "preview" && "is-active")} onClick={() => setBodyEditorTab("preview")}>Preview</button>
+                </div>
+
+                {bodyEditorTab === "write" ? (
+                  <textarea
+                    ref={bodyTextareaRef}
+                    className="creator-textarea creator-textarea--body"
+                    value={form.body}
+                    onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                    onSelect={(e) => {
+                      const target = e.currentTarget;
+                      latestSelectionRef.current = {
+                        start: target.selectionStart ?? 0,
+                        end: target.selectionEnd ?? 0,
+                        text: form.body.slice(target.selectionStart ?? 0, target.selectionEnd ?? 0),
+                      };
+                    }}
+                    placeholder={"Write in Markdown...\n\n## Section heading\n\nParagraph text with **bold** and _italic_.\n\n> Pull quote or emphasis.\n\n---\n\nNext section..."}
                   />
-                  <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void requestAssist("continue", {
-                          workflowId: "startup_inspiration",
-                          helpMode: "inspiration",
-                          context: helpContext,
-                        })
+                ) : (
+                  <div className="creator-preview-pane">
+                    <ArticleBodyMarkdown markdown={form.body.trim() ? form.body : "*Preview appears here as you write.*"} variant="reader" fontPreset="literary" readingTimeSecs={previewReadingTimeSecs} />
+                  </div>
+                )}
+
+                <details className="creator-details">
+                  <summary>Markdown quick guide</summary>
+                  <div>
+                    <p><strong>Bold:</strong> <code>**text**</code> / <strong>Italic:</strong> <code>_text_</code></p>
+                    <p><strong>Heading:</strong> <code>## Title</code> / <strong>Quote:</strong> <code>&gt; line</code></p>
+                    <p><strong>List:</strong> <code>- item</code> / <strong>Link:</strong> <code>[label](https://...)</code></p>
+                  </div>
+                </details>
+              </div>
+            ) : (
+              <div className="creator-recipe-panel">
+                <div className="creator-panel__heading"><div><p className="creator-eyebrow">Recipe mode</p><h2>Recipe details</h2></div></div>
+                <label className="creator-field creator-field--wide">
+                  <span>Import recipe from link</span>
+                  <div className="creator-inline-field">
+                    <input className="creator-input" value={recipeImportUrl} onChange={(e) => setRecipeImportUrl(e.target.value)} placeholder="https://example.com/recipe" />
+                    <button type="button" className="creator-button" onClick={() => void importRecipeFromLink()} disabled={recipeImportBusy}>{recipeImportBusy ? "Importing..." : "Import"}</button>
+                  </div>
+                </label>
+                {recipeImportMessage ? <p className={cx("creator-note", recipeImportIsError ? "creator-note--danger" : "creator-note--success")}>{recipeImportMessage}</p> : <p className="creator-muted">Imports are limited to allowlisted domains.</p>}
+
+                <div className="creator-field-grid">
+                  <label className="creator-field"><span>Servings</span><input className="creator-input" type="number" value={form.recipeServings} onChange={(e) => setForm((f) => ({ ...f, recipeServings: e.target.value }))} placeholder="e.g. 4" /></label>
+                  <label className="creator-field"><span>Prep time</span><input className="creator-input" type="number" value={form.recipePrepTimeMinutes} onChange={(e) => setForm((f) => ({ ...f, recipePrepTimeMinutes: e.target.value }))} placeholder="Minutes" /></label>
+                  <label className="creator-field"><span>Cook time</span><input className="creator-input" type="number" value={form.recipeCookTimeMinutes} onChange={(e) => setForm((f) => ({ ...f, recipeCookTimeMinutes: e.target.value }))} placeholder="Minutes" /></label>
+                </div>
+                <label className="creator-field creator-field--wide"><span>Ingredients</span><textarea className="creator-textarea" value={form.recipeIngredientsText} onChange={(e) => setForm((f) => ({ ...f, recipeIngredientsText: e.target.value }))} placeholder={"1 tbsp olive oil\n1 onion, diced\n2 cloves garlic"} /></label>
+                <label className="creator-field creator-field--wide"><span>Instructions</span><textarea className="creator-textarea" value={form.recipeInstructionsText} onChange={(e) => setForm((f) => ({ ...f, recipeInstructionsText: e.target.value }))} placeholder={"Step one...\n\nStep two...\n\nStep three..."} /></label>
+                <label className="creator-field creator-field--wide">
+                  <span>Recipe pictures</span>
+                  <input
+                    key={recipeImageInputKey}
+                    className="creator-input"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={recipeImagesBusy}
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (files.length === 0) return;
+                      if (files.length > 3) {
+                        setRecipeImagesError("Please select up to 3 images.");
+                        return;
                       }
-                      style={{ padding: "0.24rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer", fontSize: "0.76rem" }}
-                    >
-                      Inspiration
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void requestAssist("improve", {
-                          workflowId: "startup_brainstorm",
-                          helpMode: "brainstorm",
-                          context: helpContext,
-                        })
+                      setRecipeImagesError(null);
+                      setRecipeImagesBusy(true);
+                      try {
+                        const fd = new FormData();
+                        for (const f of files) fd.append("files", f);
+                        const res = await fetch("/api/user/recipe-images/upload", { method: "POST", body: fd, credentials: "include" });
+                        const payload = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(typeof payload.error === "string" ? payload.error : "Upload failed");
+                        const urls = Array.isArray(payload.urls) ? (payload.urls as string[]) : [];
+                        setForm((f) => ({ ...f, recipeImages: urls }));
+                      } catch (err: unknown) {
+                        setRecipeImagesError(err instanceof Error ? err.message : "Upload failed");
+                      } finally {
+                        setRecipeImagesBusy(false);
                       }
-                      style={{ padding: "0.24rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer", fontSize: "0.76rem" }}
-                    >
-                      Brainstorm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void requestAssist("continue", {
-                          workflowId: "startup_random",
-                          helpMode: "random",
-                          context: helpContext,
-                        })
-                      }
-                      style={{ padding: "0.24rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer", fontSize: "0.76rem" }}
-                    >
-                      Random
-                    </button>
+                    }}
+                  />
+                </label>
+                {recipeImagesError ? <p className="creator-note creator-note--danger">{recipeImagesError}</p> : null}
+                {form.recipeImages.length > 0 ? (
+                  <div className="creator-image-grid">
+                    {form.recipeImages.map((url, idx) => (
+                      <div key={url + "-" + idx} className="creator-image-tile">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- recipe preview URLs are uploaded/user-provided external assets */}
+                        <img src={url} alt={"Recipe image " + (idx + 1)} width={96} height={96} />
+                        <button type="button" className="creator-button creator-button--small creator-button--ghost" onClick={() => setForm((f) => ({ ...f, recipeImages: f.recipeImages.filter((_, i) => i !== idx) }))}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            <div className="creator-field-grid creator-field-grid--metadata">
+              <label className="creator-field creator-field--wide"><span>Pull quote</span><input className="creator-input" aria-label="Pull quote" value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Optional pull quote" /></label>
+              <label className="creator-field"><span>Locale</span><input className="creator-input" aria-label="Locale" value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="global" /></label>
+              <label className="creator-field creator-field--wide"><span>Explicit hashtags</span><input className="creator-input" aria-label="Explicit hashtags" value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="comma separated" /></label>
+            </div>
+
+            {autosaveConflict ? <p className="creator-note creator-note--danger" aria-live="polite">Another tab changed this draft. Reload the page or restore a version before continuing.</p> : null}
+            {message ? <p className="creator-note creator-note--warning" aria-live="polite">{message}</p> : null}
+
+            <div className="creator-editor__footer">
+              <div className="creator-status-stack creator-status-stack--inline">
+                <span className={cx("creator-status-pill", autosaveTone)}>
+                  {autosaveStatus === "saved" ? <Check size={13} aria-hidden="true" /> : <Save size={13} aria-hidden="true" />}
+                  {autosaveLabel}
+                </span>
+                {activeDraftRevision != null ? <span className="creator-status-pill creator-status-pill--neutral">Revision #{activeDraftRevision}</span> : null}
+              </div>
+              <div className="creator-button-row">
+                <button type="button" className="creator-button creator-button--primary" onClick={() => void submitForm()} disabled={!canSubmit || busy}>
+                  <Send size={15} aria-hidden="true" />
+                  {busy ? "Saving..." : editingId ? "Save pending draft" : "Submit for approval"}
+                </button>
+                {editingId ? (
+                  <button type="button" className="creator-button creator-button--ghost" onClick={() => { setEditingId(null); setForm(EMPTY_FORM); }}>
+                    <X size={15} aria-hidden="true" />
+                    Cancel edit
+                  </button>
+                ) : null}
+                {activeDraftId && activeDraftRevision != null ? (
+                  <button type="button" className="creator-button creator-button--ghost" onClick={() => void createManualCheckpoint()}>
+                    <RefreshCw size={15} aria-hidden="true" />
+                    Checkpoint
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <aside className="creator-studio__rail creator-studio__rail--right">
+            <section className="creator-panel creator-panel--assist">
+              <div className="creator-panel__heading">
+                <div><p className="creator-eyebrow">LLM workspace</p><h2>AI Assist</h2></div>
+                <Wand2 size={18} aria-hidden="true" />
+              </div>
+              <StreamRibbon activity={llmActivity} idleLabel={form.neverSendToAi ? "AI disabled for this draft" : "AI ready"} />
+              <label className="creator-check-row">
+                <input
+                  type="checkbox"
+                  checked={form.neverSendToAi}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setForm((prev) => ({ ...prev, neverSendToAi: checked }));
+                    if (checked) {
+                      setAutocompleteSuggestion(null);
+                      markLlmActivity(null);
+                    }
+                  }}
+                />
+                Never send this draft to AI
+              </label>
+
+              {(idlePromptVisible || helpMenuOpen) ? (
+                <div className="creator-assist-prompt">
+                  <strong>Need a starting push?</strong>
+                  <input className="creator-input" value={helpContext} onChange={(event) => setHelpContext(event.target.value)} placeholder="Optional context: dramatic, skeptical, warm..." />
+                  <div className="creator-button-row">
+                    <button type="button" className="creator-button creator-button--small" disabled={assistDisabled} onClick={() => void requestAssist("continue", { workflowId: "startup_inspiration", helpMode: "inspiration", context: helpContext })}>Inspiration</button>
+                    <button type="button" className="creator-button creator-button--small" disabled={assistDisabled} onClick={() => void requestAssist("improve", { workflowId: "startup_brainstorm", helpMode: "brainstorm", context: helpContext })}>Brainstorm</button>
+                    <button type="button" className="creator-button creator-button--small" disabled={assistDisabled} onClick={() => void requestAssist("continue", { workflowId: "startup_random", helpMode: "random", context: helpContext })}>Random</button>
                   </div>
                 </div>
               ) : null}
 
-              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
-                <button type="button" onClick={() => insertMarkdown("**", "**", "bold")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Bold
-                </button>
-                <button type="button" onClick={() => insertMarkdown("_", "_", "italic")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Italic
-                </button>
-                <button type="button" onClick={() => insertMarkdown("## ", "", "Section title")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Heading
-                </button>
-                <button type="button" onClick={() => insertMarkdown("> ", "", "Quote")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Quote
-                </button>
-                <button type="button" onClick={() => insertMarkdown("- ", "", "List item")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Bullet list
-                </button>
-                <button type="button" onClick={() => insertMarkdown("[", "](https://example.com)", "Link text")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Link
-                </button>
-                <button type="button" onClick={() => insertMarkdown("\n\n---\n\n", "", "")} style={{ padding: "0.25rem 0.5rem", border: "1px solid #bbb", background: "#faf8f3", cursor: "pointer", fontSize: "0.78rem" }}>
-                  Section break
-                </button>
+              <div className="creator-button-grid">
+                <button type="button" className="creator-button" onClick={() => { setHelpMenuOpen((prev) => !prev); setIdlePromptVisible(false); }}><Sparkles size={15} aria-hidden="true" />Prompt ideas</button>
+                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("improve")}>Improve</button>
+                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("continue")}>Continue</button>
+                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("headline")}>Headline</button>
+                <button type="button" className="creator-button" disabled={assistDisabled} onClick={() => void requestAssist("improve", { workflowId: "stuck_assist", helpMode: "stuck" })}>I&apos;m stuck</button>
               </div>
 
-              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.45rem" }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.38rem", fontSize: "0.76rem", color: "#444" }}>
-                  <input
-                    type="checkbox"
-                    checked={form.neverSendToAi}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, neverSendToAi: event.target.checked }))
-                    }
-                  />
-                  Never send this draft to AI
-                </label>
-              </div>
-              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", marginTop: "0.3rem" }}>
-                <button
-                  type="button"
-                  disabled={assistBusy || form.neverSendToAi}
-                  onClick={() => void requestAssist("improve")}
-                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
-                >
-                  Improve paragraph
-                </button>
-                <button
-                  type="button"
-                  disabled={assistBusy || form.neverSendToAi}
-                  onClick={() => void requestAssist("continue")}
-                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
-                >
-                  Continue draft
-                </button>
-                <button
-                  type="button"
-                  disabled={assistBusy || form.neverSendToAi}
-                  onClick={() => void requestAssist("headline")}
-                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
-                >
-                  Suggest headline
-                </button>
-                <button
-                  type="button"
-                  disabled={assistBusy || form.neverSendToAi}
-                  onClick={() =>
-                    void requestAssist("improve", {
-                      workflowId: "stuck_assist",
-                      helpMode: "stuck",
-                    })
-                  }
-                  style={{ padding: "0.25rem 0.5rem", border: "1px solid #1a472a", background: "#fff", cursor: assistBusy ? "wait" : "pointer", fontSize: "0.78rem" }}
-                >
-                  I&apos;m stuck
-                </button>
-              </div>
-              {assistError ? (
-                <p style={{ margin: "0.4rem 0 0", color: "#8b4513", fontSize: "0.8rem" }}>
-                  {assistError}
-                </p>
-              ) : null}
-              {assistCostEstimate != null ? (
-                <p style={{ margin: "0.35rem 0 0", fontSize: "0.76rem", color: "#666" }}>
-                  Estimated assist cost: ${assistCostEstimate.toFixed(4)}
-                  {assistEscalation ? " (escalated)" : ""}
-                </p>
-              ) : null}
+              {assistError ? <p className="creator-note creator-note--danger">{assistError}</p> : null}
+              {assistCostEstimate != null ? <p className="creator-muted">Estimated assist cost: {"$" + assistCostEstimate.toFixed(4)}{assistEscalation ? " (escalated)" : ""}</p> : null}
               {assistSuggestion ? (
-                <div style={{ marginTop: "0.45rem", border: "1px solid #d8d2c7", background: "#faf8f3", padding: "0.5rem" }}>
-                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#333", whiteSpace: "pre-wrap" }}>{assistSuggestion}</p>
+                <div className="creator-suggestion-card">
+                  <p>{assistSuggestion}</p>
                   {assistOpeningAngles.length > 0 ? (
-                    <div style={{ marginTop: "0.45rem" }}>
-                      <span style={{ fontSize: "0.72rem", color: "#555", display: "block", marginBottom: "0.28rem" }}>
-                        Suggested openings (click a line to add only that text):
-                      </span>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "0.12rem" }}>
-                        {assistOpeningAngles.map((angle, index) => (
-                          <button
-                            key={`assist-angle-${index}-${angle.slice(0, 40)}`}
-                            type="button"
-                            title={assistTitles.openingLine}
-                            onClick={() => appendAssistAngleToBody(angle)}
-                            style={{
-                              display: "block",
-                              width: "100%",
-                              textAlign: "left",
-                              fontWeight: 600,
-                              fontSize: "0.8rem",
-                              color: "#111",
-                              background: "transparent",
-                              border: "none",
-                              padding: "0.28rem 0.2rem",
-                              cursor: "pointer",
-                              borderRadius: "4px",
-                              lineHeight: 1.35,
-                            }}
-                            onMouseEnter={(event) => {
-                              event.currentTarget.style.fontWeight = "800";
-                              event.currentTarget.style.background = "#f0ebe0";
-                            }}
-                            onMouseLeave={(event) => {
-                              event.currentTarget.style.fontWeight = "600";
-                              event.currentTarget.style.background = "transparent";
-                            }}
-                          >
-                            {angle}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="creator-opening-list">
+                      <span>Suggested openings</span>
+                      {assistOpeningAngles.map((angle, index) => (
+                        <button key={"assist-angle-" + index + "-" + angle.slice(0, 40)} type="button" title={assistTitles.openingLine} onClick={() => appendAssistAngleToBody(angle)}>{angle}</button>
+                      ))}
                     </div>
                   ) : null}
-                  {assistOpeningAngles.length > 0 ? (
-                    <p style={{ margin: "0.35rem 0 0", fontSize: "0.7rem", color: "#666" }}>
-                      Apply prepends all openings (or replaces your selection). Insert below appends them. The analysis
-                      above is never inserted by those buttons.
-                    </p>
-                  ) : null}
-                  <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.4rem", flexWrap: "wrap" }}>
+                  <div className="creator-button-row">
                     <button
                       type="button"
+                      className="creator-button creator-button--small"
                       title={assistTitles.apply}
                       onClick={() => {
                         if (!assistSuggestion) return;
@@ -1505,669 +1729,107 @@ export function CreatorDashboard({
                         if (anglesBlock) {
                           const sel = latestSelectionRef.current;
                           if (sel && sel.start !== sel.end) {
-                            setForm((f) => ({
-                              ...f,
-                              body: `${f.body.slice(0, sel.start)}${anglesBlock}${f.body.slice(sel.end)}`,
-                            }));
+                            setForm((f) => ({ ...f, body: f.body.slice(0, sel.start) + anglesBlock + f.body.slice(sel.end) }));
                             return;
                           }
                           setForm((f) => {
                             const rest = f.body.trim();
                             const sep = rest.length === 0 ? "" : "\n\n";
-                            return { ...f, body: `${anglesBlock}${sep}${rest}`.trim() };
+                            return { ...f, body: (anglesBlock + sep + rest).trim() };
                           });
                           return;
                         }
                         setForm((f) => ({ ...f, body: assistSuggestion.trim() }));
                       }}
-                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
                       Apply
                     </button>
                     <button
                       type="button"
+                      className="creator-button creator-button--small"
                       title={assistTitles.insertBelow}
                       onClick={() => {
-                        const block =
-                          assistOpeningAngles.length > 0
-                            ? assistOpeningAngles.join("\n\n")
-                            : assistSuggestion.trim();
+                        const block = assistOpeningAngles.length > 0 ? assistOpeningAngles.join("\n\n") : assistSuggestion.trim();
                         if (!block) return;
-                        setForm((f) => ({
-                          ...f,
-                          body: `${f.body.trim()}\n\n${block}`.trim(),
-                        }));
+                        setForm((f) => ({ ...f, body: (f.body.trim() + "\n\n" + block).trim() }));
                       }}
-                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
                       Insert below
                     </button>
                     <button
                       type="button"
+                      className="creator-button creator-button--small"
                       title={assistTitles.replaceSelection}
                       onClick={() => {
                         const selection = latestSelectionRef.current;
                         if (!selection) return;
-                        const block =
-                          assistOpeningAngles.length > 0
-                            ? assistOpeningAngles.join("\n\n")
-                            : assistSuggestion;
-                        setForm((f) => {
-                          const nextBody = `${f.body.slice(0, selection.start)}${block}${f.body.slice(selection.end)}`;
-                          return { ...f, body: nextBody };
-                        });
+                        const block = assistOpeningAngles.length > 0 ? assistOpeningAngles.join("\n\n") : assistSuggestion;
+                        setForm((f) => ({ ...f, body: f.body.slice(0, selection.start) + block + f.body.slice(selection.end) }));
                       }}
-                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
                     >
-                      Replace selection
+                      Replace
                     </button>
-                    <button
-                      type="button"
-                      title={assistTitles.copy}
-                      onClick={() => void navigator.clipboard.writeText(assistSuggestion)}
-                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
-                    >
-                      Copy
-                    </button>
-                    <button
-                      type="button"
-                      title={assistTitles.dismiss}
-                      onClick={() => {
-                        setAssistSuggestion(null);
-                        setAssistOpeningAngles([]);
-                      }}
-                      style={{ padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.75rem" }}
-                    >
-                      Dismiss
-                    </button>
+                    <button type="button" className="creator-button creator-button--small creator-button--ghost" title={assistTitles.copy} onClick={() => void navigator.clipboard.writeText(assistSuggestion)}><Copy size={14} aria-hidden="true" />Copy</button>
+                    <button type="button" className="creator-button creator-button--small creator-button--ghost" title={assistTitles.dismiss} onClick={() => { setAssistSuggestion(null); setAssistOpeningAngles([]); }}>Dismiss</button>
                   </div>
                 </div>
               ) : null}
+
               {autocompleteSuggestion && autocompleteEnabled ? (
-                <div style={{ marginTop: "0.35rem", border: "1px dashed #b9b2a4", padding: "0.45rem", background: "#fff" }}>
-                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#666" }}>
-                    Autocomplete suggestion: {autocompleteSuggestion}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        body: `${prev.body}${prev.body.endsWith(" ") ? "" : " "}${autocompleteSuggestion}`.trim(),
-                      }))
-                    }
-                    style={{ marginTop: "0.35rem", padding: "0.22rem 0.48rem", border: "1px solid #888", background: "#fff", cursor: "pointer", fontSize: "0.74rem" }}
-                  >
-                    Accept suggestion
-                  </button>
+                <div className="creator-suggestion-card creator-suggestion-card--compact">
+                  <strong>Autocomplete suggestion</strong>
+                  <p>{autocompleteSuggestion}</p>
+                  <button type="button" className="creator-button creator-button--small" onClick={() => setForm((prev) => ({ ...prev, body: (prev.body + (prev.body.endsWith(" ") ? "" : " ") + autocompleteSuggestion).trim() }))}>Accept suggestion</button>
                 </div>
               ) : null}
+            </section>
 
-              <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.5rem", marginBottom: "0.5rem" }}>
-                <button
-                  type="button"
-                  onClick={() => setBodyEditorTab("write")}
-                  style={{
-                    padding: "0.25rem 0.55rem",
-                    border: bodyEditorTab === "write" ? "1px solid #1a472a" : "1px solid #bbb",
-                    background: bodyEditorTab === "write" ? "#eaf4ed" : "#fff",
-                    cursor: "pointer",
-                    fontSize: "0.78rem",
-                  }}
-                >
-                  Write
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBodyEditorTab("preview")}
-                  style={{
-                    padding: "0.25rem 0.55rem",
-                    border: bodyEditorTab === "preview" ? "1px solid #1a472a" : "1px solid #bbb",
-                    background: bodyEditorTab === "preview" ? "#eaf4ed" : "#fff",
-                    cursor: "pointer",
-                    fontSize: "0.78rem",
-                  }}
-                >
-                  Preview
-                </button>
-              </div>
-
-              {bodyEditorTab === "write" ? (
-                <textarea
-                  ref={bodyTextareaRef}
-                  value={form.body}
-                  onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                  onSelect={(e) => {
-                    const target = e.currentTarget;
-                    latestSelectionRef.current = {
-                      start: target.selectionStart ?? 0,
-                      end: target.selectionEnd ?? 0,
-                      text: form.body.slice(
-                        target.selectionStart ?? 0,
-                        target.selectionEnd ?? 0
-                      ),
-                    };
-                  }}
-                  placeholder={"Write in Markdown...\n\n## Section heading\n\nParagraph text with **bold** and _italic_.\n\n> Pull quote or emphasis.\n\n---\n\nNext section..."}
-                  style={{ minHeight: "220px", width: "100%", padding: "0.55rem", border: "1px solid #bbb", resize: "vertical" }}
-                />
+            <section className="creator-panel">
+              <div className="creator-panel__heading"><div><p className="creator-eyebrow">Progress</p><h2>Local analyst</h2></div></div>
+              <label className="creator-check-row"><input type="checkbox" checked={analystEnabled} onChange={(event) => setAnalystEnabled(event.target.checked)} />Local analyst enabled</label>
+              <label className="creator-check-row"><input type="checkbox" checked={analystQuietMode} onChange={(event) => setAnalystQuietMode(event.target.checked)} />Quiet mode</label>
+              {latestAnalyst ? (
+                <p className="creator-muted">{latestAnalyst.metrics.wordCount} words, {latestAnalyst.metrics.paragraphCount} paragraphs, phase {latestAnalyst.metrics.sectionPhase}, avg sentence {latestAnalyst.metrics.avgSentenceWords}.</p>
               ) : (
-                <div style={{ minHeight: "220px", border: "1px solid #bbb", padding: "0.6rem", background: "#faf8f3" }}>
-                  <ArticleBodyMarkdown
-                    markdown={form.body.trim() ? form.body : "*Preview appears here as you write.*"}
-                    variant="reader"
-                    fontPreset="literary"
-                    readingTimeSecs={previewReadingTimeSecs}
-                  />
-                </div>
+                <p className="creator-muted">Checkpoints run every 5 minutes only after text changes.</p>
               )}
+              {!analystQuietMode && latestAnalyst && latestAnalyst.notes.length > 0 ? (
+                <ul className="creator-note-list">{latestAnalyst.notes.map((note) => <li key={note}>{note}</li>)}</ul>
+              ) : null}
+            </section>
 
-              <details style={{ marginTop: "0.55rem" }}>
-                <summary style={{ cursor: "pointer", color: "#555", fontSize: "0.8rem" }}>
-                  Markdown quick guide
-                </summary>
-                <div style={{ fontSize: "0.78rem", color: "#666", lineHeight: 1.55, marginTop: "0.4rem" }}>
-                  <div><strong>Bold:</strong> <code>**text**</code> &nbsp; <strong>Italic:</strong> <code>_text_</code></div>
-                  <div><strong>Heading:</strong> <code>## Title</code> &nbsp; <strong>Quote:</strong> <code>&gt; line</code></div>
-                  <div><strong>List:</strong> <code>- item</code> &nbsp; <strong>Link:</strong> <code>[label](https://...)</code></div>
-                  <div><strong>Section/Page break:</strong> <code>---</code> on its own line</div>
-                </div>
-              </details>
-              <p style={{ margin: "0.45rem 0 0", fontSize: "0.76rem", color: "#666" }}>
-                Typography is handled with curated reading presets in the app for consistency and safety.
-              </p>
+            <section className="creator-panel">
+              <div className="creator-panel__heading">
+                <div><p className="creator-eyebrow">Versions</p><h2>Revision history</h2></div>
+                <History size={18} aria-hidden="true" />
               </div>
-            ) : (
-              <div
-                style={{
-                  border: "1px solid #d8d2c7",
-                  background: "#fff",
-                  padding: "0.75rem",
-                }}
-              >
-                <h3
-                  style={{
-                    margin: 0,
-                    fontFamily: "'Playfair Display', Georgia, serif",
-                    fontSize: "1rem",
-                    marginBottom: "0.75rem",
-                  }}
-                >
-                  Recipe details
-                </h3>
-
-                <div style={{ display: "grid", gap: "0.55rem" }}>
-                  <div style={{ display: "grid", gap: "0.35rem" }}>
-                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                      Import recipe from link
-                    </label>
-                    <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-                      <input
-                        value={recipeImportUrl}
-                        onChange={(e) => setRecipeImportUrl(e.target.value)}
-                        placeholder="https://example.com/recipe"
-                        style={{
-                          flex: "1 1 280px",
-                          padding: "0.45rem",
-                          border: "1px solid #bbb",
-                          minWidth: 0,
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void importRecipeFromLink()}
-                        disabled={recipeImportBusy}
-                        style={{
-                          padding: "0.45rem 0.65rem",
-                          border: "1px solid #1a472a",
-                          background: "#fff",
-                          cursor: recipeImportBusy ? "wait" : "pointer",
-                          fontFamily: "'Playfair Display', Georgia, serif",
-                        }}
-                      >
-                        {recipeImportBusy ? "Importing..." : "Import"}
-                      </button>
-                    </div>
-                    {recipeImportMessage ? (
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: "0.8rem",
-                          color: recipeImportIsError ? "#8b4513" : "#2f5f3a",
-                          background: recipeImportIsError ? "#fff0e6" : "#edf7ef",
-                          border: `1px solid ${recipeImportIsError ? "#e4bf9a" : "#b6d7bf"}`,
-                          padding: "0.38rem 0.5rem",
-                        }}
-                      >
-                        {recipeImportMessage}
-                      </p>
-                    ) : (
-                      <p style={{ margin: 0, fontSize: "0.8rem", color: "#888" }}>
-                        Imports are limited to allowlisted domains.
-                      </p>
-                    )}
-                  </div>
-
-                  <div style={{ display: "flex", gap: "0.55rem", flexWrap: "wrap" }}>
-                    <div style={{ flex: "1 1 160px" }}>
-                      <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                        Servings
-                      </label>
-                      <input
-                        type="number"
-                        value={form.recipeServings}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, recipeServings: e.target.value }))
-                        }
-                        placeholder="e.g. 4"
-                        style={{ width: "100%", padding: "0.45rem", border: "1px solid #bbb", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div style={{ flex: "1 1 160px" }}>
-                      <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                        Prep time (minutes)
-                      </label>
-                      <input
-                        type="number"
-                        value={form.recipePrepTimeMinutes}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, recipePrepTimeMinutes: e.target.value }))
-                        }
-                        placeholder="e.g. 15"
-                        style={{ width: "100%", padding: "0.45rem", border: "1px solid #bbb", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div style={{ flex: "1 1 160px" }}>
-                      <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                        Cook time (minutes)
-                      </label>
-                      <input
-                        type="number"
-                        value={form.recipeCookTimeMinutes}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, recipeCookTimeMinutes: e.target.value }))
-                        }
-                        placeholder="e.g. 25"
-                        style={{ width: "100%", padding: "0.45rem", border: "1px solid #bbb", boxSizing: "border-box" }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: "grid", gap: "0.35rem" }}>
-                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                      Ingredients (one per line)
-                    </label>
-                    <textarea
-                      value={form.recipeIngredientsText}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, recipeIngredientsText: e.target.value }))
-                      }
-                      placeholder={"1 tbsp olive oil\n1 onion, diced\n2 cloves garlic"}
-                      style={{
-                        minHeight: "120px",
-                        width: "100%",
-                        padding: "0.55rem",
-                        border: "1px solid #bbb",
-                        resize: "vertical",
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ display: "grid", gap: "0.35rem" }}>
-                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                      Instructions (separate steps with a blank line)
-                    </label>
-                    <textarea
-                      value={form.recipeInstructionsText}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          recipeInstructionsText: e.target.value,
-                        }))
-                      }
-                      placeholder={"Step one...\n\nStep two...\n\nStep three..."}
-                      style={{
-                        minHeight: "160px",
-                        width: "100%",
-                        padding: "0.55rem",
-                        border: "1px solid #bbb",
-                        resize: "vertical",
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ display: "grid", gap: "0.35rem" }}>
-                    <label style={{ fontSize: "0.85rem", color: "#555", fontWeight: 600 }}>
-                      Recipe pictures (up to 3)
-                    </label>
-                    <input
-                      key={recipeImageInputKey}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      disabled={recipeImagesBusy}
-                      onChange={async (e) => {
-                        const files = Array.from(e.target.files ?? []);
-                        if (files.length === 0) return;
-                        if (files.length > 3) {
-                          setRecipeImagesError("Please select up to 3 images.");
-                          return;
-                        }
-                        setRecipeImagesError(null);
-                        setRecipeImagesBusy(true);
-                        try {
-                          const fd = new FormData();
-                          for (const f of files) fd.append("files", f);
-                          const res = await fetch(
-                            "/api/user/recipe-images/upload",
-                            {
-                              method: "POST",
-                              body: fd,
-                              credentials: "include",
-                            }
-                          );
-                          const payload = await res.json().catch(() => ({}));
-                          if (!res.ok) {
-                            throw new Error(
-                              typeof payload.error === "string"
-                                ? payload.error
-                                : "Upload failed"
-                            );
-                          }
-                          const urls = Array.isArray(payload.urls)
-                            ? (payload.urls as string[])
-                            : [];
-                          setForm((f) => ({ ...f, recipeImages: urls }));
-                        } catch (err: unknown) {
-                          const msg =
-                            err instanceof Error ? err.message : "Upload failed";
-                          setRecipeImagesError(msg);
-                        } finally {
-                          setRecipeImagesBusy(false);
-                        }
-                      }}
-                      style={{ padding: "0.4rem", border: "1px solid #bbb", background: "#fff" }}
-                    />
-                    {recipeImagesError ? (
-                      <p style={{ margin: 0, color: "#8b4513", fontSize: "0.82rem" }}>
-                        {recipeImagesError}
-                      </p>
-                    ) : null}
-                    {form.recipeImages.length > 0 ? (
-                      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                        {form.recipeImages.map((url, idx) => (
-                          <div
-                            key={`${url}-${idx}`}
-                            style={{
-                              border: "1px solid #d8d2c7",
-                              background: "#faf8f3",
-                              padding: "0.35rem",
-                              borderRadius: "6px",
-                            }}
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element -- recipe preview URLs are uploaded/user-provided external assets */}
-                            <img
-                              src={url}
-                              alt={`Recipe image ${idx + 1}`}
-                              width={90}
-                              height={90}
-                              style={{
-                                width: 90,
-                                height: 90,
-                                objectFit: "cover",
-                                display: "block",
-                                borderRadius: "4px",
-                              }}
-                            />
-                            <button
-                              type="button"
-                              style={{
-                                marginTop: "0.35rem",
-                                padding: "0.25rem 0.45rem",
-                                border: "1px solid #888",
-                                background: "#fff",
-                                cursor: "pointer",
-                                fontFamily: "'Playfair Display', Georgia, serif",
-                                fontSize: "0.72rem",
-                              }}
-                              onClick={() => {
-                                setForm((f) => ({
-                                  ...f,
-                                  recipeImages: f.recipeImages.filter((_, i) => i !== idx),
-                                }));
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
+              {activeDraftId && activeDraftRevision != null ? (
+                <>
+                  <button type="button" className="creator-button creator-button--ghost" onClick={() => { setRevisionsOpen((prev) => { const next = !prev; if (next && activeDraftId) void loadDraftVersions(activeDraftId); return next; }); }}>
+                    {revisionsOpen ? "Hide history" : "Show history"}
+                  </button>
+                  {revisionsOpen ? (
+                    draftVersions.length > 0 ? (
+                      <div className="creator-version-list">
+                        {draftVersions.slice(0, 5).map((version) => (
+                          <button key={version.id} type="button" onClick={() => void restoreDraftVersion(version.id)}>
+                            <span>{version.versionReason}</span>
+                            <small>{formatLocalClock(version.createdAt)}</small>
+                          </button>
                         ))}
                       </div>
                     ) : (
-                      <p style={{ margin: 0, color: "#777", fontSize: "0.82rem" }}>
-                        Optional.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            <input aria-label="Pull quote" value={form.pullQuote} onChange={(e) => setForm((f) => ({ ...f, pullQuote: e.target.value }))} placeholder="Pull quote (optional)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input aria-label="Locale" value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale (default global)" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-            <input aria-label="Explicit hashtags" value={form.explicitHashtags} onChange={(e) => setForm((f) => ({ ...f, explicitHashtags: e.target.value }))} placeholder="Explicit hashtags, comma separated" style={{ padding: "0.45rem", border: "1px solid #bbb" }} />
-          </div>
-
-          <div style={{ display: "flex", gap: "0.65rem", alignItems: "center", flexWrap: "wrap", marginTop: "0.7rem" }}>
-            <p
-              style={{
-                margin: 0,
-                fontSize: "0.8rem",
-                color:
-                  autosaveStatus === "error"
-                    ? "#8b4513"
-                    : autosaveStatus === "saved"
-                      ? "#2f5f3a"
-                      : "#666",
-              }}
-            >
-              {autosaveStatus === "saving"
-                ? "Autosaving draft..."
-                : autosaveStatus === "saved"
-                  ? "Draft saved"
-                  : autosaveStatus === "error"
-                    ? `Autosave failed${autosaveError ? `: ${autosaveError}` : ""}`
-                    : "Autosave idle"}
-            </p>
-            {activeDraftRevision != null ? (
-              <span style={{ fontSize: "0.75rem", color: "#666" }}>
-                Revision #{activeDraftRevision}
-              </span>
-            ) : null}
-            {lastSavedAtRef.current ? (
-              <span style={{ fontSize: "0.75rem", color: "#666" }}>
-                Last save {new Date(lastSavedAtRef.current).toLocaleTimeString()}
-              </span>
-            ) : null}
-            {draftContentLoading ? (
-              <span style={{ fontSize: "0.75rem", color: "#666" }}>Loading draft content…</span>
-            ) : null}
-          </div>
-
-          {autosaveConflict ? (
-            <p aria-live="polite" style={{ color: "#8b4513", margin: "0.45rem 0 0" }}>
-              Another tab changed this draft. Reload the page or restore a version before continuing.
-            </p>
-          ) : null}
-          {message ? <p aria-live="polite" style={{ color: "#7b2d00", margin: "0.45rem 0 0" }}>{message}</p> : null}
-          <div style={{ marginTop: "0.45rem", border: "1px dashed #d8d2c7", padding: "0.45rem", background: "#fff" }}>
-            <div style={{ display: "flex", gap: "0.8rem", flexWrap: "wrap", alignItems: "center" }}>
-              <label style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center", fontSize: "0.76rem", color: "#555" }}>
-                <input
-                  type="checkbox"
-                  checked={analystEnabled}
-                  onChange={(event) => setAnalystEnabled(event.target.checked)}
-                />
-                Local analyst enabled
-              </label>
-              <label style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center", fontSize: "0.76rem", color: "#555" }}>
-                <input
-                  type="checkbox"
-                  checked={analystQuietMode}
-                  onChange={(event) => setAnalystQuietMode(event.target.checked)}
-                />
-                Quiet mode (no writing nags)
-              </label>
-            </div>
-            {latestAnalyst ? (
-              <p style={{ margin: "0.45rem 0 0", fontSize: "0.75rem", color: "#666" }}>
-                Analyst snapshot: {latestAnalyst.metrics.wordCount} words, {latestAnalyst.metrics.paragraphCount} paragraphs,
-                phase {latestAnalyst.metrics.sectionPhase}, avg sentence {latestAnalyst.metrics.avgSentenceWords}.
-              </p>
-            ) : (
-              <p style={{ margin: "0.45rem 0 0", fontSize: "0.75rem", color: "#777" }}>
-                Analyst checkpoints run every 5 minutes only after text changes.
-              </p>
-            )}
-            {!analystQuietMode && latestAnalyst && latestAnalyst.notes.length > 0 ? (
-              <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1rem", color: "#666", fontSize: "0.75rem" }}>
-                {latestAnalyst.notes.map((note) => (
-                  <li key={note}>{note}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-
-          <div style={{ display: "flex", gap: "0.55rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
-            <button onClick={submitForm} disabled={!canSubmit || busy} style={{ padding: "0.45rem 0.7rem", border: "1px solid #1a472a", background: "#fff", cursor: "pointer" }}>
-              {busy ? "Saving..." : editingId ? "Save pending draft" : "Submit for approval"}
-            </button>
-            {editingId ? (
-              <button onClick={() => { setEditingId(null); setForm(EMPTY_FORM); }} style={{ padding: "0.45rem 0.7rem", border: "1px solid #888", background: "#fff", cursor: "pointer" }}>
-                Cancel edit
-              </button>
-            ) : null}
-            {activeDraftId && activeDraftRevision != null ? (
-              <button
-                type="button"
-                onClick={() => void createManualCheckpoint()}
-                style={{ padding: "0.45rem 0.7rem", border: "1px solid #666", background: "#fff", cursor: "pointer" }}
-              >
-                Checkpoint
-              </button>
-            ) : null}
-          </div>
-          {activeDraftId && activeDraftRevision != null ? (
-            <div style={{ marginTop: "0.65rem", display: "grid", gap: "0.35rem" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setRevisionsOpen((prev) => {
-                    const next = !prev;
-                    if (next && activeDraftId) void loadDraftVersions(activeDraftId);
-                    return next;
-                  });
-                }}
-                style={{
-                  padding: "0.28rem 0.5rem",
-                  border: "1px solid #999",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: "0.78rem",
-                  width: "fit-content",
-                }}
-              >
-                {revisionsOpen ? "Hide revision history" : "Show revision history"}
-              </button>
-              {revisionsOpen ? (
-                draftVersions.length > 0 ? (
-                  <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                    {draftVersions.slice(0, 5).map((version) => (
-                      <button
-                        key={version.id}
-                        type="button"
-                        onClick={() => void restoreDraftVersion(version.id)}
-                        style={{
-                          padding: "0.25rem 0.45rem",
-                          border: "1px solid #999",
-                          background: "#fff",
-                          cursor: "pointer",
-                          fontSize: "0.75rem",
-                        }}
-                      >
-                        {version.versionReason} · {new Date(version.createdAt).toLocaleTimeString()}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ margin: 0, fontSize: "0.76rem", color: "#777" }}>
-                    No checkpoints yet. Save a checkpoint to see history here.
-                  </p>
-                )
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-
-        <div style={{ background: "#faf8f3", border: "1px solid #d8d2c7", padding: "1rem" }}>
-          <h2 style={{ marginTop: 0, fontFamily: "'Playfair Display', Georgia, serif", fontSize: "1.1rem" }}>
-            Your submissions
-          </h2>
-          {loading ? (
-            <p style={{ color: "#666" }}>Loading...</p>
-          ) : submissions.length === 0 ? (
-            <p style={{ color: "#666" }}>No submissions yet.</p>
-          ) : (
-            <>
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.65rem" }}>
-                {submissions.map((submission) => (
-                  <li key={submission.id} style={{ border: "1px solid #ddd", padding: "0.7rem", background: "#fff" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center" }}>
-                      <strong style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>{submission.headline}</strong>
-                      <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "#555" }}>{submission.status}</span>
-                    </div>
-                    <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.86rem" }}>
-                      {submission.contentKind === "recipe"
-                        ? `Recipe • ${new Date(submission.createdAt).toLocaleString()}`
-                        : `${submission.category} • ${(submission.articleTypeCustom || submission.articleType || "article").replaceAll("_", " ")} • ${new Date(submission.createdAt).toLocaleString()}`}
-                    </p>
-                    {submission.adminNote ? (
-                      <p style={{ margin: "0.35rem 0 0", color: "#8b6d2f", fontSize: "0.84rem" }}>
-                        Moderator note: {submission.adminNote}
-                      </p>
-                    ) : null}
-                    {submission.rejectionReason ? (
-                      <p style={{ margin: "0.35rem 0 0", color: "#8b4513", fontSize: "0.84rem" }}>
-                        Rejection reason: {submission.rejectionReason}
-                      </p>
-                    ) : null}
-                    {submission.status === "pending" || submission.status === "changes_requested" ? (
-                      <div style={{ marginTop: "0.45rem", display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-                        <button onClick={() => void beginEdit(submission)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #999", background: "#fff", cursor: "pointer" }}>
-                          {submission.status === "changes_requested" ? "Revise" : "Edit"}
-                        </button>
-                        <button onClick={() => void withdrawSubmission(submission.id)} style={{ padding: "0.35rem 0.6rem", border: "1px solid #b05", background: "#fff", cursor: "pointer" }}>
-                          Withdraw
-                        </button>
-                      </div>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {nextCursor ? (
-                <div style={{ marginTop: "0.75rem" }}>
-                  <button
-                    type="button"
-                    disabled={loadingMore}
-                    onClick={() => void loadSubmissions({ reset: false })}
-                    style={{ padding: "0.4rem 0.7rem", border: "1px solid #888", background: "#fff", cursor: loadingMore ? "wait" : "pointer" }}
-                  >
-                    {loadingMore ? "Loading..." : "Load more"}
-                  </button>
-                </div>
-              ) : null}
-            </>
-          )}
+                      <p className="creator-muted">No checkpoints yet. Save a checkpoint to see history here.</p>
+                    )
+                  ) : null}
+                </>
+              ) : (
+                <p className="creator-muted">Save a draft before revision history appears.</p>
+              )}
+            </section>
+          </aside>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

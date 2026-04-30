@@ -31,6 +31,15 @@ const nextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      {
+        source: "/security.txt",
+        destination: "/.well-known/security.txt",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     return [
       // Typo safety: URL uses hyphens; callers might use underscore

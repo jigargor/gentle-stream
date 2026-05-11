@@ -30,4 +30,8 @@ jobs:
     uses: ./.github/workflows/ci-reusable.yml
     secrets: inherit
     with:
-      run-integration: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      # Skip DB integration when secrets are unavailable: fork PRs (no access to
+      # repo Actions secrets) and Dependabot PRs (run under the separate
+      # `Dependabot` secrets scope, which is not populated with Supabase keys
+      # and would cause lib/env.ts Zod validation to fail at module load).
+      run-integration: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}

@@ -4,7 +4,7 @@
  * Grows precomputed game pools continuously (within caps).
  * Runs on a schedule via vercel.json.
  *
- * Requires x-cron-secret header matching CRON_SECRET env var.
+ * Requires Authorization: Bearer <CRON_SECRET>.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -29,6 +29,7 @@ import {
 } from "@/lib/db/gameWordPool";
 import { API_ERROR_CODES, apiErrorResponse } from "@/lib/api/errors";
 import { captureException, flushOnShutdown, startSpan } from "@/lib/observability";
+import { isAuthorizedCronRequest } from "@/lib/cron/verifyRequest";
 
 /**
  * Word-pool cap for demo: keep growth bounded while still ensuring freshness.
@@ -101,8 +102,7 @@ async function growWordPool(): Promise<{
 }
 
 export async function GET(request: NextRequest) {
-  const secret = request.headers.get("x-cron-secret");
-  if (secret !== process.env.CRON_SECRET) {
+  if (!isAuthorizedCronRequest(request)) {
     return apiErrorResponse({
       request,
       status: 401,

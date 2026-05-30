@@ -275,7 +275,7 @@ Ranked section for a user. Query params include `userId`, `sectionIndex`, option
 
 ### Cron routes
 
-Header: `x-cron-secret: <CRON_SECRET>` (or configured equivalent).
+Header: `Authorization: Bearer <CRON_SECRET>`.
 
 | Route | Schedule (vercel.json) | Role |
 |-------|-------------------------|------|
@@ -291,7 +291,7 @@ Header: `x-cron-secret: <CRON_SECRET>` (or configured equivalent).
 Use this authenticated endpoint to inspect recent scheduler runs with per-category detail:
 
 - `GET /api/admin/cron/ingest-logs?limit=20`
-- Auth header: `Authorization: Bearer <CRON_SECRET>` (or `x-cron-secret`)
+- Auth header: `Authorization: Bearer <CRON_SECRET>`
 - Returns run-level metadata (`ok`, `totalInserted`, duration notes) and category rows (`beforeCount`, `requestedCount`, `insertedCount`, `reason`, `errorMessage`)
 
 This is the fastest way to confirm whether low stock is caused by ingest failures, dedup skips, or tagger lag.

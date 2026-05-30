@@ -45,9 +45,6 @@ export function isAuthorizedCronRequest(request: NextRequest): boolean {
 
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${expected}`) return false;
-  if (process.env.NODE_ENV !== "production") return true;
-  if (isCronIpAllowed(request)) return true;
-  warnIfUnexpectedCronIp(request);
-
-  return false;
+  if (process.env.NODE_ENV === "production") warnIfUnexpectedCronIp(request);
+  return true;
 }

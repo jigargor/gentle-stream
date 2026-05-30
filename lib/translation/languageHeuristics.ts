@@ -1,3 +1,5 @@
+import { looksLikelyNonEnglishText } from "@/lib/articles/languageHeuristics";
+
 const SPANISH_MARKER_REGEX =
   /\b(el|la|los|las|de|del|que|y|en|un|una|por|para|con|como|más|pero|sus|también|desde|hasta|sobre)\b/gi;
 const NON_ASCII_PUNCT_REGEX = /[¿¡]/g;
@@ -33,10 +35,12 @@ export function detectLikelyNonEnglishText(input: string): LanguageHeuristicResu
   const diacriticCount = countMatches(DIACRITIC_REGEX, text);
   const score = markerCount + punctCount * 2 + diacriticCount;
   const likelySpanish = score >= 5 || (markerCount >= 3 && text.length >= 120);
+  const likelyGeneralNonEnglish = looksLikelyNonEnglishText(text);
+  const likelyNonEnglish = likelySpanish || likelyGeneralNonEnglish;
 
   return {
-    likelyNonEnglish: likelySpanish,
-    guessedSourceLanguage: likelySpanish ? "ES" : null,
+    likelyNonEnglish,
+    guessedSourceLanguage: likelySpanish ? "ES" : likelyNonEnglish ? "UNKNOWN" : null,
     score,
   };
 }

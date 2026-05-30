@@ -405,6 +405,7 @@ export async function GET(request: NextRequest) {
         articleIds: insertedArticleIdsThisRun,
         maxRows: insertedArticleIdsThisRun.length,
         apply: true,
+        forceOnArticleIds: true,
         reason: "cron_scheduler_post_ingest",
       });
       totalTranslatedPostIngest = normalized.translated;

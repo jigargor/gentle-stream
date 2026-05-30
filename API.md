@@ -12,7 +12,7 @@ For machine-generated route metadata, see:
 - `public`: no session required.
 - `session_user`: signed-in user cookie/session required.
 - `admin_guard`: admin-only access via shared admin guard.
-- `cron_secret`: cron-authenticated request (`x-cron-secret` or equivalent).
+- `cron_secret`: cron-authenticated request (`Authorization: Bearer <CRON_SECRET>`).
 
 ## Response And Error Conventions
 

@@ -189,4 +189,31 @@ describe("LoginForm", () => {
       screen.getByText("Complete the security check above to unlock guest browsing.")
     ).toBeInTheDocument();
   });
+
+  it("continues as guest and redirects home on success", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const assignMock = vi.fn();
+    vi.stubGlobal(
+      "location",
+      { origin: "http://127.0.0.1:3000", assign: assignMock } as unknown as Location
+    );
+
+    render(<LoginForm />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue as guest" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/auth/guest-access",
+        expect.objectContaining({
+          method: "POST",
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(assignMock).toHaveBeenCalledWith("/");
+    });
+  });
 });

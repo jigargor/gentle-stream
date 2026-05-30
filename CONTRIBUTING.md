@@ -32,6 +32,13 @@ Important: optional feed modules are opt-in. If a module flag is not set, treat 
 - Do not commit secrets or local `.env` files.
 - For feed rendering/UI work, verify both light and dark themes.
 
+## Branching and merge policy
+
+- Open feature/fix branches from `develop` and merge **only through pull requests**.
+- Merge order is mandatory: `feature/*` or `fix/*` -> PR to `develop`, then `develop` -> PR to `main`.
+- Do not push directly to `develop` or `main`.
+- Repository branch protections/rulesets should require PR approval and required CI checks on both `develop` and `main`.
+
 ## Commit message format (1.0.0 transition)
 
 - Preferred format: Conventional Commits, for example:

@@ -23,16 +23,26 @@ export default async function Home() {
     );
   }
 
+  const cookieStore = await cookies();
+  const hasGuestAccess = hasGuestAccessCookie(
+    cookieStore.get(GUEST_ACCESS_COOKIE)?.value ?? null
+  );
+  if (hasGuestAccess) {
+    return (
+      <NewsFeed
+        userId={GUEST_USER_ID}
+        userEmail={null}
+        feedIncludeUserSubmitted={feedIncludeUserSubmitted}
+      />
+    );
+  }
+
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    const cookieStore = await cookies();
-    const hasGuestAccess = hasGuestAccessCookie(
-      cookieStore.get(GUEST_ACCESS_COOKIE)?.value ?? null
-    );
-    if (!hasGuestAccess) redirect("/login?next=/");
+    redirect("/login?next=/");
     return (
       <NewsFeed
         userId={GUEST_USER_ID}

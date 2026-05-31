@@ -7,6 +7,7 @@ loadDotenv({ path: ".env.local" });
 
 const mode = process.argv[2] ?? "fast";
 const flags = new Set(process.argv.slice(3));
+const skipBrowserChecks = process.env.CI_SKIP_BROWSER_CHECKS === "1";
 const isWindows = process.platform === "win32";
 const npmCmd = isWindows ? "npm.cmd" : "npm";
 const npxCmd = isWindows ? "npx.cmd" : "npx";
@@ -39,8 +40,12 @@ const fastChecks = [
   npx("vitest", "run", "-c", "vitest.unit.config.ts", "tests/unit/articleDedupKeys.test.ts"),
   npm("run", "test:component"),
   ...(flags.has("--install-playwright") ? [npx("playwright", "install", "chromium")] : []),
-  npm("run", "test:stories"),
-  npm("run", "test:e2e:smoke"),
+  ...(skipBrowserChecks
+    ? []
+    : [
+        npm("run", "test:stories"),
+        npm("run", "test:e2e:smoke"),
+      ]),
   npm("run", "test:integration"),
 ];
 

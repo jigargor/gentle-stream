@@ -1,0 +1,58 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+function buildRequest(headers: Record<string, string>): NextRequest {
+  return new NextRequest("https://example.com/api/cron/scheduler", { headers });
+}
+
+describe("isAuthorizedCronRequest", () => {
+  const mutableEnv = process.env as Record<string, string | undefined>;
+  const originalNodeEnv = mutableEnv.NODE_ENV;
+  const originalCronSecret = mutableEnv.CRON_SECRET;
+
+  beforeEach(() => {
+    vi.resetModules();
+    mutableEnv.CRON_SECRET = "test-secret";
+    mutableEnv.NODE_ENV = "production";
+  });
+
+  afterEach(() => {
+    mutableEnv.NODE_ENV = originalNodeEnv;
+    mutableEnv.CRON_SECRET = originalCronSecret;
+    vi.restoreAllMocks();
+  });
+
+  it("returns false when cron secret is missing", async () => {
+    delete mutableEnv.CRON_SECRET;
+    const { isAuthorizedCronRequest } = await import("@/lib/cron/verifyRequest");
+    const request = buildRequest({ authorization: "Bearer test-secret" });
+    expect(isAuthorizedCronRequest(request)).toBe(false);
+  });
+
+  it("returns false when bearer token does not match", async () => {
+    const { isAuthorizedCronRequest } = await import("@/lib/cron/verifyRequest");
+    const request = buildRequest({ authorization: "Bearer wrong-secret" });
+    expect(isAuthorizedCronRequest(request)).toBe(false);
+  });
+
+  it("returns false in production with valid secret but missing cron ip headers", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { isAuthorizedCronRequest } = await import("@/lib/cron/verifyRequest");
+    const request = buildRequest({ authorization: "Bearer test-secret" });
+
+    expect(isAuthorizedCronRequest(request)).toBe(false);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns true in production with allowed vercel ip and valid secret", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { isAuthorizedCronRequest } = await import("@/lib/cron/verifyRequest");
+    const request = buildRequest({
+      authorization: "Bearer test-secret",
+      "x-vercel-forwarded-for": "76.76.21.24",
+    });
+
+    expect(isAuthorizedCronRequest(request)).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});

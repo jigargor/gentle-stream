@@ -6,23 +6,24 @@ function buildRequest(headers: Record<string, string>): NextRequest {
 }
 
 describe("isAuthorizedCronRequest", () => {
-  const originalNodeEnv = process.env.NODE_ENV;
-  const originalCronSecret = process.env.CRON_SECRET;
+  const mutableEnv = process.env as Record<string, string | undefined>;
+  const originalNodeEnv = mutableEnv.NODE_ENV;
+  const originalCronSecret = mutableEnv.CRON_SECRET;
 
   beforeEach(() => {
     vi.resetModules();
-    process.env.CRON_SECRET = "test-secret";
-    process.env.NODE_ENV = "production";
+    mutableEnv.CRON_SECRET = "test-secret";
+    mutableEnv.NODE_ENV = "production";
   });
 
   afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
-    process.env.CRON_SECRET = originalCronSecret;
+    mutableEnv.NODE_ENV = originalNodeEnv;
+    mutableEnv.CRON_SECRET = originalCronSecret;
     vi.restoreAllMocks();
   });
 
   it("returns false when cron secret is missing", async () => {
-    delete process.env.CRON_SECRET;
+    delete mutableEnv.CRON_SECRET;
     const { isAuthorizedCronRequest } = await import("@/lib/cron/verifyRequest");
     const request = buildRequest({ authorization: "Bearer test-secret" });
     expect(isAuthorizedCronRequest(request)).toBe(false);

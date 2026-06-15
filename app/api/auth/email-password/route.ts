@@ -17,6 +17,7 @@ import {
   SESSION_START_COOKIE,
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
+import { GUEST_ACCESS_COOKIE } from "@/lib/auth/guest-access";
 import { CREATOR_LOGIN_ENABLED } from "@/lib/feature-flags/regulatory";
 import { logWarning } from "@/lib/observability/logger";
 
@@ -278,5 +279,6 @@ export async function POST(request: NextRequest) {
     String(nowSec),
     sessionStartCookieOptions()
   );
+  response.cookies.delete(GUEST_ACCESS_COOKIE);
   return response;
 }

@@ -191,6 +191,10 @@ describe("LoginForm", () => {
   });
 
   it("continues as guest and redirects home on success", async () => {
+    const signOutMock = vi.fn().mockResolvedValue({ error: null });
+    createClientMock.mockReturnValue({
+      auth: { signOut: signOutMock },
+    });
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const assignMock = vi.fn();
@@ -213,6 +217,7 @@ describe("LoginForm", () => {
     });
 
     await waitFor(() => {
+      expect(signOutMock).toHaveBeenCalledTimes(1);
       expect(assignMock).toHaveBeenCalledWith("/");
     });
   });

@@ -14,6 +14,7 @@ import {
   rejectIfSupabaseKeyIsServiceRole,
 } from "./validate-anon-key";
 import { GUEST_ACCESS_COOKIE, hasGuestAccessCookie } from "@/lib/auth/guest-access";
+import { sessionNeedsMfaStepUp } from "@/lib/auth/mfa-session";
 
 const PUBLIC_PREFIXES = [
   "/",
@@ -131,8 +132,14 @@ export async function updateSession(
   });
 
   const {
-    data: { user },
+    data: { user: authUser },
   } = await supabase.auth.getUser();
+
+  let user = authUser;
+  if (hasGuestAccess && user) {
+    await supabase.auth.signOut();
+    user = null;
+  }
 
   const nowSec = Math.floor(Date.now() / 1000);
   const startRaw = request.cookies.get(SESSION_START_COOKIE)?.value;
@@ -218,10 +225,21 @@ export async function updateSession(
       // Stay on login so we can show auth errors / session expiry; otherwise logged-in
       // users get bounced home and never see e.g. a failed OAuth handoff message.
     } else {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = pathname === "/creator/login" ? "/creator" : "/";
-      redirectUrl.searchParams.delete("next");
-      return finish(NextResponse.redirect(redirectUrl));
+      let needsMfaStepUp = false;
+      try {
+        const { data: aalData } =
+          await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+        needsMfaStepUp = sessionNeedsMfaStepUp(aalData);
+      } catch {
+        // If MFA status cannot be read, keep login reachable for guest browsing.
+        needsMfaStepUp = true;
+      }
+      if (!needsMfaStepUp) {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = pathname === "/creator/login" ? "/creator" : "/";
+        redirectUrl.searchParams.delete("next");
+        return finish(NextResponse.redirect(redirectUrl));
+      }
     }
   }
 

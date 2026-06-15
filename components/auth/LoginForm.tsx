@@ -252,6 +252,8 @@ export function LoginForm({
         resetTurnstileWidget();
         return;
       }
+      const supabase = createClient();
+      await supabase.auth.signOut();
       window.location.assign(nextPath || "/");
     } finally {
       setGuestBusy(false);

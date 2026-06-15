@@ -148,6 +148,43 @@ function puzzleEndpoint(
   return `/api/game/sudoku?${params}`;
 }
 
+const PUZZLE_DEDUP_FETCH_ATTEMPTS = 3;
+
+type PuzzleFetchResult =
+  | { ok: true; data: PuzzleWithUniqueness }
+  | { ok: false; reason: "exhausted" | "error" };
+
+async function fetchUniquePuzzle(
+  gameType: GameType,
+  diff: Difficulty,
+  excludeSignatures: string[],
+  connectionsDaily: boolean,
+  allowReplay: boolean
+): Promise<PuzzleFetchResult> {
+  const excludes = allowReplay ? [] : [...excludeSignatures];
+
+  for (let attempt = 0; attempt < PUZZLE_DEDUP_FETCH_ATTEMPTS; attempt++) {
+    const url = puzzleEndpoint(gameType, diff, excludes, connectionsDaily);
+    const res = await fetchWithTimeout(
+      url,
+      { cache: "no-store" },
+      PUZZLE_FETCH_TIMEOUT_MS
+    );
+    if (res.status === 409) return { ok: false, reason: "exhausted" };
+    if (!res.ok) return { ok: false, reason: "error" };
+
+    const data = (await res.json()) as PuzzleWithUniqueness;
+    const token = getPuzzleToken(data);
+    if (!allowReplay && token && hasRenderedSignature(gameType, token)) {
+      if (!excludes.includes(token)) excludes.push(token);
+      continue;
+    }
+    return { ok: true, data };
+  }
+
+  return { ok: false, reason: "exhausted" };
+}
+
 const LOADING_MESSAGES: Partial<Record<GameType, string>> = {
   sudoku:        "Setting the grid…",
   killer_sudoku: "Counting the cages…",
@@ -205,49 +242,24 @@ export default function GameSlot({
             ...readRenderedSignatures(gameType),
           ])
         );
-        const url = puzzleEndpoint(
+        const result = await fetchUniquePuzzle(
           gameType,
           diff,
           excludeSignatures,
-          connectionsDaily
+          connectionsDaily,
+          allowReplay
         );
-        const res = await fetchWithTimeout(
-          url,
-          { cache: "no-store" },
-          PUZZLE_FETCH_TIMEOUT_MS
-        );
-        if (res.status === 409 && !allowReplay) {
-          setHasNoUniqueAvailable(true);
-          setPuzzle(null);
-          setError("0 unique games available right now.");
-          return;
-        }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as PuzzleWithUniqueness;
-        const token = getPuzzleToken(data);
-        if (hasRenderedSignature(gameType, token) && !allowReplay) {
-          // Hard guard: never render the same puzzle twice in the same feed session view.
-          const retryExcludes = Array.from(
-            new Set([...excludeSignatures, ...(token ? [token] : [])])
-          );
-          const retryUrl = puzzleEndpoint(gameType, diff, retryExcludes, connectionsDaily);
-          const retryRes = await fetchWithTimeout(
-            retryUrl,
-            { cache: "no-store" },
-            PUZZLE_FETCH_TIMEOUT_MS
-          );
-          if (!retryRes.ok) throw new Error(`HTTP ${retryRes.status}`);
-          const retryData = (await retryRes.json()) as PuzzleWithUniqueness;
-          const retryToken = getPuzzleToken(retryData);
-          if (hasRenderedSignature(gameType, retryToken)) {
-            throw new Error("Duplicate puzzle prevented");
+        if (!result.ok) {
+          if (result.reason === "exhausted" && !allowReplay) {
+            setHasNoUniqueAvailable(true);
+            setPuzzle(null);
+            setError("0 unique games available right now.");
+            return;
           }
-          setPuzzle(retryData);
-          rememberRenderedSignature(gameType, retryToken);
-          writeRecentSignature(gameType, retryData.uniquenessSignature, retryData.puzzleId);
-          setCurrentDifficulty(diff);
-          return;
+          throw new Error("Puzzle fetch failed");
         }
+        const data = result.data;
+        const token = getPuzzleToken(data);
         setPuzzle(data);
         rememberRenderedSignature(gameType, token);
         writeRecentSignature(gameType, data.uniquenessSignature, data.puzzleId);
@@ -346,34 +358,32 @@ export default function GameSlot({
 
       if (cancelled) return;
       try {
-        const url = puzzleEndpoint(
+        const excludeSignatures = Array.from(
+          new Set([
+            ...buildExcludeSignatures(false),
+            ...readRenderedSignatures(gameType),
+          ])
+        );
+        const result = await fetchUniquePuzzle(
           gameType,
           difficulty,
-          buildExcludeSignatures(false),
-          connectionsDaily
+          excludeSignatures,
+          connectionsDaily,
+          false
         );
-        const res = await fetchWithTimeout(
-          url,
-          { cache: "no-store" },
-          PUZZLE_FETCH_TIMEOUT_MS
-        );
-        if (res.status === 409) {
+        if (!result.ok) {
           if (!cancelled) {
-            setHasNoUniqueAvailable(true);
-            setError("0 unique games available right now.");
+            if (result.reason === "exhausted") {
+              setHasNoUniqueAvailable(true);
+              setError("0 unique games available right now.");
+            } else {
+              setError("Could not load puzzle — try again.");
+            }
           }
           return;
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as PuzzleWithUniqueness;
+        const data = result.data;
         const token = getPuzzleToken(data);
-        if (hasRenderedSignature(gameType, token)) {
-          if (!cancelled) {
-            setHasNoUniqueAvailable(true);
-            setError("0 unique games available right now.");
-          }
-          return;
-        }
         if (!cancelled) {
           setPuzzle(data);
           rememberRenderedSignature(gameType, token);
@@ -483,7 +493,12 @@ export default function GameSlot({
         <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={() => void fetchPuzzleFromApi(currentDifficulty, false)}
+            onClick={() => {
+              setLoading(true);
+              void fetchPuzzleFromApi(currentDifficulty, false).finally(() =>
+                setLoading(false)
+              );
+            }}
             style={{
               background: "#1a1a1a",
               color: "#faf8f3",

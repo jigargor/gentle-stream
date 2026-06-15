@@ -4,6 +4,7 @@ import {
   SESSION_START_COOKIE,
   sessionStartCookieOptions,
 } from "@/lib/auth/session-policy";
+import { GUEST_ACCESS_COOKIE } from "@/lib/auth/guest-access";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
 import { db } from "@/lib/db/client";
 
@@ -184,6 +185,7 @@ export async function GET(request: NextRequest) {
     String(nowSec),
     sessionStartCookieOptions()
   );
+  response.cookies.delete(GUEST_ACCESS_COOKIE);
 
   return response;
 }

@@ -368,8 +368,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       const mistakeUndoStack = state.mistakeUndoStack.slice(0, -1);
       const values = cloneValues(snap.values);
       const notes = cloneNotes(snap.notes);
-      // Keep mistake tally — undo clears the wrong digit but does not erase a counted mistake.
-      const mistakes = state.mistakes;
+      const mistakes = snap.mistakes;
       const failed = mistakes >= MAX_MISTAKES;
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);

@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({ ok: true });
   const supabase = createSupabaseResponseClient(request, response);
-  await supabase.auth.signOut({ scope: "local" });
+  await supabase.auth.signOut();
   response.cookies.delete(SESSION_START_COOKIE);
   response.cookies.set(GUEST_ACCESS_COOKIE, "1", guestAccessCookieOptions());
   return response;

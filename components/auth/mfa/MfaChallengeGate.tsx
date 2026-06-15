@@ -14,9 +14,11 @@ interface FactorChoice {
 
 interface MfaChallengeGateProps {
   onPassed: () => void;
+  /** When true, skip MFA checks (e.g. guest browsing). */
+  skip?: boolean;
 }
 
-export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
+export function MfaChallengeGate({ onPassed, skip = false }: MfaChallengeGateProps) {
   const [checking, setChecking] = useState(true);
   const [required, setRequired] = useState(false);
   const [selectedFactorId, setSelectedFactorId] = useState<string | null>(null);
@@ -80,6 +82,11 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
     setChallengeId(null);
     setCode("");
     autoSubmittedCodeRef.current = null;
+    if (skip) {
+      onPassedRef.current();
+      setChecking(false);
+      return;
+    }
     try {
       const supabase = createClient();
       const { data: aalData, error: aalError } =
@@ -126,7 +133,7 @@ export function MfaChallengeGate({ onPassed }: MfaChallengeGateProps) {
     } finally {
       setChecking(false);
     }
-  }, [startChallenge]);
+  }, [skip, startChallenge]);
 
   useEffect(() => {
     void init();

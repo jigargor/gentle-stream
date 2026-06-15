@@ -4,11 +4,16 @@ import { GUEST_ACCESS_COOKIE } from "@/lib/auth/guest-access";
 
 const getUserMock = vi.fn();
 const signOutMock = vi.fn();
+const getAuthenticatorAssuranceLevelMock = vi.fn();
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: vi.fn(() => ({
     auth: {
       getUser: getUserMock,
+      signOut: signOutMock,
+      mfa: {
+        getAuthenticatorAssuranceLevel: getAuthenticatorAssuranceLevelMock,
+      },
     },
   })),
 }));
@@ -24,6 +29,11 @@ vi.mock("@/lib/supabase/response-client", () => ({
 describe("updateSession middleware", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    signOutMock.mockResolvedValue({ error: null });
+    getAuthenticatorAssuranceLevelMock.mockResolvedValue({
+      data: { currentLevel: "aal1", nextLevel: "aal1" },
+      error: null,
+    });
   });
 
   it("passes through when auth disabled in non-production", async () => {
@@ -92,7 +102,9 @@ describe("updateSession middleware", () => {
     delete mutableEnv.AUTH_DISABLED;
     mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
     mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
-    getUserMock.mockResolvedValueOnce({ data: { user: null } });
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "user-1", email: "reader@example.com" } },
+    });
 
     const { updateSession } = await import("@/lib/supabase/middleware");
     const req = new NextRequest("http://localhost:3000/api/feed", {
@@ -102,6 +114,51 @@ describe("updateSession middleware", () => {
     });
     const res = await updateSession(req);
     expect(res.status).toBe(200);
+    expect(signOutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps MFA-pending users on login so they can continue as guest", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "user-1", email: "reader@example.com" } },
+    });
+    getAuthenticatorAssuranceLevelMock.mockResolvedValueOnce({
+      data: { currentLevel: "aal1", nextLevel: "aal2" },
+      error: null,
+    });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/login");
+    const res = await updateSession(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("redirects fully signed-in users away from login", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "user-1", email: "reader@example.com" } },
+    });
+    getAuthenticatorAssuranceLevelMock.mockResolvedValueOnce({
+      data: { currentLevel: "aal2", nextLevel: "aal2" },
+      error: null,
+    });
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/login");
+    const res = await updateSession(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/");
   });
 
   it("allows anonymous access to public article pages", async () => {

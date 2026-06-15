@@ -1818,8 +1818,8 @@ export default function NewsFeed({
     handleKindFilterSelect("all");
   }, [feedIncludeUserSubmitted, handleKindFilterSelect]);
 
-  if (!mfaPassed) {
-    return <MfaChallengeGate onPassed={() => setMfaPassed(true)} />;
+  if (!isGuestUser && !mfaPassed) {
+    return <MfaChallengeGate skip={false} onPassed={() => setMfaPassed(true)} />;
   }
 
   return (

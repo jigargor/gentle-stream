@@ -58,7 +58,7 @@ describe("/api/auth/guest-access", () => {
     const setCookie = response.headers.get("set-cookie") ?? "";
 
     expect(response.status).toBe(200);
-    expect(signOutMock).toHaveBeenCalledWith({ scope: "local" });
+    expect(signOutMock).toHaveBeenCalledWith();
     expect(setCookie).toContain("gs_guest_access=1");
     expect(setCookie).toContain("gs_sess_start=");
   });

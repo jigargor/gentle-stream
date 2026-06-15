@@ -29,6 +29,7 @@ import {
   finishCronIngestRun,
 } from "@/lib/db/cronIngestLogs";
 import { getSessionUserId } from "@/lib/api/sessionUser";
+import { GUEST_ACCESS_COOKIE, hasGuestAccessCookie } from "@/lib/auth/guest-access";
 import {
   buildRateLimitKey,
   consumeRateLimit,
@@ -224,7 +225,13 @@ export async function GET(request: NextRequest) {
   const requestId = makeRequestId(request);
   const startedAtMs = Date.now();
 
-  const sessionUserId = process.env.AUTH_DISABLED === "1" ? null : await getSessionUserId();
+  const hasGuestAccess = hasGuestAccessCookie(
+    request.cookies.get(GUEST_ACCESS_COOKIE)?.value ?? null
+  );
+  const sessionUserId =
+    process.env.AUTH_DISABLED === "1" || hasGuestAccess
+      ? null
+      : await getSessionUserId();
   const userId =
     process.env.AUTH_DISABLED === "1"
       ? process.env.DEV_USER_ID ?? "dev-local"

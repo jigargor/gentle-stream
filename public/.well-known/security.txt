@@ -1,0 +1,8 @@
+# RFC 9116 — https://www.rfc-editor.org/rfc/rfc9116.html
+# Replace Contact if you use a different monitored inbox or disclosure URL.
+
+Contact: mailto:security@gentle-stream.org
+Preferred-Languages: en
+Canonical: https://gentle-stream.org/.well-known/security.txt
+Canonical: https://gentle-stream.vercel.app/.well-known/security.txt
+Expires: 2027-04-29T23:59:59.000Z

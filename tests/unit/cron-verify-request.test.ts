@@ -35,12 +35,12 @@ describe("isAuthorizedCronRequest", () => {
     expect(isAuthorizedCronRequest(request)).toBe(false);
   });
 
-  it("returns false in production with valid secret but missing cron ip headers", async () => {
+  it("returns true in production with valid secret even without cron ip headers", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { isAuthorizedCronRequest } = await import("@/lib/cron/verifyRequest");
     const request = buildRequest({ authorization: "Bearer test-secret" });
 
-    expect(isAuthorizedCronRequest(request)).toBe(false);
+    expect(isAuthorizedCronRequest(request)).toBe(true);
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 

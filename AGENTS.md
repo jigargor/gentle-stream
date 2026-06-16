@@ -39,7 +39,8 @@ Supabase keys can be placeholders when auth is disabled — the feed will show "
 
 ### CI matrix
 
-- **PR fast checks** (`ci-reusable.yml` → `npm run ci:fast`): typecheck, lint, production build, unit/component tests, high-severity `npm audit --omit=dev`, Storybook critical stories, Playwright smoke (`@smoke` mock legal/login + `@app` guest feed and sudoku harness).
+- **PR fast checks** (`ci-reusable.yml` → `npm run ci:fast`): typecheck, lint, production build, unit/component tests, high-severity `npm audit --omit=dev`.
+- **PR smoke browser job** (`ci-reusable.yml` → `smoke-browser`): Storybook critical stories + Playwright mock/app smoke (Chromium cached separately so fast checks stay under 25m).
 - **Post-merge integration** (`ci:integration` job): script-based DB tests when Supabase secrets are available; not required on fork PRs.
 - **Cross-browser E2E** runs on `develop` via `e2e-cross-browser.yml`, not every PR.
 - **Rate limits** default to Postgres (`consume_rate_limit` RPC); set `RATE_LIMIT_USE_MEMORY=1` only for local debugging.

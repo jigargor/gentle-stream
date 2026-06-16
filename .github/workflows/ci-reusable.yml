@@ -54,6 +54,8 @@ jobs:
     name: Storybook and Playwright smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
     env:
       NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
@@ -68,18 +70,6 @@ jobs:
         run: npm install --global npm@11.6.1
       - name: Install dependencies
         run: npm ci || npm ci --legacy-peer-deps
-      - name: Resolve Playwright version
-        id: playwright-version
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium
-      - name: Install Playwright Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: timeout 600 npx playwright install chromium
       - name: Storybook critical stories
         run: npm run test:stories
       - name: Playwright mock smoke

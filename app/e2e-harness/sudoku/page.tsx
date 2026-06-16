@@ -3,10 +3,7 @@ import GameSlot from "@/components/games/GameSlot";
 
 /** Dev/CI-only Sudoku surface for Playwright smoke tests — not linked in production nav. */
 export default function SudokuE2eHarnessPage() {
-  if (
-    process.env.NODE_ENV === "production" &&
-    process.env.E2E_HARNESS !== "1"
-  ) {
+  if (process.env.E2E_HARNESS !== "1") {
     notFound();
   }
 

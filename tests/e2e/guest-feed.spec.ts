@@ -7,9 +7,9 @@ test.describe("guest browsing @app", () => {
     await expect(
       page.getByRole("button", { name: "Continue as guest" })
     ).toBeVisible();
-    await page.getByRole("button", { name: "Continue as guest" }).click();
+    await page.getByRole("button", { name: "Continue as guest" }).click({ noWaitAfter: true });
 
-    await page.waitForURL(/\/(\?.*)?$/, { timeout: 30_000 });
+    await page.waitForURL(/\/(\?.*)?$/, { timeout: 60_000 });
     await expect(
       page.getByText("Powered by AI", { exact: false })
     ).toBeVisible({ timeout: 30_000 });

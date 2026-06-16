@@ -53,7 +53,7 @@ jobs:
   smoke-browser:
     name: Storybook and Playwright smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     container:
       image: mcr.microsoft.com/playwright:v1.59.1-noble
     env:
@@ -74,8 +74,28 @@ jobs:
         run: npm run test:stories
       - name: Playwright mock smoke
         run: npm run test:e2e:smoke
+      - name: Start app dev server for Playwright
+        run: |
+          npm run dev-light -- --hostname 0.0.0.0 --port 3000 &
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:3000/login > /dev/null; then
+              echo "Dev server ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Dev server failed to start"
+          exit 1
+        env:
+          DEV_LIGHT: "1"
+          E2E_HARNESS: "1"
+          TURNSTILE_ENABLED: "0"
+          NEXT_PUBLIC_TURNSTILE_ENABLED: "0"
+          NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key"
+          SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key"
       - name: Playwright app smoke (guest + sudoku)
-        run: npm run test:e2e:smoke:app
+        run: cross-env PLAYWRIGHT_SKIP_WEBSERVER=1 npm run test:e2e:smoke:app
         env:
           E2E_HARNESS: "1"
           TURNSTILE_ENABLED: "0"

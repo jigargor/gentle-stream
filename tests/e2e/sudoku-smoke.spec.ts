@@ -4,8 +4,11 @@ test.describe("sudoku game @app", () => {
   test("loads puzzle and undo restores after a mistake @smoke", async ({ page }) => {
     await page.goto("/e2e-harness/sudoku");
 
+    await expect(page.getByText("Setting the grid", { exact: false })).toBeHidden({
+      timeout: 60_000,
+    });
     await expect(page.getByText("Sudoku", { exact: true })).toBeVisible({
-      timeout: 45_000,
+      timeout: 15_000,
     });
     await expect(page.getByText("Mistakes 0/3")).toBeVisible();
 

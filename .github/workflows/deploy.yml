@@ -149,3 +149,51 @@ jobs:
             exit 1
           fi
           echo "Smoke test passed"
+
+      - name: Smoke test — GET /api/feed
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          BYPASS="${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}"
+          curl_status () {
+            local url="$1"
+            if [ -n "$BYPASS" ]; then
+              curl -s -o /dev/null -w "%{http_code}" \
+                -H "x-vercel-protection-bypass: $BYPASS" \
+                "$url"
+            else
+              curl -s -o /dev/null -w "%{http_code}" \
+                "$url"
+            fi
+          }
+
+          STATUS=$(curl_status "$DEPLOY_URL/api/feed?limit=1")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "401" ] && [ "$STATUS" != "403" ]; then
+            echo "Smoke test failed — /api/feed returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed (/api/feed reachable)"
+
+      - name: Smoke test — GET /api/game/sudoku
+        run: |
+          DEPLOY_URL="${{ steps.deploy.outputs.url }}"
+          BYPASS="${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}"
+          curl_status () {
+            local url="$1"
+            if [ -n "$BYPASS" ]; then
+              curl -s -o /dev/null -w "%{http_code}" \
+                -H "x-vercel-protection-bypass: $BYPASS" \
+                "$url"
+            else
+              curl -s -o /dev/null -w "%{http_code}" \
+                "$url"
+            fi
+          }
+
+          STATUS=$(curl_status "$DEPLOY_URL/api/game/sudoku?difficulty=easy")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test failed — /api/game/sudoku returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed"

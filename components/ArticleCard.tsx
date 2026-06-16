@@ -36,6 +36,19 @@ import {
   rssHasExtraContentBeyondExcerpt,
 } from "@/lib/articles/rssFeedPreview";
 import { computeAdaptiveExcerptClamp } from "@/lib/articles/rssExcerptClamp";
+import {
+  formatDateLabel,
+  formatDateTimeDetail,
+  shouldSampleTranslationLog,
+} from "@/components/article/article-card-formatting";
+import {
+  BookmarkFilledIcon,
+  BookmarkOutlineIcon,
+  DownloadIcon,
+  HeartFilledIcon,
+  HeartOutlineIcon,
+  InfoCircleIcon,
+} from "@/components/article/article-card-icons";
 
 interface ArticleTranslationPayload {
   available: boolean;
@@ -46,11 +59,6 @@ interface ArticleTranslationPayload {
   body: string;
   pullQuote: string;
   imagePrompt: string;
-}
-
-function shouldSampleTranslationLog(): boolean {
-  if (process.env.NODE_ENV !== "production") return true;
-  return Math.random() < 0.03;
 }
 
 const HERO_IMG_W = 800;
@@ -70,160 +78,6 @@ const RSS_EXCERPT_RESERVED_PX = 18;
 /** Gap between clamped excerpt and Read more (matches grid gap on preview wrap). */
 const RSS_PREVIEW_STACK_GAP_PX = 10.4;
 let userApiAllowed = true;
-
-function formatDateLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) return null;
-  return new Date(ms).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatDateTimeDetail(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) return null;
-  return new Date(ms).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function InfoCircleIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden style={{ flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M12 10.5v5M12 8.2v.05"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function BookmarkOutlineIcon() {
-  return (
-    <svg
-      width={15}
-      height={18}
-      viewBox="0 0 15 18"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path
-        d="M2.25 1.25h10.5v14.15L7.5 11.35 2.25 15.4V1.25z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.2}
-        strokeLinejoin="miter"
-      />
-    </svg>
-  );
-}
-
-function BookmarkFilledIcon() {
-  return (
-    <svg
-      width={15}
-      height={18}
-      viewBox="0 0 15 18"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path
-        d="M2.25 1.25h10.5v14.15L7.5 11.35 2.25 15.4V1.25z"
-        fill="currentColor"
-        stroke="currentColor"
-        strokeWidth={0.85}
-        strokeLinejoin="miter"
-      />
-    </svg>
-  );
-}
-
-function HeartOutlineIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path
-        d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.2}
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function HeartFilledIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path
-        d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
-        fill="currentColor"
-        stroke="currentColor"
-        strokeWidth={1}
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function DownloadIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path
-        d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.6}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <polyline
-        points="7 10 12 15 17 10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.6}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <line
-        x1="12"
-        y1="15"
-        x2="12"
-        y2="3"
-        stroke="currentColor"
-        strokeWidth={1.6}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 const iconActionStyle: CSSProperties = {
   display: "inline-flex",

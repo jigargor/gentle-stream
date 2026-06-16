@@ -54,6 +54,24 @@ import {
   deriveSingletonPlacementFromHydratedSections,
   spotifyContentSignature,
 } from "./feed/news-feed-helpers";
+import {
+  buildPersistedFeedPayload,
+  FEED_PERSIST_MAX_BYTES_DEFAULT,
+  FEED_PERSIST_MAX_SECTIONS_DEFAULT,
+  FEED_PERSIST_VERSION,
+  persistedFeedStorageKey,
+  readPersistedFeedSnapshot,
+  type PersistedFeedSnapshot,
+} from "./feed/feed-persistence";
+import { FeedFooter } from "./feed/FeedFooter";
+import { FeedSectionsList } from "./feed/FeedSectionsList";
+import {
+  gameRatioLocalStorageKey,
+  GUEST_USER_ID,
+  SINGLETON_AFTER_ARTICLE_COUNT_NASA,
+  SINGLETON_AFTER_ARTICLE_COUNT_SPOTIFY,
+  SINGLETON_AFTER_ARTICLE_COUNT_WEATHER,
+} from "./feed/hooks/useFeedBootstrap";
 
 export { deriveSingletonPlacementFromHydratedSections } from "./feed/news-feed-helpers";
 
@@ -67,24 +85,10 @@ const FORCE_INGEST_RETRY_DELAY_MS = 1_200;
 const FORCE_INGEST_CLIENT_COOLDOWN_MS = 8_000;
 const FEED_CACHE_TTL_MS = 35_000;
 const FEED_STALE_TTL_MS = 120_000;
-const FEED_PERSIST_TTL_MS = 24 * 60 * 60 * 1000;
-/** Bumped when persisted snapshot shape or mix semantics change (invalidates stale on-disk feeds). */
-const FEED_PERSIST_VERSION = 2;
-/** Per-user client cache for game mix — avoids sharing one key between guest and signed-in sessions. */
-function gameRatioLocalStorageKey(userId: string): string {
-  return `gentle_stream_game_ratio_v2:${userId}`;
-}
-const FEED_PERSIST_MAX_SECTIONS_DEFAULT = 48;
-const FEED_PERSIST_MAX_BYTES_DEFAULT = 350_000;
-const GUEST_USER_ID = "anonymous";
 const DEFAULT_GAP_MIN_PX = 180;
 const DEFAULT_INLINE_GAP_MIN_PX = 140;
 const DEFAULT_FILLER_INTERVAL = 4;
 const DEFAULT_TODO_WEIGHT = 2;
-/** Article sections completed before we insert each cached singleton row (not at top of feed). */
-const SINGLETON_AFTER_ARTICLE_COUNT_WEATHER = 2;
-const SINGLETON_AFTER_ARTICLE_COUNT_SPOTIFY = 5;
-const SINGLETON_AFTER_ARTICLE_COUNT_NASA = 8;
 type FeedKindFilter = "all" | ArticleContentKind;
 
 interface SingletonFeedCache {
@@ -104,19 +108,6 @@ interface FeedApiResponse {
 interface FeedCacheEntry {
   data: FeedApiResponse;
   cachedAtMs: number;
-}
-
-interface PersistedFeedSnapshot {
-  version: number;
-  userId: string;
-  createdAtMs: number;
-  sectionCount: number;
-  articleSectionsRendered: number;
-  /** Mix used when this snapshot was written — reject hydrate if it no longer matches. */
-  feedGameRatio?: number;
-  sections: FeedSection[];
-  renderedArticleKeys: string[];
-  renderedDbArticleIds: string[];
 }
 
 export interface NewsFeedProps {
@@ -221,7 +212,7 @@ export default function NewsFeed({
   const firstSectionTelemetryLoggedRef = useRef(false);
   const persistentCacheHydrateAttemptedRef = useRef(false);
   const persistentCacheHydrateHitRef = useRef(false);
-  const persistedFeedKey = `gentle_stream_feed_sections_v${FEED_PERSIST_VERSION}:${userId}`;
+  const persistedFeedKey = persistedFeedStorageKey(userId);
 
   const fillerEnabled = readTruthyFlag(
     process.env.NEXT_PUBLIC_FEED_GAP_FILL_ENABLED,
@@ -281,28 +272,13 @@ export default function NewsFeed({
     if (!isDefaultFeedView()) return false;
     try {
       const raw = localStorage.getItem(persistedFeedKey);
-      if (!raw) return false;
-      const parsed = JSON.parse(raw) as PersistedFeedSnapshot;
-      if (
-        !parsed ||
-        parsed.version !== FEED_PERSIST_VERSION ||
-        parsed.userId !== userId ||
-        !Array.isArray(parsed.sections)
-      ) {
-        localStorage.removeItem(persistedFeedKey);
-        return false;
-      }
-      if (Date.now() - parsed.createdAtMs > FEED_PERSIST_TTL_MS) {
-        localStorage.removeItem(persistedFeedKey);
-        return false;
-      }
-      const snapRatio = parsed.feedGameRatio;
-      if (
-        typeof snapRatio !== "number" ||
-        Number.isNaN(snapRatio) ||
-        Math.abs(snapRatio - gameRatioRef.current) > 0.02
-      ) {
-        localStorage.removeItem(persistedFeedKey);
+      const parsed = readPersistedFeedSnapshot(
+        raw,
+        userId,
+        gameRatioRef.current
+      );
+      if (!parsed) {
+        if (raw) localStorage.removeItem(persistedFeedKey);
         return false;
       }
       const boundedSections = parsed.sections.slice(-persistentFeedCacheMaxSections);
@@ -1469,34 +1445,22 @@ export default function NewsFeed({
     if (!isDefaultFeedView()) return;
     try {
       if (sections.length === 0) return;
-      const boundedSections = sections.slice(-persistentFeedCacheMaxSections);
-      const snapshot: PersistedFeedSnapshot = {
-        version: FEED_PERSIST_VERSION,
-        userId,
-        createdAtMs: Date.now(),
-        sectionCount: boundedSections.length,
-        articleSectionsRendered: articleSectionsRenderedRef.current,
-        feedGameRatio: gameRatioRef.current,
-        sections: boundedSections,
-        renderedArticleKeys: Array.from(renderedArticleKeysRef.current),
-        renderedDbArticleIds: Array.from(renderedDbArticleIdsRef.current),
-      };
-      let payload = JSON.stringify(snapshot);
-      if (payload.length > persistentFeedCacheMaxBytes) {
-        const minKeep = Math.min(8, boundedSections.length);
-        let keepCount = boundedSections.length;
-        while (payload.length > persistentFeedCacheMaxBytes && keepCount > minKeep) {
-          keepCount -= 4;
-          const trimmedSnapshot: PersistedFeedSnapshot = {
-            ...snapshot,
-            sectionCount: keepCount,
-            sections: boundedSections.slice(-keepCount),
-          };
-          payload = JSON.stringify(trimmedSnapshot);
-        }
-      }
-      if (payload.length <= persistentFeedCacheMaxBytes)
-        localStorage.setItem(persistedFeedKey, payload);
+      const payload = buildPersistedFeedPayload({
+        snapshot: {
+          version: FEED_PERSIST_VERSION,
+          userId,
+          createdAtMs: Date.now(),
+          sectionCount: sections.length,
+          articleSectionsRendered: articleSectionsRenderedRef.current,
+          feedGameRatio: gameRatioRef.current,
+          sections,
+          renderedArticleKeys: Array.from(renderedArticleKeysRef.current),
+          renderedDbArticleIds: Array.from(renderedDbArticleIdsRef.current),
+        },
+        maxSections: persistentFeedCacheMaxSections,
+        maxBytes: persistentFeedCacheMaxBytes,
+      });
+      if (payload) localStorage.setItem(persistedFeedKey, payload);
     } catch {
       // best-effort cache
     }
@@ -2018,83 +1982,11 @@ export default function NewsFeed({
           </div>
         )}
 
-        {sections.map((section) => {
-          if (section.sectionType === "game") {
-            return (
-              <GameSlot
-                key={`game-${section.index}`}
-                gameType={section.gameType}
-                difficulty={section.difficulty}
-              />
-            );
-          }
-          if (section.sectionType === "module" || section.sectionType === "filler") {
-            if (section.moduleType === "spotify") {
-              return (
-                <SpotifyMoodTile
-                  key={`module-${section.index}-spotify`}
-                  data={section.data as SpotifyMoodTileData}
-                  reason={section.reason}
-                  feedCategory={activeCategoryRef.current ?? undefined}
-                />
-              );
-            }
-            if (section.moduleType === "todo") {
-              return (
-                <TodoCard
-                  key={`module-${section.index}-todo`}
-                  data={section.data as TodoModuleData}
-                  reason={section.reason}
-                />
-              );
-            }
-            if (section.moduleType === "generated_art") {
-              return (
-                <GeneratedArtModuleCard
-                  key={`module-${section.index}-art`}
-                  data={section.data as GeneratedImageModuleData}
-                  reason={section.reason}
-                />
-              );
-            }
-            if (section.moduleType === "icon_fractal") {
-              return (
-                <IconFractalCard
-                  key={`module-${section.index}-icon-fractal`}
-                  data={section.data as IconFractalModuleData}
-                />
-              );
-            }
-            if (section.moduleType === "nasa") {
-              return (
-                <NasaApodCard
-                  key={`module-${section.index}-nasa`}
-                  data={section.data as NasaModuleData}
-                  reason={section.reason}
-                />
-              );
-            }
-            return (
-              <WeatherCard
-                key={`module-${section.index}-weather`}
-                data={section.data as WeatherModuleData}
-                reason={section.reason}
-                weatherUnitSystem={weatherUnitSystem}
-              />
-            );
-          }
-          if (section.sectionType === "articles") {
-            return (
-              <NewsSection
-                key={`news-${section.index}`}
-                articles={section.articles}
-                sectionIndex={section.index}
-                layoutPlan={section.newspaperLayout}
-              />
-            );
-          }
-          return null;
-        })}
+        <FeedSectionsList
+          sections={sections}
+          activeCategory={activeCategory}
+          weatherUnitSystem={weatherUnitSystem}
+        />
 
         <div aria-live="polite" style={{ position: "absolute", left: "-9999px" }}>
           {loading ? "Loading more stories." : ""}
@@ -2132,20 +2024,7 @@ export default function NewsFeed({
         <div ref={sentinelRef} style={{ height: "1px" }} />
         {loading && <LoadingSection />}
 
-        <footer
-          style={{
-            padding: "2rem",
-            textAlign: "center",
-            borderTop: "3px double var(--gs-ink-strong)",
-            fontFamily: "'IM Fell English', Georgia, serif",
-            fontSize: "0.73rem",
-            color: "var(--gs-muted)",
-            letterSpacing: "0.05em",
-          }}
-        >
-          &copy; Gentle Stream &nbsp;&middot;&nbsp; Powered by AI
-          &nbsp;&middot;&nbsp; Only the uplifting, only the inspiring
-        </footer>
+        <FeedFooter />
       </main>
       {showScrollTopButton ? (
         <button

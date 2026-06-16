@@ -26,7 +26,7 @@ const fastChecks = [
   npm("run", "security:rls-audit"),
   npm("run", "validation:route-json-casts"),
   npm("run", "lint"),
-  { ...npm("run", "security:audit"), continueOnError: true },
+  { ...npm("run", "security:audit") },
   npx("tsc", "--noEmit"),
   npm("run", "build"),
   npx("tsx", "scripts/test-sudoku.ts"),
@@ -45,6 +45,7 @@ const fastChecks = [
     : [
         npm("run", "test:stories"),
         npm("run", "test:e2e:smoke"),
+        npm("run", "test:e2e:smoke:app"),
       ]),
   npm("run", "test:integration"),
 ];

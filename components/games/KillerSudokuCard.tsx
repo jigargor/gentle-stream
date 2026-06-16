@@ -439,12 +439,9 @@ function reducer(
       values[r][c] = action.num;
       const notes = cloneNotes(state.notes);
       notes[r][c] = 0;
-      if (correct) {
-        clearDigitNotesFromRowColBox(notes, r, c, action.num);
-        const cage = cageMap.get(`${r},${c}`);
-        if (cage)
-          clearDigitNotesFromCagePeers(notes, cage, action.num, r, c);
-      }
+      clearDigitNotesFromRowColBox(notes, r, c, action.num);
+      const cage = cageMap.get(`${r},${c}`);
+      if (cage) clearDigitNotesFromCagePeers(notes, cage, action.num, r, c);
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
       return {

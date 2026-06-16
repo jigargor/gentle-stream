@@ -32,7 +32,6 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
       SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
-      CI_SKIP_BROWSER_CHECKS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,7 +47,7 @@ jobs:
           npm ci || npm ci --legacy-peer-deps
       - name: Dedup key semantics are unit-tested in ci:fast
         run: echo "DB-backed dedup integration scripts run only in the integration job."
-      - run: npm run ci:fast
+      - run: node scripts/ci/run-checks.mjs fast --install-playwright
 
   integration:
     name: DB integration tests

@@ -176,7 +176,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
             fontWeight: 700,
             letterSpacing: "0.01em",
             fontSize: "1.03rem",
-            color: "#1f1f1f",
+            color: "var(--gs-tile-ink)",
           }}
         >
           {displayData.title}
@@ -189,7 +189,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
                 fontSize: "0.67rem",
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
-                color: "#746a55",
+                color: "var(--gs-tile-muted)",
               }}
             >
               {reasonLabel}
@@ -210,7 +210,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
               borderRadius: "999px",
               border: "1px solid color-mix(in srgb, var(--gs-border) 65%, transparent)",
               background: "transparent",
-              color: "#4f463b",
+              color: "var(--gs-tile-muted)",
               cursor: refreshing ? "wait" : "pointer",
               opacity: refreshing ? 0.65 : 1,
             }}
@@ -225,7 +225,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
           margin: "0 0 0.55rem",
           fontFamily: "'IM Fell English', Georgia, serif",
           fontStyle: "italic",
-          color: "#4f463b",
+          color: "var(--gs-tile-muted)",
           fontSize: "0.9rem",
         }}
       >
@@ -245,7 +245,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
           style={{
             fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
             fontSize: "0.72rem",
-            color: "#665d4f",
+            color: "var(--gs-tile-muted)",
             textTransform: "uppercase",
             letterSpacing: "0.05em",
           }}
@@ -260,7 +260,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
             style={{
               fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
               fontSize: "0.72rem",
-              color: "#1a472a",
+              color: "var(--gs-accent)",
               textDecoration: "underline",
               textUnderlineOffset: "2px",
             }}
@@ -283,7 +283,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
           style={{
             fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
             fontSize: "0.68rem",
-            color: "#665d4f",
+            color: "var(--gs-tile-muted)",
           }}
         >
           Mood preference:
@@ -303,7 +303,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
             padding: "0.25rem",
             borderRadius: "var(--gs-radius-xs)",
             border: "1px solid color-mix(in srgb, var(--gs-border) 65%, transparent)",
-            color: liked ? "#8b2942" : "#1a1a1a",
+            color: liked ? "var(--gs-like-active)" : "var(--gs-game-ink)",
             background: "transparent",
             cursor: pending ? "wait" : "pointer",
             opacity: pending ? 0.6 : 1,
@@ -316,7 +316,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
             style={{
               fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
               fontSize: "0.68rem",
-              color: "#8b5a2b",
+              color: "var(--gs-warning)",
             }}
           >
             {hint}
@@ -343,7 +343,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
             margin: 0,
             fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
             fontSize: "0.78rem",
-            color: "#3f3a30",
+            color: "var(--gs-tile-ink)",
           }}
         >
           <thead>
@@ -409,7 +409,7 @@ export default function SpotifyMoodTile({ data, reason, feedCategory }: SpotifyM
             margin: 0,
             fontFamily: "'IM Fell English', Georgia, serif",
             fontStyle: "italic",
-            color: "#7a6f5d",
+            color: "var(--gs-tile-muted)",
             fontSize: "0.82rem",
           }}
         >

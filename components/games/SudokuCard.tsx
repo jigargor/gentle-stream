@@ -339,7 +339,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       values[r][c] = action.num;
       const notes = cloneNotes(state.notes);
       notes[r][c] = 0;
-      if (correct) clearDigitNotesFromPeers(notes, r, c, action.num);
+      clearDigitNotesFromPeers(notes, r, c, action.num);
 
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
@@ -733,7 +733,7 @@ export default function SudokuCard({
     : {
         borderTop: "3px double #1a1a1a",
         borderBottom: "2px solid #1a1a1a",
-        background: "#faf8f3",
+        background: "var(--gs-game-surface)",
         padding: "1.5rem 1.5rem 1.2rem",
         display: "flex",
         flexDirection: "column",
@@ -1088,7 +1088,7 @@ export default function SudokuCard({
             border: "1px solid #ccc",
             borderRadius: "3px",
             cursor: "pointer",
-            background: "#faf8f3",
+            background: "var(--gs-game-surface)",
           }}
         />
       </div>

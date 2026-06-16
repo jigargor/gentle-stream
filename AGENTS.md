@@ -37,6 +37,13 @@ DEV_LIGHT=1
 
 Supabase keys can be placeholders when auth is disabled — the feed will show "Could not load stories" (expected without a real DB), but the dev server, game API endpoints, and all unit tests work fine.
 
+### CI matrix
+
+- **PR fast checks** (`ci-reusable.yml` → `npm run ci:fast`): typecheck, lint, production build, unit/component tests, high-severity `npm audit --omit=dev`, Storybook critical stories, Playwright smoke (`@smoke` mock legal/login + `@app` guest feed and sudoku harness).
+- **Post-merge integration** (`ci:integration` job): script-based DB tests when Supabase secrets are available; not required on fork PRs.
+- **Cross-browser E2E** runs on `develop` via `e2e-cross-browser.yml`, not every PR.
+- **Rate limits** default to Postgres (`consume_rate_limit` RPC); set `RATE_LIMIT_USE_MEMORY=1` only for local debugging.
+
 ### Tests
 
 - **Unit tests** (`npm test` / `npm run test:unit`): Vitest config at `vitest.unit.config.ts`. Runs tests in `tests/unit/` and `tests/routes/`. No database or API keys needed — test setup in `tests/setup.ts` provides placeholder env vars.

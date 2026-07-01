@@ -36,7 +36,10 @@ export function clearDigitNotesFromPeers(
   }
 }
 
-/** Classic Sudoku / Killer: clear pencil marks for `digit` in row, column, and 3×3 box only (no diagonals). */
+/**
+ * Classic Sudoku / Killer: clear pencil marks for `digit` in row, column, and 3×3 box only (no diagonals).
+ * Use this for standard 9×9 sudoku — not `clearDigitNotesFromPeers` (diagonal variant only).
+ */
 export function clearDigitNotesFromRowColBox(
   notes: number[][],
   r: number,

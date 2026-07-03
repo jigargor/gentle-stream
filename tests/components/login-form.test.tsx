@@ -190,35 +190,15 @@ describe("LoginForm", () => {
     ).toBeInTheDocument();
   });
 
-  it("continues as guest and redirects home on success", async () => {
-    const signOutMock = vi.fn().mockResolvedValue({ error: null });
-    createClientMock.mockReturnValue({
-      auth: { signOut: signOutMock },
-    });
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    const assignMock = vi.fn();
-    vi.stubGlobal(
-      "location",
-      { origin: "http://127.0.0.1:3000", assign: assignMock } as unknown as Location
-    );
-
+  it("submits guest-access form on Continue as guest", () => {
     render(<LoginForm />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue as guest" }));
+    const button = screen.getByRole("button", { name: "Continue as guest" });
+    expect(button).toHaveAttribute("type", "submit");
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/auth/guest-access",
-        expect.objectContaining({
-          method: "POST",
-        })
-      );
-    });
-
-    await waitFor(() => {
-      expect(signOutMock).toHaveBeenCalledTimes(1);
-      expect(assignMock).toHaveBeenCalledWith("/");
-    });
+    const form = button.closest("form");
+    expect(form).not.toBeNull();
+    expect(form).toHaveAttribute("action", "/api/auth/guest-access");
+    expect(form?.querySelector('input[name="turnstileToken"]')).not.toBeNull();
   });
 });

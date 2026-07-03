@@ -81,6 +81,12 @@ export async function updateSession(
   }
 
   const { pathname } = request.nextUrl;
+  if (
+    process.env.E2E_HARNESS === "1" &&
+    pathname.startsWith("/e2e-harness")
+  ) {
+    return finish(nextResponse());
+  }
   const hasGuestAccess = hasGuestAccessCookie(
     request.cookies.get(GUEST_ACCESS_COOKIE)?.value ?? null
   );

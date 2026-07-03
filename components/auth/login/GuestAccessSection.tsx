@@ -3,7 +3,6 @@ export interface GuestAccessSectionProps {
   needsTurnstileChallenge: boolean;
   turnstileToken: string | null;
   guestBusy: boolean;
-  onContinueAsGuest: () => void;
   loginTextMuted: string;
 }
 
@@ -12,7 +11,6 @@ export function GuestAccessSection({
   needsTurnstileChallenge,
   turnstileToken,
   guestBusy,
-  onContinueAsGuest,
   loginTextMuted,
 }: GuestAccessSectionProps) {
   if (isCreatorLogin) return null;
@@ -34,8 +32,7 @@ export function GuestAccessSection({
         </p>
       ) : null}
       <button
-        type="button"
-        onClick={onContinueAsGuest}
+        type="submit"
         disabled={guestBusy || requiresChallenge}
         title={requiresChallenge ? "Complete the security check above first." : "Continue as guest"}
         aria-label={

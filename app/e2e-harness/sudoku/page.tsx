@@ -9,7 +9,12 @@ export default function SudokuE2eHarnessPage() {
 
   return (
     <main style={{ maxWidth: "32rem", margin: "2rem auto", padding: "0 1rem" }}>
-      <GameSlot gameType="sudoku" difficulty="easy" persistCloud={false} />
+      <GameSlot
+        gameType="sudoku"
+        difficulty="easy"
+        embedded
+        persistCloud={false}
+      />
     </main>
   );
 }

@@ -3,14 +3,16 @@ import { seedCookieConsent } from "./helpers";
 
 test.describe("sudoku game @app", () => {
   test("loads puzzle and undo restores after a mistake @smoke", async ({ page }) => {
-    test.setTimeout(60_000);
-
     await seedCookieConsent(page);
-    await page.goto("/e2e-harness/sudoku", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText("Setting the grid", { exact: false })).toBeHidden({
-      timeout: 60_000,
-    });
+    await Promise.all([
+      page.waitForResponse(
+        (res) => res.url().includes("/api/game/sudoku") && res.status() === 200,
+        { timeout: 60_000 }
+      ),
+      page.goto("/e2e-harness/sudoku", { waitUntil: "domcontentloaded" }),
+    ]);
+
     await expect(page.getByText("Sudoku", { exact: true })).toBeVisible({
       timeout: 15_000,
     });

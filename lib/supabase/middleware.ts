@@ -103,6 +103,11 @@ export async function updateSession(
     return finish(nextResponse());
   }
 
+  // Puzzle generators are public — skip Supabase round-trip (CI smoke uses placeholder URLs).
+  if (pathname.startsWith("/api/game")) {
+    return finish(nextResponse());
+  }
+
   // Let the Route Handler own cookie exchange; refreshing here can keep the prior session
   // while /auth/callback sets the new one, so the wrong user can appear signed in.
   if (pathname === "/auth/callback" || pathname.startsWith("/auth/callback/")) {

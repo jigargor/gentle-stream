@@ -81,6 +81,21 @@ describe("updateSession middleware", () => {
     expect(res.status).toBe(200);
   });
 
+  it("passes through /api/game without Supabase auth lookup", async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    mutableEnv.NODE_ENV = "development";
+    delete mutableEnv.AUTH_DISABLED;
+    mutableEnv.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    mutableEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY = "fake-anon-key";
+
+    const { updateSession } = await import("@/lib/supabase/middleware");
+    const req = new NextRequest("http://localhost:3000/api/game/sudoku?difficulty=easy");
+    const res = await updateSession(req);
+
+    expect(res.status).toBe(200);
+    expect(getUserMock).not.toHaveBeenCalled();
+  });
+
   it("redirects anonymous root visits to login without guest cookie", async () => {
     const mutableEnv = process.env as Record<string, string | undefined>;
     mutableEnv.NODE_ENV = "development";

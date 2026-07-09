@@ -6,7 +6,8 @@ import {
   GAME_HOW_TO_URL,
   GameHowToPlayLink,
 } from "@/components/games/GameHowToPlayLink";
-import { clearDigitNotesFromPeers } from "@/lib/games/sudokuPeerNotes";
+import { clearDigitNotesFromRowColBox } from "@/lib/games/sudokuPeerNotes";
+import { isSudokuNoteAddBlocked } from "@/lib/games/sudokuNoteCandidates";
 import {
   cellInFlashUnits,
   completedSudokuUnits,
@@ -215,41 +216,6 @@ function coerceMistakeUndoStackFromCloud(raw: unknown): MistakeUndoSnapshot[] {
   return out;
 }
 
-/** True if `digit` is already placed in the same row, column, or 3×3 box (excluding r,c). */
-function digitAppearsInSudokuPeers(
-  values: number[][],
-  r: number,
-  c: number,
-  digit: number
-): boolean {
-  for (let i = 0; i < 9; i++) {
-    if (i !== c && values[r][i] === digit) return true;
-    if (i !== r && values[i][c] === digit) return true;
-  }
-  const br = Math.floor(r / 3) * 3;
-  const bc = Math.floor(c / 3) * 3;
-  for (let rr = br; rr < br + 3; rr++) {
-    for (let cc = bc; cc < bc + 3; cc++) {
-      if ((rr !== r || cc !== c) && values[rr][cc] === digit) return true;
-    }
-  }
-  return false;
-}
-
-/** Block adding a new note for `num`; removing an existing note is always allowed. */
-function isSudokuNoteAddBlocked(
-  values: number[][],
-  notes: NoteMask[][],
-  r: number,
-  c: number,
-  num: number
-): boolean {
-  if (values[r][c] !== 0) return false;
-  const bit = 1 << (num - 1);
-  if ((notes[r][c] & bit) !== 0) return false;
-  return digitAppearsInSudokuPeers(values, r, c, num);
-}
-
 /** Identity for cloud bootstrap — avoids re-RESET when only object references change. */
 function stableSudokuPuzzleKey(p: SudokuPuzzle): string {
   return p.solution.map((row) => row.join("")).join("");
@@ -339,7 +305,7 @@ function reducer(state: BoardState, action: Action, puzzle: SudokuPuzzle): Board
       values[r][c] = action.num;
       const notes = cloneNotes(state.notes);
       notes[r][c] = 0;
-      clearDigitNotesFromPeers(notes, r, c, action.num);
+      clearDigitNotesFromRowColBox(notes, r, c, action.num);
 
       const errors = computeErrors(values, puzzle.given);
       const completed = isComplete(values, puzzle.solution);
@@ -847,19 +813,14 @@ export default function SudokuCard({
     return {
       width: "2.6rem",
       height: "2.6rem",
-      border: blocked ? "1px solid #ccc" : "1px solid #1a1a1a",
-      background: blocked
-        ? "#eeeae4"
-        : isActive
-          ? "#1a1a1a"
-          : "#faf8f3",
-      color: blocked ? "#bbb" : isActive ? "#faf8f3" : "#1a1a1a",
+      border: blocked ? "1px dashed #bbb" : "1px solid #1a1a1a",
+      background: isActive ? "#1a1a1a" : "#faf8f3",
+      color: isActive ? "#faf8f3" : "#1a1a1a",
       fontFamily: "'Playfair Display', Georgia, serif",
       fontSize: "1rem",
       fontWeight: 700,
       cursor: blocked ? "not-allowed" : "pointer",
-      opacity: blocked ? 0.55 : 1,
-      transition: "background 0.1s ease, opacity 0.1s ease",
+      transition: "background 0.1s ease, border-color 0.1s ease",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",

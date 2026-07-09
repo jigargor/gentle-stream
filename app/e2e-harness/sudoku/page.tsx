@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import GameSlot from "@/components/games/GameSlot";
+import SudokuCard from "@/components/games/SudokuCard";
+import { generateSudoku } from "@/lib/games/sudokuGenerator";
 
 /** Dev/CI-only Sudoku surface for Playwright smoke tests — not linked in production nav. */
 export default function SudokuE2eHarnessPage() {
@@ -7,9 +8,16 @@ export default function SudokuE2eHarnessPage() {
     notFound();
   }
 
+  const puzzle = generateSudoku("easy");
+
   return (
     <main style={{ maxWidth: "32rem", margin: "2rem auto", padding: "0 1rem" }}>
-      <GameSlot gameType="sudoku" difficulty="easy" persistCloud={false} />
+      <SudokuCard
+        puzzle={puzzle}
+        embedded
+        cloudSaveEnabled={false}
+        metricsEnabled={false}
+      />
     </main>
   );
 }

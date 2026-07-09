@@ -81,6 +81,12 @@ export async function updateSession(
   }
 
   const { pathname } = request.nextUrl;
+  if (
+    process.env.E2E_HARNESS === "1" &&
+    pathname.startsWith("/e2e-harness")
+  ) {
+    return finish(nextResponse());
+  }
   const hasGuestAccess = hasGuestAccessCookie(
     request.cookies.get(GUEST_ACCESS_COOKIE)?.value ?? null
   );
@@ -94,6 +100,11 @@ export async function updateSession(
 
   // Browser CSP violation reports (no session cookies; must not 401)
   if (pathname === "/api/csp-report") {
+    return finish(nextResponse());
+  }
+
+  // Puzzle generators are public — skip Supabase round-trip (CI smoke uses placeholder URLs).
+  if (pathname.startsWith("/api/game")) {
     return finish(nextResponse());
   }
 

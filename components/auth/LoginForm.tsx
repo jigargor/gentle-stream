@@ -25,7 +25,6 @@ import {
   getRedirectBaseErrorMessage,
   signInWithOAuthRedirect,
   submitEmailPasswordAuth,
-  submitGuestAccess,
   type EmailPasswordAuthRequest,
   LOGIN_TEXT_MUTED,
   loginWarningTextStyle,
@@ -236,28 +235,14 @@ export function LoginForm({
     }
   }
 
-  async function continueAsGuest() {
+  function handleGuestFormSubmit(event: React.FormEvent<HTMLFormElement>) {
     setMessage(null);
     if (needsTurnstileChallenge && !turnstileToken) {
+      event.preventDefault();
       setMessage("Please complete the security verification below.");
       return;
     }
     setGuestBusy(true);
-    try {
-      const result = await submitGuestAccess({
-        payload: { turnstileToken: turnstileToken ?? "" },
-      });
-      if (!result.ok) {
-        setMessage(result.errorMessage ?? "Could not unlock guest browsing.");
-        resetTurnstileWidget();
-        return;
-      }
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      window.location.assign(nextPath || "/");
-    } finally {
-      setGuestBusy(false);
-    }
   }
 
   if (isCreatorLoginDisabled) return <CreatorLoginDisabledScreen />;
@@ -325,16 +310,21 @@ export function LoginForm({
           </p>
         ) : null}
 
-        <GuestAccessSection
-          isCreatorLogin={isCreatorLogin}
-          needsTurnstileChallenge={needsTurnstileChallenge}
-          turnstileToken={turnstileToken}
-          guestBusy={guestBusy}
-          onContinueAsGuest={() => {
-            void continueAsGuest();
-          }}
-          loginTextMuted={LOGIN_TEXT_MUTED}
-        />
+        <form
+          method="POST"
+          action="/api/auth/guest-access"
+          onSubmit={handleGuestFormSubmit}
+          style={{ margin: 0 }}
+        >
+          <input type="hidden" name="turnstileToken" value={turnstileToken ?? ""} readOnly />
+          <GuestAccessSection
+            isCreatorLogin={isCreatorLogin}
+            needsTurnstileChallenge={needsTurnstileChallenge}
+            turnstileToken={turnstileToken}
+            guestBusy={guestBusy}
+            loginTextMuted={LOGIN_TEXT_MUTED}
+          />
+        </form>
 
         <CreatorAccessSection
           isCreatorLogin={isCreatorLogin}

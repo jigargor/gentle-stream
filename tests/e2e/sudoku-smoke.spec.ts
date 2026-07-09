@@ -1,16 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { seedCookieConsent } from "./helpers";
 
 test.describe("sudoku game @app", () => {
   test("loads puzzle and undo restores after a mistake @smoke", async ({ page }) => {
-    await page.goto("/e2e-harness/sudoku");
+    await seedCookieConsent(page);
+    await page.goto("/e2e-harness/sudoku", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText("Setting the grid", { exact: false })).toBeHidden({
-      timeout: 60_000,
-    });
-    await expect(page.getByText("Sudoku", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(page.getByText("Mistakes 0/3")).toBeVisible();
+    await expect(page.getByText("Mistakes 0/3")).toBeVisible({ timeout: 90_000 });
 
     const emptyCell = page.getByLabel(/empty$/).first();
     await emptyCell.click();

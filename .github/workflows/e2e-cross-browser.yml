@@ -39,7 +39,7 @@ jobs:
         run: npm run test:e2e:cross-browser
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-cross-browser
           path: playwright-report/

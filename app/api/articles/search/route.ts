@@ -114,38 +114,55 @@ export async function GET(request: NextRequest) {
     const offset = parsePositiveInt(searchParams.get("offset"), 0);
     const tokens = normalizeSearchTokens(q);
 
-    // Pull a candidate pool, then re-rank by mixed lexical/tag relevance.
-    let query = db
-      .from("articles")
-      .select("*")
-      .eq("tagged", true)
-      .eq("moderation_status", "approved")
-      .is("deleted_at", null)
-      .order("fetched_at", { ascending: false })
-      .limit(Math.min(160, limit * 8));
-    if (category) query = query.eq("category", category);
-    if (contentKinds && contentKinds.length > 0) query = query.in("content_kind", contentKinds);
+    // Prefer search_tsv FTS (migration 064). Fall back to headline/subheadline
+    // ilike (trigram) when the generated column is not yet applied.
     const escaped = q.replace(/[%_]/g, "").slice(0, 120);
-    query = query.or(
-      `headline.ilike.%${escaped}%,subheadline.ilike.%${escaped}%,body.ilike.%${escaped}%`
-    );
-    let { data, error } = await query;
-    if (error && error.message.includes("moderation_status")) {
-      let fallbackQuery = db
+    const ftsQuery = tokens.join(" ").slice(0, 120);
+    const candidateLimit = Math.min(160, limit * 8);
+
+    function buildBaseQuery(includeModeration: boolean) {
+      let next = db
         .from("articles")
         .select("*")
         .eq("tagged", true)
         .is("deleted_at", null)
         .order("fetched_at", { ascending: false })
-        .limit(Math.min(160, limit * 8));
-      if (category) fallbackQuery = fallbackQuery.eq("category", category);
-      if (contentKinds && contentKinds.length > 0) fallbackQuery = fallbackQuery.in("content_kind", contentKinds);
-      fallbackQuery = fallbackQuery.or(
-        `headline.ilike.%${escaped}%,subheadline.ilike.%${escaped}%,body.ilike.%${escaped}%`
-      );
-      const fallback = await fallbackQuery;
+        .limit(candidateLimit);
+      if (includeModeration) next = next.eq("moderation_status", "approved");
+      if (category) next = next.eq("category", category);
+      if (contentKinds && contentKinds.length > 0) next = next.in("content_kind", contentKinds);
+      return next;
+    }
+
+    let { data, error } = await buildBaseQuery(true).textSearch("search_tsv", ftsQuery, {
+      type: "plain",
+      config: "english",
+    });
+    const missingSearchTsv =
+      Boolean(error?.message) &&
+      (error!.message.includes("search_tsv") ||
+        error!.message.includes("column") ||
+        error!.message.includes("textSearch"));
+    if (error && error.message.includes("moderation_status")) {
+      const fallback = await buildBaseQuery(false).textSearch("search_tsv", ftsQuery, {
+        type: "plain",
+        config: "english",
+      });
       data = fallback.data;
       error = fallback.error;
+    }
+    if (error && (missingSearchTsv || error.message.includes("search_tsv"))) {
+      let ilikeQuery = buildBaseQuery(true).or(
+        `headline.ilike.%${escaped}%,subheadline.ilike.%${escaped}%`
+      );
+      let ilikeResult = await ilikeQuery;
+      if (ilikeResult.error && ilikeResult.error.message.includes("moderation_status")) {
+        ilikeResult = await buildBaseQuery(false).or(
+          `headline.ilike.%${escaped}%,subheadline.ilike.%${escaped}%`
+        );
+      }
+      data = ilikeResult.data;
+      error = ilikeResult.error;
     }
     if (error) throw new Error(error.message);
 

@@ -45,20 +45,29 @@ export async function getDailyConnectionsGameRow(
 ): Promise<GameRow | null> {
   const flavor = await resolveGameFlavor("connections", flavorOverride);
 
-  const query = db
+  // Select ids only first — avoid pulling hundreds of JSONB payloads.
+  const { data: idRows, error: idError } = await db
     .from("games")
-    .select("*")
+    .select("id")
     .eq("type", "connections")
     .eq("flavor", flavor)
     .order("id", { ascending: true })
     .limit(400);
 
-  const { data, error } = await query;
-  if (error || !data?.length) return null;
+  if (idError || !idRows?.length) return null;
 
-  const rows = data as GameRow[];
-  const idx = hashStringToUint32(`connections-daily|${utcDateKey}`) % rows.length;
-  return rows[idx] ?? null;
+  const ids = (idRows as { id: string }[]).map((row) => row.id);
+  const idx = hashStringToUint32(`connections-daily|${utcDateKey}`) % ids.length;
+  const chosenId = ids[idx];
+  if (!chosenId) return null;
+
+  const { data, error } = await db
+    .from("games")
+    .select("*")
+    .eq("id", chosenId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as GameRow;
 }
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
@@ -233,12 +242,8 @@ export async function getGameFromPoolUnseenThenReuse(
  * Non-fatal on failure — we'd rather serve a duplicate than error.
  */
 export async function markGameUsed(id: string): Promise<void> {
-  const rpcAttempt = await db
-    .from("games")
-    .update({ used_count: db.rpc("increment_used_count_game", { p_id: id }) as never })
-    .eq("id", id);
-
-  if (!rpcAttempt.error) return;
+  const { error: rpcError } = await db.rpc("increment_used_count_game", { p_id: id });
+  if (!rpcError) return;
 
   const { data } = await db
     .from("games")

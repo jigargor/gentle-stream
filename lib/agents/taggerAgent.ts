@@ -124,6 +124,7 @@ async function tagSingleArticle(article: StoredArticle): Promise<TagSingleOutcom
       readingTimeSecs: article.readingTimeSecs, // already estimated by ingest
       qualityScore: clamp(enrichment.qualityScore ?? 0.5),
       moderation,
+      existingExplicitTags: article.creatorExplicitTags ?? [],
     });
 
     captureMessage({

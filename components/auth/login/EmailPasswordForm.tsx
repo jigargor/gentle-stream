@@ -22,8 +22,11 @@ export interface EmailPasswordFormProps {
   needsTurnstileChallenge: boolean;
   turnstileToken: string | null;
   turnstileContainerRef: RefObject<HTMLDivElement | null>;
+  cspNonce?: string;
+  turnstileErrorMessage?: string | null;
   onSubmit: FormEventHandler<HTMLFormElement>;
   onTurnstileScriptLoad: () => void;
+  onRetryTurnstile?: () => void;
   onEmailModeChange: (value: "sign_in" | "sign_up") => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -43,8 +46,11 @@ export function EmailPasswordForm({
   needsTurnstileChallenge,
   turnstileToken,
   turnstileContainerRef,
+  cspNonce,
+  turnstileErrorMessage = null,
   onSubmit,
   onTurnstileScriptLoad,
+  onRetryTurnstile,
   onEmailModeChange,
   onEmailChange,
   onPasswordChange,
@@ -204,12 +210,15 @@ export function EmailPasswordForm({
       {needsTurnstileChallenge ? (
         <>
           <Script
-            src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+            src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
             async
             defer
+            strategy="afterInteractive"
+            nonce={cspNonce}
+            onReady={onTurnstileScriptLoad}
             onLoad={onTurnstileScriptLoad}
           />
-          {!turnstileToken ? (
+          {!turnstileToken && !turnstileErrorMessage ? (
             <p
               style={{
                 margin: "0 0 0.5rem",
@@ -218,6 +227,45 @@ export function EmailPasswordForm({
             >
               Complete the security check below before signing in.
             </p>
+          ) : null}
+          {turnstileErrorMessage ? (
+            <div
+              style={{
+                margin: "0 0 0.65rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.4rem",
+              }}
+            >
+              <p
+                role="alert"
+                style={{
+                  margin: 0,
+                  ...loginMutedHintStyle,
+                  color: "#9a3412",
+                }}
+              >
+                {turnstileErrorMessage}
+              </p>
+              {onRetryTurnstile ? (
+                <button
+                  type="button"
+                  onClick={onRetryTurnstile}
+                  style={{
+                    ...loginIconButtonStyle,
+                    alignSelf: "flex-start",
+                    padding: "0.35rem 0.65rem",
+                    border: "1px solid rgba(154, 52, 18, 0.35)",
+                    borderRadius: "0.4rem",
+                    color: "#9a3412",
+                    background: "transparent",
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry security check
+                </button>
+              ) : null}
+            </div>
           ) : null}
           <div
             ref={turnstileContainerRef as unknown as RefObject<HTMLDivElement>}

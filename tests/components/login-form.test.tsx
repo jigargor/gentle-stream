@@ -188,6 +188,9 @@ describe("LoginForm", () => {
     expect(
       screen.getByText("Complete the security check above to unlock guest browsing.")
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("Complete the security check below before signing in.")
+    ).toBeInTheDocument();
   });
 
   it("submits guest-access form on Continue as guest", () => {

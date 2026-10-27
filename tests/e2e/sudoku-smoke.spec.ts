@@ -14,11 +14,14 @@ test.describe("sudoku game @app", () => {
     let mistakeRecorded = false;
     for (const digit of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       await page.getByRole("button", { name: `Enter ${digit}` }).click();
-      if (await page.getByText("Mistakes 1/3").isVisible().catch(() => false)) {
+      try {
+        await expect(page.getByText("Mistakes 1/3")).toBeVisible({ timeout: 1_500 });
         mistakeRecorded = true;
         break;
+      } catch {
+        await page.getByRole("button", { name: "Erase" }).click();
+        await expect(page.getByText("Mistakes 0/3")).toBeVisible({ timeout: 1_500 });
       }
-      await page.getByRole("button", { name: "Erase" }).click();
     }
 
     expect(mistakeRecorded).toBe(true);

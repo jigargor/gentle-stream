@@ -12,6 +12,7 @@ export interface CloudflareTurnstileApi {
       callback?: (token: string) => void;
       "expired-callback"?: () => void;
       "error-callback"?: () => void;
+      "timeout-callback"?: () => void;
     }
   ) => string;
   reset: (widgetId: string) => void;

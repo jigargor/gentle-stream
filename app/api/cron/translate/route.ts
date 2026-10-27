@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       traceId: request.headers.get("x-trace-id") ?? undefined,
     });
     const maxRows = readPositiveInt(process.env.TRANSLATION_NORMALIZATION_MAX_ROWS, 40);
-    const scanLimit = readPositiveInt(process.env.TRANSLATION_NORMALIZATION_SCAN_LIMIT, 900);
+    const scanLimit = readPositiveInt(process.env.TRANSLATION_NORMALIZATION_SCAN_LIMIT, 100);
     const summary = await runArticleTranslationNormalization({
       maxRows,
       scanLimit,

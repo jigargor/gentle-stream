@@ -54,16 +54,17 @@ function makeArticle(id: string, category: StoredArticle["category"]): StoredArt
 }
 
 describe("collectAcrossBuckets", () => {
-  it("deduplicates and uses parallel per-bucket fetch limits", async () => {
+  it("deduplicates and caps mixed-feed bucket fan-out", async () => {
     const profile = makeProfile();
     const requestedLimits: number[] = [];
+    const requestedCategories: string[] = [];
 
-    // With contentKinds ["news"], traversal uses all editorial buckets (no recipe bucket).
-    const bucketCount = CATEGORIES.length;
+    // Mixed feed caps fan-out at MIXED_FEED_BUCKET_CAP (5) even when more categories exist.
+    const mixedFeedBucketCap = 5;
     const poolSize = 3;
     const expectedPerBucketLimit = Math.max(
       8,
-      Math.ceil(poolSize / bucketCount) + 8
+      Math.ceil(poolSize / mixedFeedBucketCap) + 8
     );
 
     const output = await collectAcrossBuckets(
@@ -75,6 +76,7 @@ describe("collectAcrossBuckets", () => {
       ["news"],
       async (category, limit) => {
         requestedLimits.push(limit);
+        requestedCategories.push(category);
         // Parallel fetches: key mock results by category, not call order.
         if (category === CATEGORIES[0]) return [makeArticle("a1", CATEGORIES[0])];
         if (category === CATEGORIES[1]) {
@@ -89,8 +91,44 @@ describe("collectAcrossBuckets", () => {
     );
 
     expect(output.map((a) => a.id)).toEqual(["a1", "a2", "a3"]);
-    expect(requestedLimits).toHaveLength(bucketCount);
+    expect(requestedLimits).toHaveLength(mixedFeedBucketCap);
+    expect(requestedCategories.length).toBeLessThanOrEqual(CATEGORIES.length);
     expect(requestedLimits.every((limit) => limit === expectedPerBucketLimit)).toBe(true);
     expect(expectedPerBucketLimit).toBe(9);
+  });
+
+  it("rotates capped buckets across section indexes", async () => {
+    const profile = makeProfile();
+    const section0: string[] = [];
+    const section1: string[] = [];
+
+    await collectAcrossBuckets(
+      profile,
+      "user-1",
+      0,
+      3,
+      [],
+      ["news"],
+      async (category) => {
+        section0.push(category);
+        return [];
+      }
+    );
+    await collectAcrossBuckets(
+      profile,
+      "user-1",
+      1,
+      3,
+      [],
+      ["news"],
+      async (category) => {
+        section1.push(category);
+        return [];
+      }
+    );
+
+    expect(section0).toHaveLength(5);
+    expect(section1).toHaveLength(5);
+    expect(section0.join("|")).not.toEqual(section1.join("|"));
   });
 });

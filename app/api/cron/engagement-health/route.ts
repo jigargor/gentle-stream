@@ -34,23 +34,51 @@ async function getEventMetrics(
     .gt("updated_at", sinceIso);
   if (affinityErr) throw new Error(affinityErr.message);
 
-  const { data: articles, error: articlesErr } = await db
-    .from("articles")
-    .select("category,fetched_at,used_count");
-  if (articlesErr) throw new Error(articlesErr.message);
-
-  const categoryCounts: Record<string, number> = {};
+  let uniqueCats = 0;
+  let totalArticles = 0;
   let usedCountTotal = 0;
   let newestFetch = 0;
-  for (const row of articles ?? []) {
-    categoryCounts[row.category] = (categoryCounts[row.category] ?? 0) + 1;
-    usedCountTotal += row.used_count ?? 0;
-    const t = Date.parse(row.fetched_at);
-    if (!Number.isNaN(t)) newestFetch = Math.max(newestFetch, t);
+
+  const { data: rpcData, error: rpcError } = await db.rpc(
+    "get_engagement_health_article_metrics"
+  );
+  if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+    const row = rpcData[0] as {
+      unique_categories: number | string;
+      total_articles: number | string;
+      total_used_count: number | string;
+      newest_fetched_at: string | null;
+    };
+    uniqueCats = Number(row.unique_categories) || 0;
+    totalArticles = Number(row.total_articles) || 0;
+    usedCountTotal = Number(row.total_used_count) || 0;
+    const t = row.newest_fetched_at ? Date.parse(row.newest_fetched_at) : NaN;
+    if (!Number.isNaN(t)) newestFetch = t;
+  } else {
+    if (rpcError) {
+      console.warn(
+        "[engagement-health] article metrics RPC unavailable; falling back:",
+        rpcError.message
+      );
+    }
+    const { data: articles, error: articlesErr } = await db
+      .from("articles")
+      .select("category,fetched_at,used_count")
+      .is("deleted_at", null);
+    if (articlesErr) throw new Error(articlesErr.message);
+
+    const categoryCounts: Record<string, number> = {};
+    for (const row of articles ?? []) {
+      categoryCounts[row.category] = (categoryCounts[row.category] ?? 0) + 1;
+      usedCountTotal += row.used_count ?? 0;
+      const t = Date.parse(row.fetched_at);
+      if (!Number.isNaN(t)) newestFetch = Math.max(newestFetch, t);
+    }
+    uniqueCats = Object.values(categoryCounts).filter((n) => n > 0).length;
+    totalArticles = articles?.length ?? 0;
   }
 
-  const uniqueCats = Object.values(categoryCounts).filter((n) => n > 0).length;
-  const repeatRate = (articles?.length ?? 0) === 0 ? 0 : usedCountTotal / (articles?.length ?? 1);
+  const repeatRate = totalArticles === 0 ? 0 : usedCountTotal / totalArticles;
   const freshnessHours =
     newestFetch === 0 ? 999 : (Date.now() - newestFetch) / (1000 * 60 * 60);
 

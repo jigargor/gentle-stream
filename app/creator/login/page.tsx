@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { getAuthRedirectBaseFromRequest } from "@/lib/auth/redirect-origin";
 
@@ -18,6 +19,8 @@ export default async function CreatorLoginPage({
   const resolvedSearchParams = await searchParams;
   const errorParam = firstParam(resolvedSearchParams.error) ?? null;
   const authRedirectBase = await getAuthRedirectBaseFromRequest();
+  const requestHeaders = await headers();
+  const cspNonce = requestHeaders.get("x-nonce")?.trim() ?? "";
 
   return (
     <LoginForm
@@ -29,6 +32,7 @@ export default async function CreatorLoginPage({
         firstParam(resolvedSearchParams.reason) === "session_expired"
       }
       initialOauthBrowserError={errorParam === "oauth_browser"}
+      cspNonce={cspNonce}
     />
   );
 }

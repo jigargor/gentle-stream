@@ -25,7 +25,6 @@ import {
   getRedirectBaseErrorMessage,
   signInWithOAuthRedirect,
   submitEmailPasswordAuth,
-  submitGuestAccess,
   type EmailPasswordAuthRequest,
   LOGIN_TEXT_MUTED,
   loginWarningTextStyle,
@@ -51,6 +50,8 @@ export interface LoginFormProps {
   initialSessionExpired?: boolean;
   /** From `?error=oauth_browser` - PKCE verifier missing (wrong browser / app). */
   initialOauthBrowserError?: boolean;
+  /** CSP nonce from middleware (`x-nonce`) for Turnstile script. */
+  cspNonce?: string;
 }
 
 export function LoginForm({
@@ -60,6 +61,7 @@ export function LoginForm({
   initialAuthError = null,
   initialSessionExpired = false,
   initialOauthBrowserError = false,
+  cspNonce = "",
 }: LoginFormProps) {
   const nextPath = useMemo(() => safeNextPath(initialNext ?? null), [initialNext]);
   const authError = initialAuthError;
@@ -82,6 +84,8 @@ export function LoginForm({
   const needsTurnstileChallenge = turnstileEnabled && Boolean(turnstileSiteKey);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileScriptReady, setTurnstileScriptReady] = useState(false);
+  const [turnstileErrorMessage, setTurnstileErrorMessage] = useState<string | null>(null);
+  const [turnstileRemountKey, setTurnstileRemountKey] = useState(0);
   const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
   const turnstileWidgetIdRef = useRef<string | null>(null);
   const [showCreatorOnboardingNotice, setShowCreatorOnboardingNotice] = useState(false);
@@ -109,10 +113,27 @@ export function LoginForm({
       sitekey: turnstileSiteKey,
       theme: "light",
       callback: (token: string) => {
+        setTurnstileErrorMessage(null);
         setTurnstileToken(token.trim() ? token.trim() : null);
       },
-      "expired-callback": () => setTurnstileToken(null),
-      "error-callback": () => setTurnstileToken(null),
+      "expired-callback": () => {
+        setTurnstileToken(null);
+        setTurnstileErrorMessage(
+          "Security check expired. Please complete it again."
+        );
+      },
+      "error-callback": () => {
+        setTurnstileToken(null);
+        setTurnstileErrorMessage(
+          "Security check failed to load. Retry the check, then try again."
+        );
+      },
+      "timeout-callback": () => {
+        setTurnstileToken(null);
+        setTurnstileErrorMessage(
+          "Security check timed out. Retry the check, then try again."
+        );
+      },
     });
     turnstileWidgetIdRef.current = widgetId;
 
@@ -134,6 +155,7 @@ export function LoginForm({
     requiresEmailVerification,
     turnstileScriptReady,
     turnstileSiteKey,
+    turnstileRemountKey,
   ]);
 
   function resetTurnstileWidget() {
@@ -147,6 +169,13 @@ export function LoginForm({
       }
     }
     setTurnstileToken(null);
+    setTurnstileErrorMessage(null);
+  }
+
+  function retryTurnstileChallenge() {
+    setTurnstileErrorMessage(null);
+    setTurnstileToken(null);
+    setTurnstileRemountKey((value) => value + 1);
   }
 
   async function signInWithOAuth(provider: Provider) {
@@ -188,20 +217,18 @@ export function LoginForm({
       }
     }
 
-    if (needsTurnstileChallenge) {
-      const formData = new FormData(event.currentTarget);
-      const token = (formData.get("cf-turnstile-response") as string | null)?.trim() ?? "";
-      if (!token) {
-        setMessage("Please complete the security verification below.");
-        return;
-      }
+    const formData = new FormData(event.currentTarget);
+    const formTurnstileToken =
+      (formData.get("cf-turnstile-response") as string | null)?.trim() ?? "";
+    const resolvedTurnstileToken =
+      turnstileToken?.trim() || formTurnstileToken || "";
+    if (needsTurnstileChallenge && !resolvedTurnstileToken) {
+      setMessage("Please complete the security verification below.");
+      return;
     }
 
     setEmailBusy(true);
     try {
-      const formData = new FormData(event.currentTarget);
-      const turnstileResponseToken =
-        (formData.get("cf-turnstile-response") as string | null)?.trim() ?? "";
       const base = resolveAuthRedirectBase(authRedirectBaseFromServer);
       if (!base) {
         setMessage(getRedirectBaseErrorMessage());
@@ -216,7 +243,7 @@ export function LoginForm({
         audience,
         birthDate,
         redirectTo,
-        turnstileToken: turnstileResponseToken,
+        turnstileToken: resolvedTurnstileToken,
       };
       const result = await submitEmailPasswordAuth({ payload });
       if (!result.ok) {
@@ -236,28 +263,14 @@ export function LoginForm({
     }
   }
 
-  async function continueAsGuest() {
+  function handleGuestFormSubmit(event: React.FormEvent<HTMLFormElement>) {
     setMessage(null);
     if (needsTurnstileChallenge && !turnstileToken) {
+      event.preventDefault();
       setMessage("Please complete the security verification below.");
       return;
     }
     setGuestBusy(true);
-    try {
-      const result = await submitGuestAccess({
-        payload: { turnstileToken: turnstileToken ?? "" },
-      });
-      if (!result.ok) {
-        setMessage(result.errorMessage ?? "Could not unlock guest browsing.");
-        resetTurnstileWidget();
-        return;
-      }
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      window.location.assign(nextPath || "/");
-    } finally {
-      setGuestBusy(false);
-    }
   }
 
   if (isCreatorLoginDisabled) return <CreatorLoginDisabledScreen />;
@@ -304,8 +317,11 @@ export function LoginForm({
             needsTurnstileChallenge={needsTurnstileChallenge}
             turnstileToken={turnstileToken}
             turnstileContainerRef={turnstileContainerRef}
+            cspNonce={cspNonce}
+            turnstileErrorMessage={turnstileErrorMessage}
             onSubmit={submitEmailPassword}
             onTurnstileScriptLoad={() => setTurnstileScriptReady(true)}
+            onRetryTurnstile={retryTurnstileChallenge}
             onEmailModeChange={setEmailMode}
             onEmailChange={setEmail}
             onPasswordChange={setPassword}
@@ -325,16 +341,21 @@ export function LoginForm({
           </p>
         ) : null}
 
-        <GuestAccessSection
-          isCreatorLogin={isCreatorLogin}
-          needsTurnstileChallenge={needsTurnstileChallenge}
-          turnstileToken={turnstileToken}
-          guestBusy={guestBusy}
-          onContinueAsGuest={() => {
-            void continueAsGuest();
-          }}
-          loginTextMuted={LOGIN_TEXT_MUTED}
-        />
+        <form
+          method="POST"
+          action="/api/auth/guest-access"
+          onSubmit={handleGuestFormSubmit}
+          style={{ margin: 0 }}
+        >
+          <input type="hidden" name="turnstileToken" value={turnstileToken ?? ""} readOnly />
+          <GuestAccessSection
+            isCreatorLogin={isCreatorLogin}
+            needsTurnstileChallenge={needsTurnstileChallenge}
+            turnstileToken={turnstileToken}
+            guestBusy={guestBusy}
+            loginTextMuted={LOGIN_TEXT_MUTED}
+          />
+        </form>
 
         <CreatorAccessSection
           isCreatorLogin={isCreatorLogin}

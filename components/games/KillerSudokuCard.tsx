@@ -439,12 +439,9 @@ function reducer(
       values[r][c] = action.num;
       const notes = cloneNotes(state.notes);
       notes[r][c] = 0;
-      if (correct) {
-        clearDigitNotesFromRowColBox(notes, r, c, action.num);
-        const cage = cageMap.get(`${r},${c}`);
-        if (cage)
-          clearDigitNotesFromCagePeers(notes, cage, action.num, r, c);
-      }
+      clearDigitNotesFromRowColBox(notes, r, c, action.num);
+      const cage = cageMap.get(`${r},${c}`);
+      if (cage) clearDigitNotesFromCagePeers(notes, cage, action.num, r, c);
       const errors = computeErrors(values, puzzle.cages);
       const completed = isComplete(values, puzzle.solution);
       return {
@@ -1011,14 +1008,13 @@ export default function KillerSudokuCard({
               style={{
                 width: "2.6rem",
                 height: "2.6rem",
-                border: "1px solid #1a1a1a",
+                border: noteAddBlocked ? "1px dashed #bbb" : "1px solid #1a1a1a",
                 background: "#faf8f3",
                 color: "#1a1a1a",
                 fontFamily: "'Playfair Display', Georgia, serif",
                 fontSize: "1rem",
                 fontWeight: 700,
                 cursor: noteAddBlocked ? "not-allowed" : "pointer",
-                opacity: noteAddBlocked ? 0.45 : 1,
               }}
             >
               {num}

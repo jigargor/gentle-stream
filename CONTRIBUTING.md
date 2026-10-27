@@ -31,6 +31,7 @@ Important: optional feed modules are opt-in. If a module flag is not set, treat 
 - Add/update tests for logic changes where feasible.
 - Do not commit secrets or local `.env` files.
 - For feed rendering/UI work, verify both light and dark themes.
+- PR CI runs `ci:fast` (typecheck, build, unit/component tests, high-severity prod audit, Storybook + Playwright smoke). Full DB integration runs post-merge when secrets are available.
 
 ## Branching and merge policy
 

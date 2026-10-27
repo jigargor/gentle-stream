@@ -65,6 +65,12 @@ html {
   --gs-motion-slow: 360ms;
   --gs-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   --gs-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --gs-game-surface: #faf8f3;
+  --gs-game-ink: #1a1a1a;
+  --gs-game-muted: #888888;
+  --gs-game-accent: #5c4a32;
+  --gs-tile-ink: #1f1f1f;
+  --gs-tile-muted: #665d4f;
 }
 
 html[data-theme="dark"] {
@@ -107,6 +113,12 @@ html[data-theme="dark"] {
   --gs-shadow-page: 0 18px 46px rgba(0, 0, 0, 0.4);
   --gs-shadow-overlay: 0 22px 68px rgba(0, 0, 0, 0.55);
   --gs-shadow-popover: 0 14px 40px rgba(0, 0, 0, 0.45);
+  --gs-game-surface: #1e2128;
+  --gs-game-ink: #f2efe8;
+  --gs-game-muted: #a39e94;
+  --gs-game-accent: #d4b896;
+  --gs-tile-ink: #f2efe8;
+  --gs-tile-muted: #b0a89b;
 }
 
 body {

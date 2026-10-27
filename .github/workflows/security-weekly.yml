@@ -28,6 +28,5 @@ jobs:
       - run: npm run security:inventory
       - run: npm run security:rls-audit
       - run: npm run security:audit
-        continue-on-error: true
       - run: npm run security:audit:full
         continue-on-error: true

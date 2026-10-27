@@ -42,6 +42,8 @@ import pLimit from "p-limit";
 const MIXED_SECTION_LABEL = "Mixed";
 const SOFT_SEEN_TTL_MS = 20 * 60 * 1000;
 const RANDOM_FALLBACK_EXCLUDE_CAP = 240;
+/** Cap mixed-feed bucket fan-out per section to cut DB round-trips. */
+const MIXED_FEED_BUCKET_CAP = 5;
 const rankerBucketLimit = pLimit(3);
 const env = getEnv();
 const hybridSeenEnabled =
@@ -129,11 +131,23 @@ export async function collectAcrossBuckets(
   ) => Promise<StoredArticle[]>,
   bucketOrderOverride?: (Category | typeof RECIPE_CATEGORY)[]
 ): Promise<StoredArticle[]> {
-  const order =
+  const fullOrder =
     bucketOrderOverride && bucketOrderOverride.length > 0
       ? bucketOrderOverride
       : feedBucketsForTraversal(profile, sectionIndex, contentKinds);
-  if (order.length === 0) return [];
+  if (fullOrder.length === 0) return [];
+
+  // Rotate which buckets are queried per section so diversity is preserved across
+  // infinite scroll while capping per-request fan-out (was all ~11 buckets).
+  const start = sectionIndex % fullOrder.length;
+  const rotated =
+    fullOrder.length <= MIXED_FEED_BUCKET_CAP
+      ? fullOrder
+      : [
+          ...fullOrder.slice(start),
+          ...fullOrder.slice(0, start),
+        ].slice(0, MIXED_FEED_BUCKET_CAP);
+  const order = rotated;
 
   // Parallel per-bucket fetches: sequential awaits stacked latency across many categories.
   const perBucketLimit = Math.max(

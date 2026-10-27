@@ -435,38 +435,48 @@ async function fetchExistingFingerprints(fps: string[]): Promise<Set<string>> {
     unique.push(fp);
   }
   if (unique.length === 0) return new Set();
+
+  // Prefer a single `.in()` round-trip. Fall back to per-fingerprint `.eq()` only
+  // when PostgREST rejects the filter (e.g. category names with `&` in older paths).
   const found = new Set<string>();
-  const maxAttempts = 3;
+  const { data, error } = await db
+    .from("articles")
+    .select("fingerprint")
+    .in("fingerprint", unique);
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const pending = unique.filter((fp) => !found.has(fp));
-    if (pending.length === 0) break;
-
-    const rows = await Promise.all(
-      pending.map(async (fp) => {
-        const { data, error } = await db
-          .from("articles")
-          .select("fingerprint")
-          .eq("fingerprint", fp)
-          .limit(1);
-
-        if (error) {
-          throw new Error(`insertArticles: fingerprint lookup: ${error.message}`);
-        }
-        const row = data?.[0] as { fingerprint: string } | undefined;
-        return row?.fingerprint;
-      })
-    );
-
-    rows
-      .filter((fp): fp is string => fp != null)
-      .forEach((fp) => found.add(fp));
-
-    if (found.size === unique.length || attempt === maxAttempts - 1) break;
-
-    await sleepMs(120 * (attempt + 1));
+  if (!error) {
+    for (const row of data ?? []) {
+      const fp = (row as { fingerprint?: string }).fingerprint;
+      if (fp) found.add(fp);
+    }
+    return found;
   }
 
+  const lower = error.message.toLowerCase();
+  const looksLikeFilterParse =
+    lower.includes("failed to parse") ||
+    lower.includes("invalid") ||
+    lower.includes("&");
+  if (!looksLikeFilterParse) {
+    throw new Error(`insertArticles: fingerprint lookup: ${error.message}`);
+  }
+
+  const rows = await Promise.all(
+    unique.map(async (fp) => {
+      const result = await db
+        .from("articles")
+        .select("fingerprint")
+        .eq("fingerprint", fp)
+        .limit(1);
+      if (result.error) {
+        throw new Error(`insertArticles: fingerprint lookup: ${result.error.message}`);
+      }
+      return (result.data?.[0] as { fingerprint: string } | undefined)?.fingerprint;
+    })
+  );
+  for (const fp of rows) {
+    if (fp) found.add(fp);
+  }
   return found;
 }
 
@@ -1111,37 +1121,10 @@ export async function getRandomArticlesResurfacing(
 export async function countAvailableByCategory(): Promise<
   Record<string, number>
 > {
-  let countQuery = db
-    .from("articles")
-    .select("category")
-    .eq("tagged", true)
-    .is("deleted_at", null);
-  if (isModerationColumnsAvailable) {
-    countQuery = countQuery.eq("moderation_status", "approved");
-  }
-  const { data, error } = await countQuery;
-  let rowsData = data;
-  let rowsError = error;
-  if (
-    rowsError &&
-    isModerationColumnsAvailable &&
-    isMissingModerationColumn(rowsError.message)
-  ) {
-    isModerationColumnsAvailable = false;
-    const fallback = await db
-      .from("articles")
-      .select("category")
-      .eq("tagged", true)
-      .is("deleted_at", null);
-    rowsData = fallback.data;
-    rowsError = fallback.error;
-  }
-
-  if (rowsError) throw new Error(`countAvailableByCategory: ${rowsError.message}`);
-
+  const snapshot = await getAvailableStockSnapshotByCategory();
   const counts: Record<string, number> = {};
-  for (const row of rowsData ?? []) {
-    counts[row.category] = (counts[row.category] ?? 0) + 1;
+  for (const [category, row] of Object.entries(snapshot)) {
+    counts[category] = row.count;
   }
   return counts;
 }
@@ -1154,6 +1137,32 @@ export async function countAvailableByCategory(): Promise<
 export async function getAvailableStockSnapshotByCategory(): Promise<
   Record<string, { count: number; newestFetchedAt: string | null }>
 > {
+  const { data: rpcData, error: rpcError } = await db.rpc(
+    "get_article_stock_snapshot_by_category",
+    { p_include_user_submitted: isUserSubmittedEnabled }
+  );
+  if (!rpcError && Array.isArray(rpcData)) {
+    const out: Record<string, { count: number; newestFetchedAt: string | null }> = {};
+    for (const row of rpcData as Array<{
+      category: string;
+      available_count: number | string;
+      newest_fetched_at: string | null;
+    }>) {
+      out[row.category] = {
+        count: Number(row.available_count) || 0,
+        newestFetchedAt: row.newest_fetched_at ?? null,
+      };
+    }
+    return out;
+  }
+  if (rpcError) {
+    console.warn(
+      "[getAvailableStockSnapshotByCategory] RPC unavailable; falling back:",
+      rpcError.message
+    );
+  }
+
+  // Bounded fallback: only the columns needed for aggregation (still avoid SELECT *).
   let snapshotQuery = db
     .from("articles")
     .select("category,fetched_at")
@@ -1161,6 +1170,9 @@ export async function getAvailableStockSnapshotByCategory(): Promise<
     .is("deleted_at", null);
   if (isModerationColumnsAvailable) {
     snapshotQuery = snapshotQuery.eq("moderation_status", "approved");
+  }
+  if (!isUserSubmittedEnabled) {
+    snapshotQuery = snapshotQuery.neq("content_kind", "user_article");
   }
   const { data, error } = await snapshotQuery;
   let rowsData = data;
@@ -1171,11 +1183,15 @@ export async function getAvailableStockSnapshotByCategory(): Promise<
     isMissingModerationColumn(rowsError.message)
   ) {
     isModerationColumnsAvailable = false;
-    const fallback = await db
+    let fallbackQuery = db
       .from("articles")
       .select("category,fetched_at")
       .eq("tagged", true)
       .is("deleted_at", null);
+    if (!isUserSubmittedEnabled) {
+      fallbackQuery = fallbackQuery.neq("content_kind", "user_article");
+    }
+    const fallback = await fallbackQuery;
     rowsData = fallback.data;
     rowsError = fallback.error;
   }
@@ -1242,18 +1258,23 @@ export async function updateArticleTags(
       labels: Record<string, unknown>;
       moderatedByUserId?: string | null;
     };
+    /** When provided by the caller (e.g. tagger), skip a redundant SELECT. */
+    existingExplicitTags?: string[];
   }
 ): Promise<void> {
-  const { data: existing, error: fetchError } = await db
-    .from("articles")
-    .select("creator_explicit_tags")
-    .eq("id", id)
-    .single();
+  let explicitSource = enrichment.existingExplicitTags;
+  if (explicitSource == null) {
+    const { data: existing, error: fetchError } = await db
+      .from("articles")
+      .select("creator_explicit_tags")
+      .eq("id", id)
+      .single();
 
-  if (fetchError) throw new Error(`updateArticleTags fetch existing: ${fetchError.message}`);
-  const explicit = ((existing as { creator_explicit_tags?: string[] } | null)?.creator_explicit_tags ?? [])
-    .map(normaliseTag)
-    .filter(Boolean);
+    if (fetchError) throw new Error(`updateArticleTags fetch existing: ${fetchError.message}`);
+    explicitSource =
+      (existing as { creator_explicit_tags?: string[] } | null)?.creator_explicit_tags ?? [];
+  }
+  const explicit = (explicitSource ?? []).map(normaliseTag).filter(Boolean);
   const mergedTags = mergeTags(explicit, enrichment.tags ?? []);
 
   const moderation = enrichment.moderation ?? {
@@ -1395,9 +1416,10 @@ export async function getUntaggedArticles(
 ): Promise<StoredArticle[]> {
   const { data, error } = await db
     .from("articles")
-    .select("*")
+    .select(ARTICLE_FEED_ROW_SELECT)
     .eq("tagged", false)
     .is("deleted_at", null)
+    .order("fetched_at", { ascending: true })
     .limit(limit);
 
   if (error) throw new Error(`getUntaggedArticles: ${error.message}`);

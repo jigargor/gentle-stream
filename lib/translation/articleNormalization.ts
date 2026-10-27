@@ -23,6 +23,19 @@ interface TranslationCandidateRow {
   source_language: string | null;
 }
 
+interface TranslationProbeRow {
+  id: string;
+  category: string;
+  headline: string;
+  subheadline: string | null;
+  body_probe: string | null;
+  pull_quote: string | null;
+  image_prompt: string | null;
+  locale: string | null;
+  translated_at: string | null;
+  source_language: string | null;
+}
+
 export interface RunArticleTranslationNormalizationInput {
   maxRows?: number;
   scanLimit?: number;
@@ -37,13 +50,15 @@ export interface RunArticleTranslationNormalizationResult {
   candidates: number;
   translated: number;
   skipped: number;
+  markedChecked: number;
   unavailableCount: number;
   failures: number;
 }
 
-const DEFAULT_SCAN_LIMIT = 1200;
-const DEFAULT_MAX_ROWS = 80;
+const DEFAULT_SCAN_LIMIT = 100;
+const DEFAULT_MAX_ROWS = 40;
 const MAX_FIELD_CHARS = 45_000;
+const BODY_PROBE_CHARS = 600;
 
 function trimField(value: string | null | undefined): string {
   return (value ?? "").trim().slice(0, MAX_FIELD_CHARS);
@@ -64,7 +79,13 @@ function hasMeaningfulTranslationChange(inputs: string[], outputs: string[]): bo
   return false;
 }
 
-function buildCandidateProbe(row: TranslationCandidateRow): string {
+function buildCandidateProbe(row: {
+  headline: string;
+  subheadline: string | null;
+  body: string;
+  pull_quote: string | null;
+  image_prompt: string | null;
+}): string {
   return [row.headline, row.subheadline ?? "", row.body, row.pull_quote ?? "", row.image_prompt ?? ""]
     .filter(Boolean)
     .join(" ")
@@ -76,41 +97,111 @@ function localeSuggestsNonEnglish(locale: string | null): boolean {
   return !isLikelyEnglishLocale(locale);
 }
 
-function shouldTranslateCandidate(row: TranslationCandidateRow): boolean {
+function shouldTranslateCandidate(row: {
+  translated_at: string | null;
+  locale: string | null;
+  headline: string;
+  subheadline: string | null;
+  body: string;
+  pull_quote: string | null;
+  image_prompt: string | null;
+}): boolean {
   if (row.translated_at) return false;
   const localeFlag = localeSuggestsNonEnglish(row.locale);
   const heuristic = detectLikelyNonEnglishText(buildCandidateProbe(row));
   return localeFlag || heuristic.likelyNonEnglish;
 }
 
-async function fetchCandidateRows(input: RunArticleTranslationNormalizationInput): Promise<TranslationCandidateRow[]> {
-  if (input.articleIds && input.articleIds.length > 0) {
-    const { data, error } = await db
-      .from("articles")
-      .select(
-        "id,category,headline,subheadline,body,pull_quote,image_prompt,locale,original_headline,original_subheadline,original_body,translated_at,source_language"
-      )
-      .in("id", input.articleIds)
-      .eq("source", "ingest")
-      .eq("content_kind", "news")
-      .is("deleted_at", null);
-    if (error) throw new Error(`fetchCandidateRows(articleIds): ${error.message}`);
-    return (data ?? []) as TranslationCandidateRow[];
-  }
+async function markArticlesTranslationChecked(articleIds: string[]): Promise<number> {
+  const unique = Array.from(new Set(articleIds.filter(Boolean)));
+  if (unique.length === 0) return 0;
+  const nowIso = new Date().toISOString();
+  const { error } = await db
+    .from("articles")
+    .update({
+      translated_at: nowIso,
+      translation_provider: "none",
+    })
+    .in("id", unique)
+    .is("translated_at", null);
+  if (error) throw new Error(`markArticlesTranslationChecked: ${error.message}`);
+  return unique.length;
+}
 
-  const scanLimit = Math.max(1, input.scanLimit ?? DEFAULT_SCAN_LIMIT);
+async function fetchFullCandidateRows(articleIds: string[]): Promise<TranslationCandidateRow[]> {
+  if (articleIds.length === 0) return [];
   const { data, error } = await db
     .from("articles")
     .select(
       "id,category,headline,subheadline,body,pull_quote,image_prompt,locale,original_headline,original_subheadline,original_body,translated_at,source_language"
     )
+    .in("id", articleIds)
     .eq("source", "ingest")
     .eq("content_kind", "news")
     .is("deleted_at", null)
+    .is("translated_at", null);
+  if (error) throw new Error(`fetchFullCandidateRows: ${error.message}`);
+  return (data ?? []) as TranslationCandidateRow[];
+}
+
+async function fetchCandidateRows(input: RunArticleTranslationNormalizationInput): Promise<{
+  rows: TranslationCandidateRow[];
+  scanned: number;
+  markedChecked: number;
+}> {
+  if (input.articleIds && input.articleIds.length > 0) {
+    const rows = await fetchFullCandidateRows(input.articleIds);
+    return { rows, scanned: rows.length, markedChecked: 0 };
+  }
+
+  const scanLimit = Math.max(1, input.scanLimit ?? DEFAULT_SCAN_LIMIT);
+  // Lightweight probe first so we only download full bodies for likely non-English rows.
+  // Filter translated_at IS NULL so idx_articles_translation_pending can be used.
+  const { data, error } = await db
+    .from("articles")
+    .select(
+      "id,category,headline,subheadline,locale,translated_at,source_language,pull_quote,image_prompt,body"
+    )
+    .eq("source", "ingest")
+    .eq("content_kind", "news")
+    .is("deleted_at", null)
+    .is("translated_at", null)
     .order("fetched_at", { ascending: false })
     .limit(scanLimit);
   if (error) throw new Error(`fetchCandidateRows(scan): ${error.message}`);
-  return (data ?? []) as TranslationCandidateRow[];
+
+  const probes = (data ?? []) as Array<
+    TranslationProbeRow & { body?: string | null }
+  >;
+  const scanned = probes.length;
+  const likelyCandidates: string[] = [];
+  const alreadyEnglishIds: string[] = [];
+
+  for (const probe of probes) {
+    const bodyProbe = (probe.body ?? probe.body_probe ?? "").slice(0, BODY_PROBE_CHARS);
+    const probeRow = {
+      translated_at: probe.translated_at,
+      locale: probe.locale,
+      headline: probe.headline,
+      subheadline: probe.subheadline,
+      body: bodyProbe,
+      pull_quote: probe.pull_quote,
+      image_prompt: probe.image_prompt,
+    };
+    if (shouldTranslateCandidate(probeRow)) {
+      likelyCandidates.push(probe.id);
+    } else {
+      alreadyEnglishIds.push(probe.id);
+    }
+  }
+
+  let markedChecked = 0;
+  if (input.apply !== false && alreadyEnglishIds.length > 0) {
+    markedChecked = await markArticlesTranslationChecked(alreadyEnglishIds);
+  }
+
+  const rows = await fetchFullCandidateRows(likelyCandidates);
+  return { rows, scanned, markedChecked };
 }
 
 export async function runArticleTranslationNormalization(
@@ -118,18 +209,21 @@ export async function runArticleTranslationNormalization(
 ): Promise<RunArticleTranslationNormalizationResult> {
   const apply = input.apply ?? true;
   const maxRows = Math.max(1, input.maxRows ?? DEFAULT_MAX_ROWS);
-  const rows = await fetchCandidateRows(input);
+  const fetched = await fetchCandidateRows({ ...input, apply });
+  const rows = fetched.rows;
   const filtered = rows.filter((row) => {
     if (input.forceOnArticleIds && input.articleIds?.length) return !row.translated_at;
     return shouldTranslateCandidate(row);
   });
   const candidates = filtered.slice(0, maxRows);
+  const skippedAsEnglish = filtered.slice(maxRows).map((row) => row.id);
 
   const result: RunArticleTranslationNormalizationResult = {
-    scanned: rows.length,
+    scanned: fetched.scanned,
     candidates: filtered.length,
     translated: 0,
     skipped: 0,
+    markedChecked: fetched.markedChecked,
     unavailableCount: 0,
     failures: 0,
   };
@@ -158,6 +252,10 @@ export async function runArticleTranslationNormalization(
       const hasMeaningfulChange = hasMeaningfulTranslationChange(sourceTexts, translatedTexts);
       if (!hasMeaningfulChange) {
         result.skipped += 1;
+        if (apply) {
+          await markArticlesTranslationChecked([row.id]);
+          result.markedChecked += 1;
+        }
         continue;
       }
 
@@ -213,6 +311,10 @@ export async function runArticleTranslationNormalization(
     }
   }
 
+  if (apply && skippedAsEnglish.length > 0) {
+    // Candidates beyond maxRows stay pending; do not mark them checked.
+  }
+
   captureMessage({
     level: "info",
     message: "article.translation.normalization.summary",
@@ -221,6 +323,7 @@ export async function runArticleTranslationNormalization(
       candidates: result.candidates,
       translated: result.translated,
       skipped: result.skipped,
+      markedChecked: result.markedChecked,
       unavailable: result.unavailableCount,
       failures: result.failures,
       reason: input.reason ?? "normalization",

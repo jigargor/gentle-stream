@@ -235,6 +235,28 @@ export async function getAuthorDisplayByUserIds(
 }
 
 export async function getPreferredLocaleDemand(limit = 8): Promise<LocaleDemandRow[]> {
+  const safeLimit = Math.max(1, Math.trunc(limit));
+  const { data: rpcData, error: rpcError } = await db.rpc(
+    "get_preferred_locale_demand",
+    { p_limit: safeLimit }
+  );
+  if (!rpcError && Array.isArray(rpcData)) {
+    const rows = (rpcData as Array<{ locale: string; weight: number | string }>).map(
+      (row) => ({
+        locale: String(row.locale),
+        weight: Number(Number(row.weight).toFixed(4)),
+      })
+    );
+    if (rows.length === 0) return [{ locale: "global", weight: 1 }];
+    return rows;
+  }
+  if (rpcError) {
+    console.warn(
+      "[getPreferredLocaleDemand] RPC unavailable; falling back:",
+      rpcError.message
+    );
+  }
+
   const { data, error } = await db
     .from("user_profiles")
     .select("preferred_locales");
@@ -256,7 +278,7 @@ export async function getPreferredLocaleDemand(limit = 8): Promise<LocaleDemandR
     .map(([locale, weight]) => ({ locale, weight: Number(weight.toFixed(4)) }))
     .sort((a, b) => b.weight - a.weight);
   if (sorted.length === 0) return [{ locale: "global", weight: 1 }];
-  return sorted.slice(0, Math.max(1, Math.trunc(limit)));
+  return sorted.slice(0, safeLimit);
 }
 
 /** Read-only profile lookup (no insert). Used for public creator pages. */

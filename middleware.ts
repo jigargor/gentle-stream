@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { buildCspImgSrcDirective } from "@/lib/security/csp-img-src";
 import { getOrCreateTraceId } from "@/lib/api/errors";
 import { updateSession } from "@/lib/supabase/middleware";
 
@@ -22,7 +23,7 @@ export async function middleware(request: NextRequest) {
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    "img-src 'self' data: blob: https:",
+    buildCspImgSrcDirective(supabaseOrigin),
     "font-src 'self' data: https://fonts.gstatic.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://places.googleapis.com https://accounts.google.com https://www.googleapis.com https://www.facebook.com https://graph.facebook.com`,

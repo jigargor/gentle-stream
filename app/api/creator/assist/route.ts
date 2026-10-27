@@ -29,6 +29,7 @@ import {
   upsertCreatorMemorySummary,
 } from "@/lib/db/creatorStudio";
 import { redactSecrets } from "@/lib/security/redaction";
+import { buildInspirationContextSeeds } from "@/lib/creator/inspiration-seeds";
 
 const assistBodySchema = z
   .object({
@@ -57,16 +58,6 @@ const assistBodySchema = z
   .strict();
 
 type AssistRequestBody = z.infer<typeof assistBodySchema>;
-
-const INSPIRATION_CONTEXT_SEEDS = [
-  "dramatic",
-  "intellectual",
-  "stern",
-  "cold",
-  "curious",
-  "playful",
-];
-// TODO: replace this static list with generated personalized suggestions.
 
 interface ArticleAssistPromptInput {
   mode: "improve" | "continue" | "headline";
@@ -128,7 +119,7 @@ Return only the closing paragraph.`;
   if (input.helpMode === "inspiration") {
     return `${sharedHeader}
 Task: generate a short opening (2-3 sentences) to start the piece.
-The user can optionally set tone hints. Use these starter examples when hints are missing: ${INSPIRATION_CONTEXT_SEEDS.join(", ")}.
+The user can optionally set tone hints. Use these starter examples when hints are missing: ${buildInspirationContextSeeds(input).join(", ")}.
 Optional context: ${input.context || "none"}
 Headline: ${input.headline}`;
   }

@@ -108,6 +108,7 @@ export async function submitGuestAccess(
   const response = await fetchImpl("/api/auth/guest-access", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(input.payload),
   });
 

@@ -6,7 +6,7 @@ import {
   guestAccessCookieOptions,
 } from "@/lib/auth/guest-access";
 import { SESSION_START_COOKIE } from "@/lib/auth/session-policy";
-import { hasTrustedOrigin } from "@/lib/security/origin";
+import { getRequestOrigin, hasTrustedOrigin } from "@/lib/security/origin";
 import { getClientIp } from "@/lib/security/rateLimit";
 import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import { createSupabaseResponseClient } from "@/lib/supabase/response-client";
@@ -18,6 +18,84 @@ const guestAccessBodySchema = z
   })
   .strict();
 
+function wantsJsonResponse(request: NextRequest): boolean {
+  const accept = request.headers.get("accept") ?? "";
+  return accept.includes("application/json");
+}
+
+async function parseGuestAccessBody(
+  request: NextRequest
+): Promise<
+  | { ok: true; data: z.infer<typeof guestAccessBodySchema> }
+  | { ok: false; response: NextResponse }
+> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    return parseJsonBody({
+      request,
+      schema: guestAccessBodySchema,
+    });
+  }
+
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    const form = await request.formData();
+    const parsed = guestAccessBodySchema.safeParse({
+      turnstileToken: String(form.get("turnstileToken") ?? ""),
+    });
+    if (!parsed.success) {
+      return {
+        ok: false,
+        response: apiErrorResponse({
+          request,
+          status: 400,
+          code: API_ERROR_CODES.VALIDATION,
+          message: "Invalid guest access request.",
+        }),
+      };
+    }
+    return { ok: true, data: parsed.data };
+  }
+
+  return {
+    ok: false,
+    response: apiErrorResponse({
+      request,
+      status: 400,
+      code: API_ERROR_CODES.VALIDATION,
+      message: "Invalid guest access request.",
+    }),
+  };
+}
+
+async function buildGuestAccessSuccessResponse(
+  request: NextRequest
+): Promise<NextResponse> {
+  const response = wantsJsonResponse(request)
+    ? NextResponse.json({ ok: true })
+    : NextResponse.redirect(new URL("/", getRequestOrigin(request)), 303);
+
+  response.cookies.delete(SESSION_START_COOKIE);
+
+  const hasSupabaseSession = request.cookies
+    .getAll()
+    .some((cookie) => cookie.name.startsWith("sb-"));
+  if (hasSupabaseSession) {
+    try {
+      const supabase = createSupabaseResponseClient(request, response);
+      await Promise.race([
+        supabase.auth.signOut(),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]);
+    } catch {
+      // Middleware clears stale sessions on the next request.
+    }
+  }
+
+  response.cookies.set(GUEST_ACCESS_COOKIE, "1", guestAccessCookieOptions());
+
+  return response;
+}
+
 export async function POST(request: NextRequest) {
   if (!hasTrustedOrigin(request)) {
     return apiErrorResponse({
@@ -28,10 +106,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const parsedBody = await parseJsonBody({
-    request,
-    schema: guestAccessBodySchema,
-  });
+  const parsedBody = await parseGuestAccessBody(request);
   if (!parsedBody.ok) return parsedBody.response;
 
   const captcha = await verifyTurnstileToken({
@@ -47,11 +122,5 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const response = NextResponse.json({ ok: true });
-  const supabase = createSupabaseResponseClient(request, response);
-  await supabase.auth.signOut();
-  response.cookies.delete(SESSION_START_COOKIE);
-  response.cookies.set(GUEST_ACCESS_COOKIE, "1", guestAccessCookieOptions());
-  return response;
+  return buildGuestAccessSuccessResponse(request);
 }
-
